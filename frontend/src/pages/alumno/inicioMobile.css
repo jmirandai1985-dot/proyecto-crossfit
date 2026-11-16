@@ -805,10 +805,14 @@
     flex: 0 0 136px;
     scroll-snap-align: start;
     position: relative;
-    background: var(--ub-panel);
-    border: 1px solid var(--ub-line);
-    border-radius: var(--ub-r-md);
-    padding: 10px 10px 14px;
+    padding: 5px;                          /* marco biselado (escala del Bazar) */
+    border: 0;
+    border-radius: 12px;
+    background: linear-gradient(160deg, #77776f 0%, #3a3a36 14%, #222220 52%, #3a3a36 86%, #67675f 100%);
+    box-shadow:
+        0 6px 14px rgba(0, 0, 0, 0.55),
+        0 1px 0 rgba(255, 255, 255, 0.05),
+        inset 0 0 0 1px rgba(0, 0, 0, 0.55);
     /* Ahora la tarjeta es un <button> (abre el producto): se resetea para que se vea
        exactamente igual que el <div> de antes. */
     font: inherit;
@@ -818,17 +822,92 @@
     -webkit-tap-highlight-color: transparent;
 }
 
+/* Las 2 líneas de glow óxido (arriba/abajo), finas por el tamaño reducido. */
+.ub-inicio .prod::before,
+.ub-inicio .prod::after {
+    content: '';
+    position: absolute;
+    left: 9px;
+    right: 9px;
+    height: 1px;
+    background: linear-gradient(90deg, #e8792f 0%, #ffb066 50%, #e8792f 100%);
+    box-shadow: 0 0 6px rgba(232, 121, 47, 0.8);
+    pointer-events: none;
+    z-index: 2;
+}
+.ub-inicio .prod::before { top: 2px; }
+.ub-inicio .prod::after { bottom: 2px; }
+
+/* Remaches de las 4 esquinas (5px, escalados a la tarjeta de 136px). */
+.ub-inicio .prod-remache {
+    position: absolute;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 32% 28%, #cfcfc8 0%, #83837c 45%, #3a3a36 80%, #232321 100%);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25), 0 1px 1px rgba(0, 0, 0, 0.8);
+    pointer-events: none;
+    z-index: 3;
+}
+.ub-inicio .prod-remache--tl { top: 1px; left: 1px; }
+.ub-inicio .prod-remache--tr { top: 1px; right: 1px; }
+.ub-inicio .prod-remache--bl { bottom: 1px; left: 1px; }
+.ub-inicio .prod-remache--br { bottom: 1px; right: 1px; }
+
+/* Panel interior: metal cepillado + carbono en diagonal (clip-path) + franjas
+   de glow óxido en los bordes, igual que la tarjeta del Bazar pero escalado. */
+.ub-inicio .prod-panel {
+    position: relative;
+    display: block;
+    overflow: hidden;
+    border-radius: 8px;
+    padding: 6px 6px 9px;
+    background: linear-gradient(118deg, #474742 0%, #35352f 40%, #2a2a27 70%, #232321 100%);
+    box-shadow:
+        inset 0 0 0 1px rgba(0, 0, 0, 0.6),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.ub-inicio .prod-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    left: 40%;
+    background: repeating-linear-gradient(45deg, #17181b 0 4px, #0f1013 4px 8px);
+    clip-path: polygon(24% 0, 100% 0, 100% 100%, 0 100%);
+    pointer-events: none;
+}
+.ub-inicio .prod-panel::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(90deg, rgba(255, 176, 102, 0.9), rgba(232, 121, 47, 0) 2px) left top / 2px 100% no-repeat,
+        linear-gradient(270deg, rgba(255, 176, 102, 0.9), rgba(232, 121, 47, 0) 2px) right top / 2px 100% no-repeat;
+    box-shadow: inset 0 0 10px rgba(232, 121, 47, 0.16);
+    pointer-events: none;
+    z-index: 1;
+}
+.ub-inicio .prod-panel > * {
+    position: relative;
+    z-index: 2;
+}
+
 .ub-inicio .prod:active {
     transform: scale(0.98);
 }
 
 .ub-inicio .prod .img {
-    height: 104px;
-    border-radius: var(--ub-r-sm);
+    height: 96px;
+    border-radius: 6px;
     display: grid;
     place-items: center;
     overflow: hidden;
     background: #24262d;
+    /* Efecto "hueco" dentro del panel. */
+    box-shadow:
+        inset 0 0 12px rgba(0, 0, 0, 0.85),
+        inset 0 0 0 1px rgba(0, 0, 0, 0.55),
+        0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .ub-inicio .prod .img img {
@@ -846,14 +925,24 @@
 
 .ub-inicio .prod b {
     display: block;
-    font-size: 15px;
-    margin-top: 10px;
+    font-size: 0.88rem;
+    line-height: 1.2;
+    margin-top: 8px;
+    font-weight: 700;
+    color: var(--ub-text);
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+    /* El panel recorta (`overflow: hidden`): un nombre con una palabra muy larga
+       se parte en vez de quedar cortado. */
+    overflow-wrap: anywhere;
 }
 
-.ub-inicio .prod span {
-    font-size: 14.5px;
-    color: var(--ub-orange);
+.ub-inicio .prod .prod-precio {
+    display: block;
+    margin-top: 2px;
+    font-size: 0.95rem;
+    color: #e8792f;
     font-weight: 700;
+    text-shadow: 0 0 10px rgba(232, 121, 47, 0.35);
 }
 
 /* Badges de la tarjeta de producto (migración 072): "Nuevo" (verde, sup. izq.)
@@ -862,26 +951,27 @@
 .ub-inicio .prod .badge-nuevo,
 .ub-inicio .prod .badge-descuento {
     position: absolute;
-    top: 14px;
-    z-index: 2;
+    top: 11px;
+    z-index: 4;
     padding: 3px 7px;
     border-radius: 999px;
     font-size: 11px;
     font-weight: 700;
     line-height: 1;
     letter-spacing: 0.02em;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(0, 0, 0, 0.5);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
 .ub-inicio .prod .badge-nuevo {
-    left: 14px;
-    background: var(--ub-ok);
+    left: 11px;
+    background: linear-gradient(180deg, #7bf0b6 0%, #3ddc97 55%, #199a63 100%);
     color: #06291a;
 }
 
 .ub-inicio .prod .badge-descuento {
-    right: 14px;
-    background: var(--ub-orange);
+    right: 11px;
+    background: linear-gradient(180deg, #f3934a 0%, #dd6f20 55%, #a9430f 100%);
     color: #2b1103;
 }
 
@@ -981,5 +1071,28 @@
 
 .ub-inicio[data-checked="1"] .ub-nav .mid {
     color: var(--ub-ok);
+}
+
+/* ============================================================================
+   Grilla de reserva móvil COMPARTIDA (components/GrillaReservaClasesMobile)
+   ----------------------------------------------------------------------------
+   En el Inicio el bloque vive dentro de `.ub-inicio` y hereda todo de arriba
+   (= el alumno ve exactamente lo mismo que antes). En pantallas que lo montan
+   suelto (pestaña "Agendar Reserva") el componente agrega `.ub-inicio-suelto`
+   para heredar la paleta y las tarjetas SIN el marco de pantalla completa del
+   Inicio: nada de margin -16px ni min-height 100dvh, y acotado a la columna
+   móvil del mockup (430px) como en el Inicio.
+   ============================================================================ */
+.ub-inicio.ub-inicio-suelto {
+    margin: 0 auto;
+    padding: 0;
+    min-height: 0;
+    max-width: 430px;
+    background: transparent;
+}
+
+/* La tarjeta es el único bloque: sin el margen de sección del Inicio. */
+.ub-inicio.ub-inicio-suelto .sec {
+    margin-top: 0;
 }
 

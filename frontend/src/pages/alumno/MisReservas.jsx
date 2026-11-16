@@ -6,6 +6,9 @@ import { getEstadoColor, getEstadoDisplay, esActiva, filtrarPorEstado } from '..
 // Filtro por estado del HISTORIAL (chips fijos, mismo estilo "claro" que el filtro
 // de disciplina). Sólo aplica al historial: las activas son pocas y no se tocan.
 import FiltroEstadoHistorial from '../../components/FiltroEstadoHistorial';
+// Filtro por MES del historial (chips "Todos" + un chip por mes): comparte la piel
+// del filtro de estado y se combina con disciplina/estado (AND).
+import FiltroMesHistorial from '../../components/FiltroMesHistorial';
 import BotonVolver from '../../components/BotonVolver';
 import EscanerQR from '../../components/EscanerQR';
 import FiltroDisciplina from '../../components/FiltroDisciplina';
@@ -14,7 +17,9 @@ import {
     CLAVE_FILTRO_RESERVAS, filtrarPorDisciplina,
 } from '../../utils/filtroDisciplina';
 // Estadísticas (clases del mes, % asistencia, racha) + agrupación por mes del historial.
-import { agruparReservasPorMes, calcularEstadisticasReservas } from '../../utils/reservasEstadisticas';
+import {
+    agruparReservasPorMes, calcularEstadisticasReservas, filtrarGruposPorMes, TODOS_LOS_MESES,
+} from '../../utils/reservasEstadisticas';
 // TZ Chile: el "mes actual" se ancla al día chileno, igual que el resto de la app.
 import { hoyChileStr } from '../../utils/fecha';
 
@@ -126,6 +131,21 @@ const MisReservas = () => {
     // Historial agrupado por mes (más reciente primero), ya filtrado por estado.
     const gruposHistorial = agruparReservasPorMes(reservasHistorialFiltradas);
 
+    // ── Filtro por mes del HISTORIAL ─────────────────────────────────────
+    // Los meses disponibles salen de los MISMOS grupos (`agruparReservasPorMes`):
+    // no se recalcula nada, sólo se reutilizan { clave: 'YYYY-MM', label }.
+    // Arranca en "Todos" y NO se persiste entre visitas (igual que el filtro de
+    // estado; a diferencia del de disciplina, que sí se recuerda en la sesión).
+    const [filtroMes, setFiltroMes] = useState(TODOS_LOS_MESES);
+    const mesesHistorial = gruposHistorial.map(({ clave, label }) => ({ clave, label }));
+    // Si el mes elegido deja de existir (p. ej. al cambiar el filtro de estado o de
+    // disciplina), la vista cae a "Todos" en vez de quedar filtrada por un mes que
+    // ya no tiene chip visible.
+    const mesEfectivo = mesesHistorial.some((mes) => mes.clave === filtroMes) ? filtroMes : TODOS_LOS_MESES;
+    // Los 3 filtros se combinan (AND): disciplina y estado ya vienen aplicados en
+    // `gruposHistorial`; acá sólo se recorta al mes elegido.
+    const gruposVisibles = filtrarGruposPorMes(gruposHistorial, mesEfectivo);
+
     return (
         <Layout>
             <div className="max-w-4xl mx-auto space-y-6">
@@ -140,15 +160,19 @@ const MisReservas = () => {
                     </div>
                 </div>
 
-                {/* Tarjeta destacada: escanear QR para marcar asistencia */}
-                <div className="rounded-xl border border-orange-200 bg-gradient-to-r from-orange-50 to-amber-50 p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                {/* Tarjeta destacada: escanear QR para marcar asistencia.
+                    Mismo lenguaje oscuro que el encabezado (fondo #12161f / zinc,
+                    borde zinc-800): la tarjeta clara naranja sobre el tema oscuro
+                    dejaba el texto gris con muy poco contraste. El ícono y el botón
+                    naranjas se mantienen tal cual (ya contrastan bien). */}
+                <div className="rounded-xl border border-zinc-800 bg-[#12161f] p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4" data-testid="tarjeta-qr">
                     <div className="flex items-start gap-3">
                         <div className="shrink-0 w-11 h-11 rounded-lg bg-orange-500 text-white flex items-center justify-center">
                             <QrCode size={24} />
                         </div>
                         <div>
-                            <p className="font-bold text-gray-900">Marca tu asistencia con el QR del box</p>
-                            <p className="text-sm text-gray-600 mt-0.5">
+                            <p className="font-bold text-zinc-100">Marca tu asistencia con el QR del box</p>
+                            <p className="text-sm text-zinc-400 mt-0.5">
                                 Escanea el código en recepción para registrar tu ingreso a la clase en curso.
                             </p>
                         </div>
@@ -218,6 +242,17 @@ const MisReservas = () => {
                                 valor={filtroEstado}
                                 onCambiar={setFiltroEstado}
                                 testid="filtro-estado-historial"
+                            />
+                        )}
+                        {/* Mes: sólo si hay historial (mismo criterio que el estado).
+                            Si hay un solo mes, el chip "Todos" + ese mes igual ayudan
+                            a confirmar qué se está viendo, así que se muestran. */}
+                        {reservasHistorial.length > 0 && (
+                            <FiltroMesHistorial
+                                valor={mesEfectivo}
+                                meses={mesesHistorial}
+                                onCambiar={setFiltroMes}
+                                testid="filtro-mes-historial"
                             />
                         )}
                     </div>
@@ -308,13 +343,13 @@ const MisReservas = () => {
                                     <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Historial</p>
                                 </div>
                             )}
-                            {gruposHistorial.length === 0 ? (
+                            {gruposVisibles.length === 0 ? (
                                 <div className="p-5 text-center text-sm text-gray-400">
-                                    No hay reservas con ese estado.
+                                    No hay reservas con esos filtros.
                                 </div>
                             ) : (
-                                gruposHistorial.map((grupo) => (
-                                    <div key={grupo.clave}>
+                                gruposVisibles.map((grupo) => (
+                                    <div key={grupo.clave} data-testid="grupo-mes" data-clave={grupo.clave}>
                                         <div className="px-5 py-2 bg-gray-50 border-b border-gray-200">
                                             <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">{grupo.label}</p>
                                         </div>

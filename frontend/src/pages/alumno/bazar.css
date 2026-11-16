@@ -47,55 +47,136 @@
     margin: 0.15rem 0 0;
 }
 
-/* ── Placa de producto (metal/concreto) ────────────────────────────────────── */
+/* ── Placa de producto: marco biselado + panel interior ────────────────────── */
+/* El marco (`.bb-placa`) es sólo el bisel metálico con remaches y las 2 líneas
+   de glow óxido; todo el contenido vive en `.bb-panel` (metal / carbono). */
 .bb-placa {
     position: relative;
-    border: 1px solid #3a3a36;
-    border-radius: 10px;
-    padding: 1.25rem;
-    background: repeating-linear-gradient(135deg, #2a2a28 0 6px, #262624 6px 12px);
-    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
-    transition: border-color 0.15s ease;
+    border: 0;
+    border-radius: 16px;
+    padding: 10px;                      /* marco visible alrededor del panel */
+    background: linear-gradient(
+        160deg,
+        #7a7a74 0%,
+        #3a3a36 12%,
+        #222220 50%,
+        #3a3a36 88%,
+        #6a6a64 100%
+    );
+    box-shadow:
+        0 10px 22px rgba(0, 0, 0, 0.55),          /* profundidad exterior */
+        0 2px 0 rgba(255, 255, 255, 0.05),
+        inset 0 0 0 1px rgba(0, 0, 0, 0.55);      /* aro oscuro del bisel */
+    transition: box-shadow 0.18s ease;
 }
-.bb-placa:hover { border-color: #4a4a46; }
+.bb-placa:hover {
+    box-shadow:
+        0 14px 26px rgba(0, 0, 0, 0.6),
+        0 2px 0 rgba(255, 255, 255, 0.07),
+        inset 0 0 0 1px rgba(0, 0, 0, 0.55);
+}
 
-/* Remaches decorativos (4 esquinas) */
+/* Las 2 líneas finas con glow óxido (arriba y abajo, dentro del padding del
+   marco). Pseudo-elementos para no sumar spans decorativos al JSX. */
+.bb-placa::before,
+.bb-placa::after {
+    content: '';
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, #e8792f 0%, #ffb066 50%, #e8792f 100%);
+    box-shadow: 0 0 8px rgba(232, 121, 47, 0.75), 0 0 2px rgba(255, 176, 102, 0.9);
+    pointer-events: none;
+    z-index: 2;
+}
+.bb-placa::before { top: 4px; }
+.bb-placa::after { bottom: 4px; }
+
+/* Remaches decorativos (4 esquinas del marco): círculo con gradiente radial. */
 .bb-remache {
     position: absolute;
-    width: 6px;
-    height: 6px;
+    width: 9px;
+    height: 9px;
     border-radius: 50%;
-    background: #4a4a46;
-    box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(255, 255, 255, 0.06);
+    background: radial-gradient(circle at 32% 28%, #c9c9c2 0%, #83837c 40%, #3a3a36 78%, #232321 100%);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.28), 0 1px 2px rgba(0, 0, 0, 0.8);
+    z-index: 3;
 }
-.bb-remache--tl { top: 8px; left: 8px; }
-.bb-remache--tr { top: 8px; right: 8px; }
-.bb-remache--bl { bottom: 8px; left: 8px; }
-.bb-remache--br { bottom: 8px; right: 8px; }
+.bb-remache--tl { top: 3px; left: 3px; }
+.bb-remache--tr { top: 3px; right: 3px; }
+.bb-remache--bl { bottom: 3px; left: 3px; }
+.bb-remache--br { bottom: 3px; right: 3px; }
+
+/* Panel interior: metal cepillado a la izquierda + carbono en diagonal a la
+   derecha (clip-path) y las 2 franjas verticales de glow óxido en los bordes. */
+.bb-panel {
+    position: relative;
+    overflow: hidden;
+    border-radius: 10px;
+    padding: 12px;
+    background: linear-gradient(118deg, #4a4a45 0%, #373733 38%, #2b2b28 68%, #242422 100%);
+    box-shadow:
+        inset 0 0 0 1px rgba(0, 0, 0, 0.65),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Zona de carbono (derecha), cortada en diagonal (no vertical). */
+.bb-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    left: 38%;
+    background: repeating-linear-gradient(45deg, #17181b 0 5px, #0f1013 5px 10px);
+    clip-path: polygon(22% 0, 100% 0, 100% 100%, 0 100%);
+    opacity: 0.95;
+    pointer-events: none;
+}
+
+/* Franjas verticales de glow óxido en los bordes izquierdo y derecho. */
+.bb-panel::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(90deg, rgba(255, 176, 102, 0.95), rgba(232, 121, 47, 0) 3px) left top / 3px 100% no-repeat,
+        linear-gradient(270deg, rgba(255, 176, 102, 0.95), rgba(232, 121, 47, 0) 3px) right top / 3px 100% no-repeat;
+    box-shadow: inset 0 0 14px rgba(232, 121, 47, 0.18);
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* El contenido va por encima de las capas decorativas del panel. */
+.bb-panel > * {
+    position: relative;
+    z-index: 2;
+}
 
 /* Badges de la tarjeta del catálogo (migración 072): "Nuevo" (verde, sup. izq.)
    y "-N%" (naranja, sup. der.). Van ABSOLUTOS sobre la placa y no se superponen. */
 .bb-badge {
     position: absolute;
-    top: 12px;
-    z-index: 3;
+    top: 18px;
+    z-index: 4;
     padding: 3px 8px;
     border-radius: 999px;
     font-size: 11px;
     font-weight: 700;
     line-height: 1;
     letter-spacing: 0.02em;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(0, 0, 0, 0.45);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .bb-badge-nuevo {
-    left: 12px;
+    left: 18px;
     background: #34d399;
     color: #06291a;
 }
 
 .bb-badge-descuento {
-    right: 12px;
+    right: 18px;
     background: #f97316;
     color: #2b1103;
 }
@@ -106,16 +187,20 @@
     align-items: flex-start;
 }
 
-/* Foto lateral 110x110: gradiente "metal cepillado" de fallback (se pisa con la
-   foto real si el box la subió). */
+/* Foto lateral 100x100: efecto "hueco" dentro del panel (borde + sombra
+   interior). El gradiente "metal cepillado" de fallback lo pone el JSX
+   (`tonoMetal(p)`) y se pisa con la foto real si el box la subió. */
 .bb-foto {
-    width: 110px;
-    height: 110px;
+    width: 100px;
+    height: 100px;
     flex-shrink: 0;
-    border-radius: 6px;
-    border: 1px solid #3a3a36;
+    border-radius: 8px;
+    border: 1px solid #55554f;
     overflow: hidden;
-    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45);
+    box-shadow:
+        inset 0 0 14px rgba(0, 0, 0, 0.8),
+        inset 0 0 0 1px rgba(0, 0, 0, 0.6),
+        0 1px 0 rgba(255, 255, 255, 0.06);
 }
 .bb-foto img {
     width: 100%;
@@ -137,10 +222,14 @@
     text-transform: uppercase;
     letter-spacing: 0.02em;
     color: #e5e5e0;
-    font-size: 1.05rem;
-    font-weight: 600;
-    line-height: 1.2;
+    font-size: 1.2rem;
+    font-weight: 700;
+    line-height: 1.15;
     margin: 0;
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+    /* El panel recorta (`overflow: hidden`): una palabra larguísima se parte en
+       vez de quedar cortada. */
+    overflow-wrap: anywhere;
 }
 .bb-desc {
     font-family: 'Inter', sans-serif;
@@ -151,50 +240,115 @@
 }
 .bb-precio {
     font-family: 'Oswald', sans-serif;
-    color: #b5491a;
-    font-size: 1.5rem;
-    font-weight: 600;
+    color: #e8792f;
+    font-size: 1.7rem;
+    font-weight: 700;
     line-height: 1;
     margin: 0.15rem 0 0;
+    text-shadow: 0 0 12px rgba(232, 121, 47, 0.45), 0 1px 0 rgba(0, 0, 0, 0.5);
 }
 
-/* ── Badges de stock (colores apagados con borde) ──────────────────────────── */
+/* ── Badge de stock: "medalla" (pill con degradado + ícono circular) ───────── */
+/* La lógica de los 3 estados (stockBadge en Bazar.jsx) no cambia: acá sólo se
+   les da la piel. El ícono es TEXTO (✓ / ! / ✗), no emoji. */
 .bb-stock {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px 2px 3px;
+    border-radius: 999px;
     font-family: 'Inter', sans-serif;
     font-size: 11px;
+    font-weight: 600;
     letter-spacing: 0.02em;
     line-height: 1.5;
+    border: 1px solid rgba(0, 0, 0, 0.55);
+    box-shadow:
+        0 1px 2px rgba(0, 0, 0, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
-.bb-stock-unidades { color: #6fae7d; border: 1px solid #3f6b4a; background: rgba(63, 107, 74, 0.15); }
-.bb-stock-ultimas  { color: #d4af37; border: 1px solid #b58a1a; background: rgba(181, 138, 26, 0.15); }
-.bb-stock-agotado  { color: #c45c42; border: 1px solid #8a3a2a; background: rgba(138, 58, 42, 0.18); }
 
-/* ── Botón Comprar (acento óxido #b5491a) ──────────────────────────────────── */
+/* Ícono circular de la medalla (✓ por defecto). */
+.bb-stock::before {
+    content: '✓';
+    display: inline-grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    flex: none;
+    border-radius: 50%;
+    font-size: 10px;
+    font-weight: 900;
+    line-height: 1;
+    color: #0b2015;
+    background: radial-gradient(circle at 32% 28%, #9ff0bd 0%, #3ddc97 55%, #1a8f5c 100%);
+    box-shadow:
+        0 1px 2px rgba(0, 0, 0, 0.55),
+        inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.bb-stock-unidades {
+    color: #c8f5d8;
+    background: linear-gradient(180deg, rgba(63, 107, 74, 0.6), rgba(24, 54, 37, 0.9));
+}
+
+.bb-stock-ultimas {
+    color: #ffe6a8;
+    background: linear-gradient(180deg, rgba(181, 138, 26, 0.65), rgba(84, 62, 10, 0.92));
+}
+.bb-stock-ultimas::before {
+    content: '!';
+    color: #2a1a00;
+    background: radial-gradient(circle at 32% 28%, #ffe9a8 0%, #e6b54e 55%, #a2761a 100%);
+}
+
+.bb-stock-agotado {
+    color: #ffd3c7;
+    background: linear-gradient(180deg, rgba(138, 58, 42, 0.75), rgba(66, 24, 17, 0.94));
+}
+.bb-stock-agotado::before {
+    content: '✗';
+    color: #2a0b06;
+    background: radial-gradient(circle at 32% 28%, #ffb4a1 0%, #d64545 55%, #8a2a1a 100%);
+}
+
+/* ── Botón Comprar (glossy óxido, bisel brillante arriba y sombra abajo) ───── */
 .bb-comprar {
     width: 100%;
-    margin-top: 1rem;
-    padding: 0.65rem 1rem;
-    background: #b5491a;
-    color: #1a1a1a;
+    margin-top: 12px;
+    padding: 0.7rem 1rem;
+    background: linear-gradient(180deg, #f3934a 0%, #dd6f20 55%, #a9430f 100%);
+    color: #1b0d03;
     font-family: 'Oswald', sans-serif;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     font-weight: 600;
     font-size: 0.95rem;
-    border: none;
-    border-radius: 6px;
+    border: 1px solid rgba(0, 0, 0, 0.6);
+    border-radius: 8px;
     cursor: pointer;
-    transition: filter 0.15s ease;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.25);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.45),
+        inset 0 -2px 0 rgba(0, 0, 0, 0.35),
+        0 3px 0 rgba(0, 0, 0, 0.45),
+        0 6px 12px rgba(0, 0, 0, 0.4);
+    transition: filter 0.15s ease, transform 0.1s ease, box-shadow 0.1s ease;
 }
 .bb-comprar:hover:not(:disabled) { filter: brightness(1.08); }
+.bb-comprar:active:not(:disabled) {
+    transform: translateY(1px);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.3),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+        0 1px 0 rgba(0, 0, 0, 0.45),
+        0 3px 6px rgba(0, 0, 0, 0.4);
+}
 .bb-comprar:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .bb-agotado {
     display: block;
-    margin-top: 1rem;
+    margin-top: 12px;
     text-align: center;
     font-family: 'Oswald', sans-serif;
     text-transform: uppercase;

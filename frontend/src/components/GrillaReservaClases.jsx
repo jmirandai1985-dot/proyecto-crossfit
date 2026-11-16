@@ -235,7 +235,9 @@ const GrillaReservaClases = ({
                                     <span className={`text-sm font-bold transition-transform ${seccionesExpandidas.manana ? 'rotate-90' : ''}`}>
                                         ▶
                                     </span>
-                                    <span className="font-bold text-sm">🌅 MAÑANA</span>
+                                    {/* Sin emoji (criterio del Bloque 1): el color + la negrita
+                                        distinguen la franja. */}
+                                    <span className="font-bold text-sm text-amber-700">MAÑANA</span>
                                     <span className={`text-xs font-medium ${manana.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-400'} px-2 py-0.5 rounded-full`}>
                                         {manana.length} clase(s)
                                     </span>
@@ -266,7 +268,7 @@ const GrillaReservaClases = ({
                                     <span className={`text-sm font-bold transition-transform ${seccionesExpandidas.tarde ? 'rotate-90' : ''}`}>
                                         ▶
                                     </span>
-                                    <span className="font-bold text-sm">🌆 TARDE</span>
+                                    <span className="font-bold text-sm text-indigo-700">TARDE</span>
                                     <span className={`text-xs font-medium ${tarde.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-400'} px-2 py-0.5 rounded-full`}>
                                         {tarde.length} clase(s)
                                     </span>

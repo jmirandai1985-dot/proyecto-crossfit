@@ -22,11 +22,12 @@ export const NOCHE = 'noche';
 
 // Los 4 chips del mockup, en orden. `label` es lo que se pinta; `id` es lo que se
 // guarda en el estado y lo que devuelven las funciones puras de acá.
+// Sin emojis (criterio del Bloque 1): el chip activo ya se distingue por color.
 export const FRANJAS = [
     { id: TODO_EL_DIA, label: 'Todo el día' },
-    { id: MANANA, label: '🌅 Mañana' },
-    { id: TARDE, label: '☀️ Tarde' },
-    { id: NOCHE, label: '🌙 Noche' },
+    { id: MANANA, label: 'Mañana' },
+    { id: TARDE, label: 'Tarde' },
+    { id: NOCHE, label: 'Noche' },
 ];
 
 // Cortes en MINUTOS desde la medianoche (inclusive el inicio, exclusivo el fin).

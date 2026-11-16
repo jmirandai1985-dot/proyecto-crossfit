@@ -262,32 +262,37 @@ const Bazar = () => {
                                     <span className="bb-remache bb-remache--tr" aria-hidden="true" />
                                     <span className="bb-remache bb-remache--bl" aria-hidden="true" />
                                     <span className="bb-remache bb-remache--br" aria-hidden="true" />
-                                    <div className="bb-cuerpo">
-                                        {/* Foto real si el box la subió; si no, queda el gradiente
-                                            "metal cepillado" (fallback por tono de producto). */}
-                                        <div className="bb-foto" style={{ background: tonoMetal(p) }}>
-                                            <ImagenProducto
-                                                url={p.imagen_url}
-                                                alt={p.nombre}
-                                                className="bb-foto-img"
-                                                respaldo={null}
-                                            />
+                                    {/* Panel interior: el marco biselado y los remaches viven
+                                        en `.bb-placa`; acá va el metal cepillado / carbono en
+                                        diagonal con las franjas de glow óxido (bazar.css). */}
+                                    <div className="bb-panel">
+                                        <div className="bb-cuerpo">
+                                            {/* Foto real si el box la subió; si no, queda el gradiente
+                                                "metal cepillado" (fallback por tono de producto). */}
+                                            <div className="bb-foto" style={{ background: tonoMetal(p) }}>
+                                                <ImagenProducto
+                                                    url={p.imagen_url}
+                                                    alt={p.nombre}
+                                                    className="bb-foto-img"
+                                                    respaldo={null}
+                                                />
+                                            </div>
+                                            <div className="bb-info">
+                                                <h3 className="bb-titulo">{p.nombre}</h3>
+                                                {p.descripcion && <p className="bb-desc">{p.descripcion}</p>}
+                                                <p className="bb-precio">${(p.precio || 0).toLocaleString('es-CL')}</p>
+                                                <span className={`bb-stock ${badge.clase}`}>{badge.texto}</span>
+                                            </div>
                                         </div>
-                                        <div className="bb-info">
-                                            <h3 className="bb-titulo">{p.nombre}</h3>
-                                            {p.descripcion && <p className="bb-desc">{p.descripcion}</p>}
-                                            <p className="bb-precio">${(p.precio || 0).toLocaleString('es-CL')}</p>
-                                            <span className={`bb-stock ${badge.clase}`}>{badge.texto}</span>
-                                        </div>
+                                        {p.stock > 0 ? (
+                                            <button onClick={() => handleComprar(p)} disabled={!configBancaria}
+                                                className="bb-comprar">
+                                                Comprar
+                                            </button>
+                                        ) : (
+                                            <span className="bb-agotado">Agotado</span>
+                                        )}
                                     </div>
-                                    {p.stock > 0 ? (
-                                        <button onClick={() => handleComprar(p)} disabled={!configBancaria}
-                                            className="bb-comprar">
-                                            Comprar
-                                        </button>
-                                    ) : (
-                                        <span className="bb-agotado">Agotado</span>
-                                    )}
                                 </div>
                             );
                         })}
@@ -296,7 +301,7 @@ const Bazar = () => {
 
                 {paso === 2 && productoSeleccionado && (
                     <div className="space-y-6 max-w-lg mx-auto">
-                        <div className="bg-emerald-50 rounded-xl border border-emerald-200 overflow-hidden">
+                        <div className="bg-zinc-900 rounded-xl border border-orange-900 overflow-hidden">
                             {/* Galería del producto: portada + miniaturas + visor con zoom,
                                 flechas y swipe. Las tarjetas del catálogo siguen mostrando
                                 sólo la portada (`imagen_url`). */}
@@ -304,12 +309,12 @@ const Bazar = () => {
                                 imagenes={productoSeleccionado.imagenes}
                                 urlPrincipal={productoSeleccionado.imagen_url}
                                 nombre={productoSeleccionado.nombre}
-                                className="bg-gray-100 p-2"
+                                className="bg-zinc-800 p-2 [&>button]:bg-zinc-800"
                             />
                             <div className="p-5 pt-3">
-                                <p className="text-xs text-emerald-600 uppercase font-semibold">Producto seleccionado</p>
-                                <h3 className="text-xl font-bold text-gray-800">{productoSeleccionado.nombre}</h3>
-                                <p className="text-lg font-bold text-emerald-600">${(productoSeleccionado.precio * cantidad).toLocaleString('es-CL')}</p>
+                                <p className="text-xs text-orange-400 uppercase font-semibold">Producto seleccionado</p>
+                                <h3 className="text-xl font-bold text-zinc-100">{productoSeleccionado.nombre}</h3>
+                                <p className="text-lg font-bold text-orange-400">${(productoSeleccionado.precio * cantidad).toLocaleString('es-CL')}</p>
                             </div>
                         </div>
 
@@ -317,10 +322,10 @@ const Bazar = () => {
                             ACTIVAS y con stock. La cantidad se acota al stock de
                             la talla elegida, no al total del producto. */}
                         {productoSeleccionado.tiene_variantes && (
-                            <div className="bg-white rounded-xl border p-4">
-                                <p className="text-sm font-medium text-gray-700">Talla:</p>
+                            <div className="bg-zinc-900 rounded-xl border border-zinc-700 p-4">
+                                <p className="text-sm font-medium text-zinc-200">Talla:</p>
                                 {tallasDisponibles.length === 0 ? (
-                                    <p className="mt-2 text-sm text-gray-500">No quedan tallas disponibles.</p>
+                                    <p className="mt-2 text-sm text-zinc-400">No quedan tallas disponibles.</p>
                                 ) : (
                                     <div className="mt-2 flex flex-wrap gap-2">
                                         {tallasDisponibles.map((variante) => {
@@ -331,10 +336,10 @@ const Bazar = () => {
                                                     type="button"
                                                     onClick={() => { setTallaId(variante.id); setCantidad(1); }}
                                                     aria-pressed={activa}
-                                                    className={`rounded-lg border px-3.5 py-2 text-sm font-bold transition-colors ${activa ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-gray-300 bg-white text-gray-700 hover:border-emerald-400'}`}
+                                                    className={`rounded-lg border px-3.5 py-2 text-sm font-bold transition-colors ${activa ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-zinc-700 bg-zinc-800 text-zinc-200 hover:border-emerald-400'}`}
                                                 >
                                                     {variante.talla}
-                                                    <span className={`ml-1.5 text-[11px] font-medium ${activa ? 'text-white/80' : 'text-gray-400'}`}>
+                                                    <span className={`ml-1.5 text-[11px] font-medium ${activa ? 'text-white/80' : 'text-zinc-400'}`}>
                                                         {variante.stock}
                                                     </span>
                                                 </button>
@@ -343,21 +348,21 @@ const Bazar = () => {
                                     </div>
                                 )}
                                 {tallasDisponibles.length > 0 && !tallaElegida && (
-                                    <p className="mt-2 text-xs text-amber-600">Elige una talla para continuar.</p>
+                                    <p className="mt-2 text-xs text-amber-400">Elige una talla para continuar.</p>
                                 )}
                             </div>
                         )}
 
-                        <div className="flex items-center gap-3 bg-white rounded-xl border p-4">
-                            <label className="text-sm font-medium text-gray-700">Cantidad:</label>
+                        <div className="flex items-center gap-3 bg-zinc-900 rounded-xl border border-zinc-700 p-4">
+                            <label className="text-sm font-medium text-zinc-200">Cantidad:</label>
                             <select value={cantidad} onChange={e => setCantidad(Number(e.target.value))}
                                 disabled={productoSeleccionado.tiene_variantes && !tallaElegida}
-                                className="px-3 py-2 border rounded-lg text-sm disabled:opacity-50">
+                                className="px-3 py-2 border border-zinc-700 bg-zinc-800 text-zinc-100 rounded-lg text-sm disabled:opacity-50">
                                 {[...Array(Math.min(Math.max(stockDisponible, 1), 10)).keys()].map(i =>
                                     <option key={i + 1} value={i + 1}>{i + 1}</option>
                                 )}
                             </select>
-                            <span className="text-xs text-gray-400">
+                            <span className="text-xs text-zinc-400">
                                 Stock disponible: {stockDisponible}
                             </span>
                         </div>
@@ -365,32 +370,34 @@ const Bazar = () => {
                         {/* I3: el bloque va SIEMPRE, con el mismo fallback que SolicitarPlan.
                             Sin datos cargados, antes no se renderizaba nada y el alumno subía el
                             comprobante sin saber a qué cuenta transferir. */}
-                        <div className="bg-blue-50 rounded-xl border border-blue-200 p-5">
-                            <h4 className="font-bold text-blue-800 mb-3">🏦 Datos para Transferencia</h4>
+                        <div className="bg-zinc-900 rounded-xl border border-zinc-700 p-5">
+                            <h4 className="font-bold text-orange-400 mb-3">Datos para Transferencia</h4>
                             {configBancaria ? (
-                                <div className="bg-white rounded-lg p-3 border border-blue-100 space-y-1.5 text-sm">
-                                    <p><span className="font-medium text-gray-600">Banco:</span> {configBancaria.banco}</p>
-                                    <p><span className="font-medium text-gray-600">Tipo:</span> {configBancaria.tipo_cuenta}</p>
-                                    <p><span className="font-medium text-gray-600">N° Cuenta:</span> <span className="font-bold text-blue-800">{configBancaria.numero_cuenta}</span></p>
-                                    <p><span className="font-medium text-gray-600">RUT:</span> {configBancaria.rut}</p>
+                                <div className="bg-zinc-800 rounded-lg p-3 border border-zinc-700 space-y-1.5 text-sm">
+                                    <p><span className="font-medium text-zinc-400">Banco:</span> {configBancaria.banco}</p>
+                                    <p><span className="font-medium text-zinc-400">Tipo:</span> {configBancaria.tipo_cuenta}</p>
+                                    <p><span className="font-medium text-zinc-400">N° Cuenta:</span> <span className="font-bold text-orange-400">{configBancaria.numero_cuenta}</span></p>
+                                    <p><span className="font-medium text-zinc-400">RUT:</span> {configBancaria.rut}</p>
                                 </div>
                             ) : (
-                                <div className="text-sm text-blue-600 bg-white rounded-lg p-3 border border-blue-100"
+                                <div className="text-sm text-zinc-300 bg-zinc-800 rounded-lg p-3 border border-zinc-700"
                                     data-testid="bazar-datos-bancarios-faltantes">
-                                    <p>⏳ El box aún no ha configurado sus datos de pago.</p>
-                                    <p className="text-xs mt-1">Por favor contacta al administrador para obtener la información de transferencia.</p>
+                                    <p>El box aún no ha configurado sus datos de pago.</p>
+                                    <p className="text-xs text-zinc-400 mt-1">Por favor contacta al administrador para obtener la información de transferencia.</p>
                                 </div>
                             )}
                         </div>
 
-                        <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                            <h4 className="font-bold text-gray-800 mb-3">📎 Subir Comprobante de Pago</h4>
-                            <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-emerald-400 transition-colors">
+                        <div className="bg-zinc-900 rounded-xl border border-zinc-700 p-5 shadow-sm">
+                            <h4 className="font-bold text-zinc-100 mb-3">Subir Comprobante de Pago</h4>
+                            <div className="border-2 border-dashed border-zinc-600 rounded-xl p-6 text-center hover:border-orange-500 transition-colors">
                                 <input type="file" id="voucher-bazar" accept="image/*,application/pdf"
                                     onChange={e => setArchivoVoucher(e.target.files[0] || null)} className="hidden" />
                                 <label htmlFor="voucher-bazar" className="cursor-pointer">
-                                    <span className="text-4xl block mb-2">{archivoVoucher ? '📄' : '📤'}</span>
-                                    <p className="text-sm text-gray-600">{archivoVoucher ? archivoVoucher.name : 'Haz clic para seleccionar'}</p>
+                                    <span className={`block mb-2 text-xs font-bold uppercase tracking-wider ${archivoVoucher ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                                        {archivoVoucher ? 'Archivo listo' : 'Sin archivo'}
+                                    </span>
+                                    <p className="text-sm text-zinc-400">{archivoVoucher ? archivoVoucher.name : 'Haz clic para seleccionar'}</p>
                                 </label>
                             </div>
                         </div>
@@ -400,12 +407,12 @@ const Bazar = () => {
                             pedido se valida solo cuando Mercado Pago confirma
                             el cobro. El stock se reserva igual al crear. */}
                         {pagoDisponible && (
-                            <div className="bg-blue-50 rounded-xl border border-blue-200 p-5"
+                            <div className="bg-zinc-900 rounded-xl border border-zinc-700 p-5"
                                 data-testid="bazar-pago-online">
-                                <h4 className="font-bold text-blue-900 mb-2 flex items-center gap-2">
-                                    <span>💳</span> Pagar online con Mercado Pago
+                                <h4 className="font-bold text-zinc-100 mb-2 flex items-center gap-2">
+                                    Pagar online con Mercado Pago
                                 </h4>
-                                <p className="text-xs text-blue-700 mb-4">
+                                <p className="text-xs text-zinc-400 mb-4">
                                     Tarjeta, débito o dinero en cuenta. Tu pedido queda
                                     confirmado automáticamente y te damos el código de retiro;
                                     no necesitas subir comprobante.
@@ -415,25 +422,25 @@ const Bazar = () => {
                                     onClick={handlePagarOnline}
                                     disabled={yendoAPagar || subiendo}
                                     className="w-full px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                                    {yendoAPagar ? 'Redirigiendo a Mercado Pago...' : '💳 Pagar con Mercado Pago'}
+                                    {yendoAPagar ? 'Redirigiendo a Mercado Pago...' : 'Pagar con Mercado Pago'}
                                 </button>
                             </div>
                         )}
 
                         {mensaje.text && (
-                            <div className={`p-4 rounded-xl border text-sm font-medium ${mensaje.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
-                                {mensaje.type === 'success' ? '✅' : '❌'} {mensaje.text}
+                            <div className={`p-4 rounded-xl border text-sm font-medium ${mensaje.type === 'success' ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300' : 'bg-red-950/40 border-red-800 text-red-300'}`}>
+                                {mensaje.text}
                             </div>
                         )}
 
                         <div className="flex gap-4">
                             <button onClick={() => { setPaso(1); setMensaje({ type: '', text: '' }); }}
-                                className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-medium text-sm">
+                                className="px-6 py-3 border border-zinc-700 text-zinc-300 rounded-xl hover:bg-zinc-800 font-medium text-sm">
                                 ← Volver
                             </button>
                             <button onClick={handleEnviarPedido} disabled={subiendo || !archivoVoucher || !configBancaria}
                                 className="flex-1 px-6 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm disabled:opacity-50">
-                                {subiendo ? 'Procesando...' : '✅ Enviar Pedido'}
+                                {subiendo ? 'Procesando...' : 'Enviar Pedido'}
                             </button>
                         </div>
                     </div>
@@ -441,7 +448,7 @@ const Bazar = () => {
 
                 {paso === 3 && (
                     <div className="text-center py-12">
-                        <div className="text-6xl mb-6">✅</div>
+                        {/* Sin emoji: el título ya comunica el resultado. */}
                         <h2 className="text-2xl font-bold text-gray-100 mb-3">¡Pedido Enviado!</h2>
                         <p className="text-gray-400 mb-4">{mensaje.text}</p>
                         <a href="/alumno/mis-pedidos" className="inline-block px-8 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm">

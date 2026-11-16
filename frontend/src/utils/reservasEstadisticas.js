@@ -96,3 +96,19 @@ export function agruparReservasPorMes(reservas) {
         .sort((a, b) => b[0].localeCompare(a[0])) // 'YYYY-MM' descendente
         .map(([clave, reservasMes]) => ({ clave, label: etiquetaMes(clave), reservas: reservasMes }));
 }
+
+// ── Filtro por mes del historial ("Mis Reservas") ───────────────────────────
+// `'Todos'` es el valor de la UI para "sin filtrar" (mismo rol que 'Todas' en
+// `utils/estadoReserva.js`): no se persiste entre visitas, arranca siempre ahí.
+export const TODOS_LOS_MESES = 'Todos';
+
+/**
+ * Filtra los grupos que devuelve `agruparReservasPorMes` por mes ('YYYY-MM').
+ * `TODOS_LOS_MESES` (o vacío) devuelve los grupos tal cual. La pantalla lo aplica
+ * DESPUÉS de los filtros de disciplina y estado, así los tres se combinan (AND)
+ * sin recalcular la agrupación.
+ */
+export function filtrarGruposPorMes(grupos, claveMes) {
+    if (!claveMes || claveMes === TODOS_LOS_MESES) return grupos || [];
+    return (grupos || []).filter((grupo) => grupo.clave === claveMes);
+}

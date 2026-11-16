@@ -2,6 +2,10 @@ import React, { useState } from 'react';
 import Layout from '../../components/Layout';
 import BotonVolver from '../../components/BotonVolver';
 import GrillaReservaClases, { ModalConfirmarReserva } from '../../components/GrillaReservaClases';
+// Misma grilla, versión <768px (selector de día + TARJETAS + Reservar): es la que
+// el alumno ya ve en el Inicio móvil, extraída a un componente compartido para que
+// esta pestaña no muestre la tabla de escritorio apretada en el teléfono.
+import GrillaReservaClasesMobile from '../../components/GrillaReservaClasesMobile';
 import { useAuth } from '../../context/AuthContext';
 import { useClasesRango, useCrearReserva, useReservasConfirmadas } from '../../hooks/queries';
 import { agruparClasesPorDia, getProximosDias } from '../../utils/grillaReserva';
@@ -10,8 +14,9 @@ import { agruparClasesPorDia, getProximosDias } from '../../utils/grillaReserva'
  * "Agendar Reserva" (Bloque 2): la pestaña con la grilla REAL para TOMAR una
  * clase nueva (selector de día + horarios + botón Reservar). Antes esa grilla
  * vivía escondida dentro del Inicio (Dashboard.jsx); ahora las dos pantallas
- * montan el MISMO componente compartido `GrillaReservaClases` y el MISMO modal
- * `ModalConfirmarReserva`, sin lógica duplicada.
+ * montan los MISMOS componentes compartidos —`GrillaReservaClases` en ≥768px y
+ * `GrillaReservaClasesMobile` en <768px, igual que el switch del Inicio— y el
+ * MISMO modal `ModalConfirmarReserva`, sin lógica duplicada.
  *
  * Los datos son los mismos del Inicio (mismas queryKeys): si el alumno viene de
  * ahí, la grilla se pinta al instante desde la caché de React Query.
@@ -68,11 +73,28 @@ const AgendarReserva = () => {
                         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-500" />
                     </div>
                 ) : (
-                    <GrillaReservaClases
-                        proximosDias={proximosDias}
-                        clasesPorDia={clasesPorDia}
-                        onReservar={setClaseSeleccionada}
-                    />
+                    <>
+                        {/* ─── <768px: las MISMAS tarjetas del Inicio móvil ───
+                            (`suelto`: hereda la paleta del Inicio pero fuera de su
+                            marco de pantalla completa; el modal es el compartido). */}
+                        <div className="md:hidden">
+                            <GrillaReservaClasesMobile
+                                proximosDias={proximosDias}
+                                clasesPorDia={clasesPorDia}
+                                onReservar={setClaseSeleccionada}
+                                suelto
+                            />
+                        </div>
+
+                        {/* ─── ≥768px: grilla de escritorio (sin cambios) ─── */}
+                        <div className="hidden md:block">
+                            <GrillaReservaClases
+                                proximosDias={proximosDias}
+                                clasesPorDia={clasesPorDia}
+                                onReservar={setClaseSeleccionada}
+                            />
+                        </div>
+                    </>
                 )}
             </div>
 

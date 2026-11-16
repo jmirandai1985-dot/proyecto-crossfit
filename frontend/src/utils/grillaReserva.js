@@ -42,9 +42,18 @@ export const agruparClasesPorDia = (clases) => {
     return agrupadas;
 };
 
+// Hora "HH:MM" desde el valor del backend ("HH:MM:SS" o "HH:MM"). La comparten
+// la grilla móvil (`GrillaReservaClasesMobile`) y el hero del Inicio móvil.
+export const horaCorta = (h) => {
+    if (!h) return '';
+    const partes = String(h).split(':');
+    return partes.length >= 2 ? `${partes[0]}:${partes[1]}` : String(h);
+};
+
 // Helper: una fila por (disciplina, hora_inicio, hora_fin) — la grilla muestra
-// el representante de cada grupo, no una fila por clase dictada.
-const agruparClasesRepetidas = (clases) => {
+// el representante de cada grupo, no una fila por clase dictada. También lo usa
+// la grilla móvil para deduplicar las clases del día elegido.
+export const agruparClasesRepetidas = (clases) => {
     const grupos = {};
     (clases || []).forEach((c) => {
         const key = `${c.disciplina_nombre || ''}|${c.hora_inicio || ''}|${c.hora_fin || ''}`;

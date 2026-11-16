@@ -3,6 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 // TZ Chile: "hoy" en el calendario chileno (no el del navegador), misma fuente
 // que el Dashboard (utils/fecha.js): así la reserva de hoy coincide con las clases.
 import { hoyChileStr, fechaSolaAInstante } from '../../utils/fecha';
+// Hora "HH:MM" del backend: la MISMA función que usa la grilla móvil compartida.
+import { horaCorta } from '../../utils/grillaReserva';
 // "Buenos días / Buenas tardes / Buenas noches": el copy de la tarjeta "Tu clase
 // de hoy" según el momento del día en Chile (no el del teléfono).
 import { copyClaseHoy, momentoDelDia, saludoDelMomento } from '../../utils/momentoDia';
@@ -14,15 +16,10 @@ import EscanerQR from '../../components/EscanerQR';
 // Carrusel "Novedades del box": los avisos de marketing del box (Bloque 4). Se
 // dibuja sólo si hay avisos vigentes hoy; si no, no ocupa lugar.
 import CarruselMarketing from '../../components/CarruselMarketing';
-// Chips de filtro por disciplina: el MISMO componente (y la misma lógica) que
-// usa "Mis Reservas", para no duplicar el control ni su criterio.
-import FiltroDisciplina from '../../components/FiltroDisciplina';
-import { useFiltroDisciplina } from '../../hooks/useFiltroDisciplina';
-import { CLAVE_FILTRO_INICIO, filtrarPorDisciplina } from '../../utils/filtroDisciplina';
-// Filtro por franja horaria (segundo filtro de "Clases disponibles", debajo del de
-// disciplina). La franja se preselecciona con la hora de Chile (misma fuente que el
-// resto del archivo), no con `new Date()` del navegador.
-import { franjaActual, filtrarPorFranja, rangoFranja, TODO_EL_DIA, FRANJAS } from '../../utils/franjaHoraria';
+// Grilla de reserva MÓVIL compartida con la pestaña "Agendar Reserva" (Bloque 3):
+// selector de día + tarjetas + botón Reservar salen de este componente, igual
+// que la versión de escritorio (`GrillaReservaClases`). Nada de lógica duplicada.
+import GrillaReservaClasesMobile from '../../components/GrillaReservaClasesMobile';
 // Rótulo del cupo de créditos ("∞"/"—"): la MISMA regla que la tarjeta del
 // Dashboard (≥768px), para que las dos pantallas no puedan divergir.
 import { rotuloCreditos } from '../../utils/rotuloCreditos';
@@ -46,30 +43,6 @@ const fechaLargaChile = () =>
     }).format(new Date()).replace(/,/g, '');
 
 const capitalizar = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
-
-// "Pocos cupos": por debajo de este umbral la tarjeta muestra un badge rojo
-// (advertencia de que la clase está por llenarse). No hay otro umbral definido
-// en el resto de la app, así que este es el único.
-const UMBRAL_POCOS_CUPOS = 3;
-
-// Hora "HH:MM" desde el valor del backend ("HH:MM:SS" o "HH:MM").
-const horaCorta = (h) => {
-    if (!h) return '';
-    const partes = String(h).split(':');
-    return partes.length >= 2 ? `${partes[0]}:${partes[1]}` : String(h);
-};
-
-// Dedupe de filas repetidas del backend (varias sedes comparten disciplina y
-// hora), mismo criterio que AGRUPAR_CLASES del Dashboard.
-const agruparClases = (clases) => {
-    const vistos = new Set();
-    return (clases || []).filter((c) => {
-        const clave = `${c.disciplina_nombre || ''}|${c.hora_inicio || ''}|${c.hora_fin || ''}`;
-        if (vistos.has(clave)) return false;
-        vistos.add(clave);
-        return true;
-    });
-};
 
 // ── Semana en curso (lunes a domingo) del calendario CHILENO ──
 const LETRAS_SEMANA = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
@@ -207,15 +180,6 @@ const InicioMobile = ({
     // "Hoy" en el calendario CHILENO (misma fuente que el Dashboard).
     const hoy = hoyChileStr();
 
-    // Día elegido en "Clases disponibles". Arranca en el primer día con clases
-    // (igual que el acordeón del Dashboard); se fija cuando llegan los datos.
-    const [diaSeleccionado, setDiaSeleccionado] = useState(null);
-    useEffect(() => {
-        if (diaSeleccionado) return;
-        const primero = proximosDias.find((d) => (clasesPorDia[d.fecha] || []).length > 0);
-        if (primero) setDiaSeleccionado(primero.fecha);
-    }, [proximosDias, clasesPorDia, diaSeleccionado]);
-
     const nombre = (usuario || 'Atleta').trim();
     const primerNombre = nombre.split(/\s+/)[0] || 'Atleta';
     const inicial = (primerNombre[0] || 'A').toUpperCase();
@@ -315,32 +279,6 @@ const InicioMobile = ({
     const navBazar = itemMenu('Bazar');
     // FAB: escanea el QR del box (public_id); si no está, va a Mis Reservas.
     const irAAsistencia = () => setEscanerAbierto(true);
-
-    // Clases del día elegido: deduplicadas (varias sedes comparten disciplina y
-    // hora) y ordenadas por horario, como la rejilla del Dashboard.
-    const clasesDelDia = agruparClases(clasesPorDia[diaSeleccionado] || [])
-        .sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || ''));
-
-    // ── Filtro por disciplina de "Clases disponibles" ──
-    // Filtra la LISTA del día elegido (con varias disciplinas la lista se hace
-    // larguísima). La rejilla de 7 días NO se filtra: cada día sigue mostrando
-    // el TOTAL de clases que trae `clasesPorDia` (por eso se filtra una copia).
-    // La última disciplina elegida se recuerda mientras dure la sesión, con el
-    // mismo mecanismo que "Mis Reservas" (chips y lógica compartidos).
-    const {
-        disponibles: disciplinasClases,
-        filtro: filtroClases,
-        cambiar: cambiarFiltroClases,
-        mostrar: mostrarFiltroClases,
-    } = useFiltroDisciplina(clasesDelDia, CLAVE_FILTRO_INICIO);
-    const clasesFiltradas = filtrarPorDisciplina(clasesDelDia, filtroClases);
-
-    // ── Filtro por franja horaria (se combina con el de disciplina) ──
-    // Arranca preseleccionado en la franja del momento (hora de Chile); el alumno
-    // puede cambiarlo libremente. "Todo el día" no filtra por franja, así que la
-    // lista resultante es la que ya salió del filtro de disciplina.
-    const [franjaFiltro, setFranjaFiltro] = useState(franjaActual);
-    const clasesFiltradasPorFranja = filtrarPorFranja(clasesFiltradas, franjaFiltro);
 
     // "Reservar otra clase": baja al bloque "Clases disponibles" (la rejilla del
     // dashboard reutilizada). Si ese bloque aún no existe, abre "Agendar Reserva"
@@ -518,116 +456,14 @@ const InicioMobile = ({
                     </div>
                 </section>
 
-                {/* ── Clases disponibles: rejilla del Dashboard adaptada a móvil.
-                    Es el ancla de "Reservar otra clase" (#ub-clases). ── */}
-                <section className="card sec" id="ub-clases" aria-label="Clases disponibles">
-                    <div className="head">
-                        <h2>Clases disponibles</h2>
-                    </div>
-
-                    {proximosDias.length > 0 && (
-                        <div className="days" role="tablist" aria-label="Elige el día">
-                            {proximosDias.map((d) => {
-                                const n = (clasesPorDia[d.fecha] || []).length;
-                                const activo = d.fecha === diaSeleccionado;
-                                return (
-                                    <button
-                                        key={d.fecha}
-                                        type="button"
-                                        role="tab"
-                                        aria-selected={activo}
-                                        className={`day${activo ? ' on' : ''}`}
-                                        onClick={() => setDiaSeleccionado(d.fecha)}
-                                    >
-                                        <span className="dn">{d.nombreDia.substring(0, 3)}</span>
-                                        <span className="dd">{d.diaNum}</span>
-                                        <span className={`dc${n ? ' has' : ''}`}>{n || '–'}</span>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    )}
-
-                    {/* Filtro por disciplina del día elegido, sobre la MISMA lista
-                        filtrada de abajo. Si hay una sola disciplina no se pinta:
-                        "Todas" y esa disciplina darían la misma lista. */}
-                    {mostrarFiltroClases && (
-                        <FiltroDisciplina
-                            variante="ub"
-                            disciplinas={disciplinasClases}
-                            valor={filtroClases}
-                            onCambiar={cambiarFiltroClases}
-                            testid="ub-filtro-disciplina"
-                        />
-                    )}
-
-                    {/* Filtro por franja horaria (debajo del de disciplina): fila de 4
-                        chips fijos con el MISMO estilo `.filtro`/`.on`. No reusa el
-                        componente de disciplinas (esas son dinámicas). */}
-                    <div className="filtro" data-testid="ub-filtro-franja" aria-label="Filtrar por franja horaria">
-                        {FRANJAS.map((f) => (
-                            <button
-                                key={f.id}
-                                type="button"
-                                onClick={() => setFranjaFiltro(f.id)}
-                                aria-pressed={franjaFiltro === f.id}
-                                className={franjaFiltro === f.id ? 'on' : ''}
-                            >
-                                {f.label}
-                            </button>
-                        ))}
-                    </div>
-                    {franjaFiltro !== TODO_EL_DIA && (
-                        <p className="franja-info">
-                            Mostrando {rangoFranja(franjaFiltro)} · {clasesFiltradasPorFranja.length} de {clasesFiltradas.length} horarios
-                        </p>
-                    )}
-
-                    <div className="clases">
-                        {clasesDelDia.length === 0 ? (
-                            <p className="vacio">Sin clases programadas este día.</p>
-                        ) : clasesFiltradas.length === 0 ? (
-                            <p className="vacio">No hay clases de {filtroClases} este día.</p>
-                        ) : clasesFiltradasPorFranja.length === 0 ? (
-                            <p className="vacio">No hay clases en esta franja horaria.</p>
-                        ) : (
-                            clasesFiltradasPorFranja.map((clase) => {
-                                // Migración 066: cupo NULL = sin tope (Musculación / Open Box).
-                                const sinTope = clase.cupo_maximo === null || clase.cupo_maximo === undefined;
-                                const cupos = sinTope
-                                    ? Infinity
-                                    : (clase.cupo_maximo || 0) - (clase.asistentes_confirmados || 0);
-                                const libre = cupos > 0;
-                                // Pocos cupos = advertencia roja (sin tope no cuenta).
-                                const pocosCupos = !sinTope && libre && cupos <= UMBRAL_POCOS_CUPOS;
-                                return (
-                                    <div className="clase" key={clase.id}>
-                                        <div className="ci">
-                                            <span className="ch">{horaCorta(clase.hora_inicio)}</span>
-                                            <span className="cd">{clase.disciplina_nombre || 'Clase'}</span>
-                                            <span className="cc">{clase.coach_nombre ? `Con ${clase.coach_nombre}` : 'Coach por confirmar'}</span>
-                                        </div>
-                                        <div className="cq">
-                                            <span className={`cupos${!libre ? ' no' : pocosCupos ? ' pocos' : ' ok'}`}>
-                                                {sinTope
-                                                    ? 'Acceso libre'
-                                                    : (!libre ? 'Lleno' : pocosCupos ? `¡Quedan ${cupos}!` : `${cupos} cupos`)}
-                                            </span>
-                                            <button
-                                                type="button"
-                                                className="res"
-                                                disabled={!libre}
-                                                onClick={() => onReservar && onReservar(clase)}
-                                            >
-                                                {libre ? 'Reservar' : 'Lleno'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                );
-                            })
-                        )}
-                    </div>
-                </section>
+                {/* ── Clases disponibles: la MISMA grilla móvil que la pestaña
+                    "Agendar Reserva" (componente compartido, Bloque 3). Es el
+                    ancla de "Reservar otra clase" (#ub-clases). ── */}
+                <GrillaReservaClasesMobile
+                    proximosDias={proximosDias}
+                    clasesPorDia={clasesPorDia}
+                    onReservar={onReservar}
+                />
 
                 {/* -- Tienda Urban Box (vista rapida): productos reales del Bazar -- */}
                 <section className="sec" aria-label="Tienda Urban Box">
@@ -654,15 +490,23 @@ const InicioMobile = ({
                                     {tieneDescuento(p.descuento_pct) && (
                                         <span className="badge-descuento">-{p.descuento_pct}%</span>
                                     )}
-                                    <div className="img">
-                                        <ImagenProducto
-                                            url={p.imagen_url}
-                                            alt={p.nombre || 'Producto'}
-                                            respaldo={<Icono nombre="tee" />}
-                                        />
+                                    {/* Marco industrial: 4 remaches + panel metal/carbono
+                                        (mismos que la tarjeta del Bazar, escalados). */}
+                                    <span className="prod-remache prod-remache--tl" aria-hidden="true" />
+                                    <span className="prod-remache prod-remache--tr" aria-hidden="true" />
+                                    <span className="prod-remache prod-remache--bl" aria-hidden="true" />
+                                    <span className="prod-remache prod-remache--br" aria-hidden="true" />
+                                    <div className="prod-panel">
+                                        <div className="img">
+                                            <ImagenProducto
+                                                url={p.imagen_url}
+                                                alt={p.nombre || 'Producto'}
+                                                respaldo={<Icono nombre="tee" />}
+                                            />
+                                        </div>
+                                        <b>{p.nombre}</b>
+                                        <span className="prod-precio">{precioCLP(p.precio)}</span>
                                     </div>
-                                    <b>{p.nombre}</b>
-                                    <span>{precioCLP(p.precio)}</span>
                                 </button>
                             ))}
                         </div>

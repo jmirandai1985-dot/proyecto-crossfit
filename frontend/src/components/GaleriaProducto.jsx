@@ -101,7 +101,7 @@ const GaleriaProducto = ({ imagenes, urlPrincipal, nombre = 'Producto', classNam
                         respaldo={<span className="flex h-64 items-center justify-center text-5xl">🛍️</span>}
                     />
                     <span className="absolute bottom-2 right-2 rounded-full bg-black/65 px-2.5 py-1 text-xs font-semibold text-white">
-                        🔍 {fotos.length} {fotos.length === 1 ? 'foto' : 'fotos'}
+                        {fotos.length} {fotos.length === 1 ? 'foto' : 'fotos'}
                     </span>
                 </button>
 

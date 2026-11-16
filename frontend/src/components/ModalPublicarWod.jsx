@@ -142,8 +142,11 @@ const ModalPublicarWod = ({
     // Horarios de ESA disciplina en la semana en curso, agrupados por franja (Mañana/Tarde/
     // Noche) con el util compartido. El horario de la clase siempre está, aunque la lista de
     // la semana no lo traiga (así el modal nunca queda sin opciones).
+    // Se filtra por `disciplinaEfectiva` (la de la clase o, sin clase, la que el coach elige
+    // en el modal): con `clase` null, `clase?.disciplina_id` es `undefined` y la sección 5
+    // quedaría sin horarios aunque el formulario manual ya tenga disciplina.
     const clasesDeLaDisciplina = useMemo(() => (clasesSemana || [])
-        .filter((c) => c?.disciplina_id === clase?.disciplina_id), [clasesSemana, clase]);
+        .filter((c) => c?.disciplina_id === disciplinaEfectiva), [clasesSemana, disciplinaEfectiva]);
     const horasPorFranja = useMemo(() => {
         const set = new Set();
         clasesDeLaDisciplina.forEach((c) => { const h = horaDe(c); if (h) set.add(h); });
@@ -451,6 +454,29 @@ const ModalPublicarWod = ({
                                     <span className="font-bold uppercase tracking-wide">Atención</span> Al guardar se actualiza el WOD que comparten estas clases:
                                     no se crea otro ni se cambia su alcance.
                                 </div>
+                            )}
+
+                            {/* Sin clase puntual (se abrió "Publicar WOD" directo, sin tocar una
+                                clase de la grilla) no hay disciplina de la clase: el coach la
+                                elige acá. Es la MISMA fuente (`disciplinaSel`) que usa la pestaña
+                                del Excel y la que exige `publicarManual`; al elegirla se llenan
+                                los horarios de la sección 5. En edición no hace falta: la clase
+                                (y su disciplina) ya existe. */}
+                            {!esEdicion && !clase?.disciplina_id && (
+                                <label className={ETIQUETA}>
+                                    Disciplina de la semana
+                                    <select
+                                        value={disciplinaSel}
+                                        onChange={(e) => setDisciplinaSel(e.target.value)}
+                                        data-testid="wod-disciplina-manual"
+                                        className={CAMPO}
+                                    >
+                                        <option value="">Elige la disciplina…</option>
+                                        {disciplinas.map((d) => (
+                                            <option key={d.id} value={d.id}>{d.nombre}</option>
+                                        ))}
+                                    </select>
+                                </label>
                             )}
 
                             {/* Sección "contenido": los campos del WOD en sí, agrupados para que la

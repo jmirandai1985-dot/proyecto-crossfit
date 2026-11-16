@@ -10,9 +10,14 @@
 //   4. racha actual = semanas ISO consecutivas con >= 1 asistencia (mismo criterio
 //      que asistenciaEvolucion); un hueco corta la racha
 //   5. la etiqueta de semana ISO es estable ('YYYY-Sww')
+//   6. filtro por mes del historial (chips "Todos" + mes) y su combinación AND
+//      con los filtros de disciplina y estado
 import {
     semanaISO, etiquetaMes, agruparReservasPorMes, calcularEstadisticasReservas,
+    filtrarGruposPorMes, TODOS_LOS_MESES,
 } from '../src/utils/reservasEstadisticas.js';
+import { filtrarPorEstado } from '../src/utils/estadoReserva.js';
+import { filtrarPorDisciplina } from '../src/utils/filtroDisciplina.js';
 
 let fallos = 0;
 const eq = (obtenido, esperado, msg) => {
@@ -99,6 +104,50 @@ const conFalto = calcularEstadisticasReservas([
     r(3, '2026-01-12', 'asistio'),
 ], '2026-01-15');
 eq(conFalto.rachaActual, 2, 'dos semanas con >= 1 asistencia -> racha 2');
+
+// ── 4. Filtro por mes del historial (chips "Todos" + un chip por mes) ────────
+// La pantalla calcula los meses desde los MISMOS grupos (agruparReservasPorMes) y
+// después recorta con `filtrarGruposPorMes`. Se valida el recorte y que se
+// combine (AND) con los otros dos filtros, sin recalcular la agrupación.
+const historialMeses = [
+    r(1, '2026-11-05', 'asistio'),
+    r(2, '2026-11-20', 'falto'),
+    r(3, '2026-10-15', 'asistio'),
+    r(4, '2026-10-22', 'falto'),
+    r(5, '2026-09-30', 'asistio'),
+];
+const gruposMeses = agruparReservasPorMes(historialMeses);
+eq(gruposMeses.length, 3, 'tres meses de historial -> tres chips de mes');
+eq(gruposMeses.map((g) => g.label).join(' | '), 'Noviembre 2026 | Octubre 2026 | Septiembre 2026',
+    'los chips salen del label ya formateado, más reciente primero');
+eq(filtrarGruposPorMes(gruposMeses, TODOS_LOS_MESES).length, 3, '"Todos" no recorta la lista');
+eq(filtrarGruposPorMes(gruposMeses, '2026-10').length, 1, 'un mes deja SOLO su grupo');
+eq(filtrarGruposPorMes(gruposMeses, '2026-10')[0].label, 'Octubre 2026',
+    'el grupo que queda es el del mes elegido');
+eq(filtrarGruposPorMes(gruposMeses, '2026-10')[0].reservas.length, 2,
+    'octubre conserva sus 2 reservas');
+eq(filtrarGruposPorMes(gruposMeses, '2030-01').length, 0,
+    'un mes sin reservas -> lista vacía (no inventa grupo)');
+eq(filtrarGruposPorMes(gruposMeses, '').length, 3, 'sin mes elegido -> todos');
+eq(filtrarGruposPorMes(null, '2026-10').length, 0, 'grupos nulos no rompen');
+
+// Combinación AND: disciplina -> estado -> agrupado por mes -> mes elegido.
+// Las dos reservas de noviembre son de CrossFit; octubre y septiembre, de Yoga.
+const conDisciplina = historialMeses.map((reserva, i) => ({
+    ...reserva,
+    disciplina_nombre: i < 2 ? 'CrossFit' : 'Yoga',
+}));
+const soloCrossFit = filtrarPorDisciplina(conDisciplina, 'CrossFit');
+const crossFitAsistio = agruparReservasPorMes(filtrarPorEstado(soloCrossFit, 'asistio'));
+eq(crossFitAsistio.map((g) => g.clave).join(','), '2026-11',
+    'disciplina + estado dejan sólo el grupo de noviembre');
+eq(filtrarGruposPorMes(crossFitAsistio, '2026-10').length, 0,
+    'mes + disciplina + estado: octubre ya no existe -> 0 grupos');
+eq(
+    filtrarGruposPorMes(agruparReservasPorMes(filtrarPorEstado(soloCrossFit, 'Todas')), '2026-11')[0].reservas.length,
+    2,
+    'mes + disciplina (sin estado): noviembre conserva sus 2 reservas',
+);
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);

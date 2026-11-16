@@ -113,3 +113,38 @@ test('alumno reserva clase, la ve en Mis reservas y se le marca asistencia', asy
     // best-effort: la corrida siguiente puede chocar con "ya reservada"; ver README.
   }
 });
+
+// Regresión Bloque 3: en el teléfono "Agendar Reserva" tiene que mostrar la
+// grilla MÓVIL (selector de día + tarjetas + Reservar), la misma del Inicio, y
+// NO la tabla de escritorio apretada. No reserva nada: sólo verifica qué UI se
+// monta a 390px, así que no ensucia los datos.
+test('agendar reserva en mobile muestra las tarjetas y no la tabla', async ({ page }) => {
+  // Viewport de teléfono (iPhone 12/13): dispara el switch `md:hidden` (<768px).
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  await login(page, creds().alumno);
+  await expect(page).toHaveURL(/\/alumno\/dashboard/);
+
+  // La pestaña del bug, abierta por URL directa.
+  await page.goto('/alumno/agendar-reserva');
+  await expect(page).toHaveURL(/\/alumno\/agendar-reserva/);
+
+  // 1. Se ve la grilla móvil compartida: selector de día + al menos una tarjeta.
+  const grillaMobile = page.getByTestId('ub-clases-mobile');
+  await expect(grillaMobile).toBeVisible({ timeout: 45_000 });
+  await expect(grillaMobile.getByRole('tablist', { name: 'Elige el día' })).toBeVisible();
+  await expect(grillaMobile.getByTestId('ub-clase').first()).toBeVisible();
+
+  // 2. Cada tarjeta ofrece su botón Reservar (o Lleno si no quedan cupos).
+  await expect(
+    grillaMobile.getByRole('button', { name: /Reservar|Lleno/ }).first()
+  ).toBeVisible();
+
+  // 3. La versión de escritorio queda en el DOM bajo `hidden md:block`: su tabla
+  //    y su título no pueden verse en el teléfono.
+  await expect(page.locator('table:visible')).toHaveCount(0);
+  await expect(
+    page.getByRole('heading', { name: /CLASES DISPONIBLES — PRÓXIMOS 7 DÍAS/ })
+  ).toBeHidden();
+});
+
