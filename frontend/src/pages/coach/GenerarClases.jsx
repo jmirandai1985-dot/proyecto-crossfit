@@ -36,7 +36,7 @@ const GenerarClases = () => {
                 <div className="max-md:flex max-md:items-start max-md:gap-2">
                     <BotonVolver fallback="/coach/dashboard" />
                     <div>
-                        <h1 className="text-3xl font-bold text-gray-900">⚡ Generar Clases del Día</h1>
+                        <h1 className="text-3xl font-bold uppercase tracking-wide text-gray-900">Generar Clases del Día</h1>
                         <p className="text-gray-600 mt-1">
                             Crea todas las clases de un día desde el horario base semanal. No duplica si ya existen.
                         </p>
@@ -60,16 +60,16 @@ const GenerarClases = () => {
                             className="px-6 py-2.5 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors font-bold text-sm disabled:opacity-50 flex items-center gap-2"
                         >
                             {generando ? (
-                                <><span className="animate-spin">⏳</span> Generando...</>
+                                <>Generando...</>
                             ) : (
-                                <><span>⚡</span> Generar Clases</>
+                                <>Generar Clases</>
                             )}
                         </button>
                     </div>
 
                     {error && (
                         <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                            ❌ {error}
+                            <span className="font-bold uppercase tracking-wide">Error</span> {error}
                         </div>
                     )}
 
@@ -80,7 +80,7 @@ const GenerarClases = () => {
                                 : 'bg-blue-500/10 border-blue-500/40 text-blue-700'
                                 }`}>
                                 <p className="font-medium">
-                                    {resultado.creadas > 0 ? '✅' : 'ℹ️'} {resultado.message}
+                                    {resultado.message}
                                 </p>
                             </div>
                             <div className="grid grid-cols-3 gap-3 text-sm">
@@ -103,7 +103,7 @@ const GenerarClases = () => {
 
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
                     <p className="text-sm text-amber-800">
-                        <strong>💡 Tip:</strong> Puedes usar esta página al inicio de cada día para generar
+                        <strong>Tip:</strong> Puedes usar esta página al inicio de cada día para generar
                         todas las clases automáticamente. Si ya existen, se omiten (no se duplican).
                     </p>
                 </div>

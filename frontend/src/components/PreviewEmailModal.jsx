@@ -47,7 +47,7 @@ const PreviewEmailModal = ({ alumnoId, coachId, onClose, onConfirmar, enviando }
 
                     {!loading && error && (
                         <div className="bg-red-500/10 border-l-4 border-red-500 rounded p-3 text-sm text-red-300">
-                            <p className="font-medium">⚠️ {error}</p>
+                            <p className="font-medium"><span className="font-bold uppercase tracking-wide">Error</span> {error}</p>
                             <button onClick={() => previewQ.refetch()} className="mt-2 px-3 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">
                                 Reintentar
                             </button>

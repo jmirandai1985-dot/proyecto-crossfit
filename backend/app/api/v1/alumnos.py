@@ -11,8 +11,7 @@ from pydantic import (
     BaseModel, EmailStr, Field, AliasChoices, ConfigDict, model_validator,
     field_validator,
 )
-from sqlalchemy import and_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import ClassVar, Literal, Optional
 
 from app.db.database import get_db
@@ -23,6 +22,7 @@ from app.models.suscripcion import Suscripcion
 from app.models.clase import Clase
 from app.models.reserva import Reserva
 from app.models.wod import EstadoWod, Wod
+from app.models.wod_bloque import WodBloque
 from app.models.wod_resultado import WodResultado
 from app.api.v1.usuarios import hash_password
 from app.core.dependencies import get_current_user, get_current_admin, es_usuario_prueba
@@ -634,20 +634,25 @@ def rechazar_alumno(
 # vive en `wods` y el resultado en `wod_resultados` (un registro por alumno y WOD).
 TIPOS_WOD_POR_TIEMPO = frozenset({"FOR TIME", "FORTIME", "RFT"})
 TIPOS_WOD_POR_RONDAS = frozenset({"AMRAP", "EMOM"})
+# Bloque 3: un bloque de RM se registra con PESO (kg), no con tiempo/rondas.
+TIPOS_BLOQUE_RM = frozenset({"RM", "1RM", "PR", "1 PR"})
 
 
 class RegistrarResultadoWod(BaseModel):
-    """Body de `POST /me/wods/{wod_id}/resultado`.
+    """Body de `POST /me/wods/{wod_id}/resultado` (y del endpoint por bloque).
 
     `modo` es obligatorio ('rx' | 'escalado'). Los campos del resultado dependen
-    de `wods.tipo_metcon`: tiempo para FOR TIME/RFT, rondas (+ reps sueltas) para
-    AMRAP/EMOM. La validación del tipo vive en el endpoint, no acá, porque necesita
-    el WOD.
+    del `tipo_metcon` del WOD o del bloque: tiempo para FOR TIME/RFT, rondas
+    (+ reps sueltas) para AMRAP/EMOM y peso_kg para un bloque tipo RM. La
+    validación del tipo vive en el endpoint, no acá, porque necesita el WOD o el
+    bloque.
     """
     modo: Literal["rx", "escalado"]
     tiempo_segundos: int | None = Field(None, gt=0)
     rondas: int | None = Field(None, ge=0)
     reps_extra: int | None = Field(None, ge=0)
+    # Peso del bloque tipo RM. SIEMPRE en kilos (sin selector de unidad).
+    peso_kg: float | None = Field(None, gt=0)
     nota: str | None = Field(None, max_length=500)
 
     model_config = ConfigDict(extra="forbid")
@@ -670,6 +675,9 @@ def _grupo_resultado(tipo_metcon) -> str:
         return "tiempo"
     if tipo in TIPOS_WOD_POR_RONDAS or tipo.startswith(("AMRAP", "EMOM")):
         return "rondas"
+    # "RM", "RM Final", "1RM", "PR"…: el resultado del bloque es un peso en kg.
+    if tipo in TIPOS_BLOQUE_RM or tipo.startswith(("RM ", "1RM ", "PR ")):
+        return "peso"
     return "libre"
 
 
@@ -681,6 +689,13 @@ def _validar_resultado_wod(tipo_metcon, datos: RegistrarResultadoWod) -> None:
     contra lo prescrito.
     """
     grupo = _grupo_resultado(tipo_metcon)
+    if grupo == "peso":
+        if datos.peso_kg is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Este bloque es un RM: registra el peso en kg",
+            )
+        return
     if grupo == "tiempo" and datos.tiempo_segundos is None:
         raise HTTPException(
             status_code=422,
@@ -692,11 +707,27 @@ def _validar_resultado_wod(tipo_metcon, datos: RegistrarResultadoWod) -> None:
             detail="Este WOD es por rondas: registra las rondas completadas",
         )
     if (grupo == "libre"
-            and datos.tiempo_segundos is None and datos.rondas is None):
+            and datos.tiempo_segundos is None and datos.rondas is None
+            and datos.peso_kg is None):
         raise HTTPException(
             status_code=422,
-            detail="Registra un tiempo o las rondas del WOD",
+            detail="Registra un tiempo, las rondas o el peso del WOD",
         )
+
+
+def _bloques_json(wod) -> list[dict]:
+    """Bloques del WOD en orden. Vacío = WOD simple (no agrega ruido al front)."""
+    return [
+        {
+            "id": b.id,
+            "wod_id": b.wod_id,
+            "orden": b.orden,
+            "titulo": b.titulo,
+            "tipo_metcon": b.tipo_metcon,
+            "descripcion": b.descripcion,
+        }
+        for b in sorted(wod.bloques or [], key=lambda x: (x.orden or 0, x.id or 0))
+    ]
 
 
 def _resultado_wod_json(resultado: WodResultado, wod: Wod) -> dict:
@@ -704,6 +735,8 @@ def _resultado_wod_json(resultado: WodResultado, wod: Wod) -> dict:
     return {
         "id": resultado.id,
         "wod_id": resultado.wod_id,
+        # NULL en un WOD simple; el bloque en un "WOD con bloques".
+        "bloque_id": resultado.bloque_id,
         "fecha": wod.fecha.isoformat() if wod.fecha else None,
         "titulo": wod.titulo,
         "wod_principal": wod.wod_principal,
@@ -712,8 +745,12 @@ def _resultado_wod_json(resultado: WodResultado, wod: Wod) -> dict:
         "tiempo_segundos": resultado.tiempo_segundos,
         "rondas": resultado.rondas,
         "reps_extra": resultado.reps_extra,
+        "peso_kg": (float(resultado.peso_kg)
+                    if resultado.peso_kg is not None else None),
         "nota": resultado.nota,
         "reserva_id": resultado.reserva_id,
+        # Los bloques viajan DENTRO del WOD (vacío si es simple).
+        "bloques": _bloques_json(wod),
         "created_at": (resultado.created_at.isoformat()
                        if resultado.created_at else None),
     }
@@ -765,14 +802,6 @@ def mis_wods_pendientes(
         )
         .join(Clase, Clase.wod_id == Wod.id)
         .join(Reserva, Reserva.clase_id == Clase.id)
-        .outerjoin(
-            WodResultado,
-            and_(
-                WodResultado.wod_id == Wod.id,
-                WodResultado.alumno_id == alumno_id,
-                WodResultado.tenant_id == tenant_id,
-            ),
-        )
         .filter(
             Reserva.alumno_id == alumno_id,
             Reserva.tenant_id == tenant_id,
@@ -786,7 +815,6 @@ def mis_wods_pendientes(
             # del corte); la hora exacta se filtra abajo con `_momento_clase`.
             Clase.fecha >= desde.date(),
             Clase.fecha <= ahora.date(),
-            WodResultado.id.is_(None),
         )
         .order_by(
             Wod.fecha.desc(),
@@ -815,7 +843,63 @@ def mis_wods_pendientes(
             "wod_principal": fila.wod_principal,
             "tipo_metcon": fila.tipo_metcon,
         })
-    return resultado
+
+    if not resultado:
+        return []
+
+    # Bloque 3: un WOD con bloques sigue pendiente hasta registrar TODOS sus
+    # bloques; un WOD simple (sin bloques) conserva la regla de siempre (basta
+    # con no tener ningún resultado). Se resuelve en 2 consultas, sin N+1.
+    wod_ids = [w["wod_id"] for w in resultado]
+    bloques = (
+        db.query(WodBloque)
+        .filter(WodBloque.wod_id.in_(wod_ids))
+        .order_by(WodBloque.wod_id, WodBloque.orden, WodBloque.id)
+        .all()
+    )
+    bloques_por_wod = {}
+    for b in bloques:
+        bloques_por_wod.setdefault(b.wod_id, []).append(b)
+
+    registrados = (
+        db.query(WodResultado.wod_id, WodResultado.bloque_id)
+        .filter(
+            WodResultado.alumno_id == alumno_id,
+            WodResultado.tenant_id == tenant_id,
+            WodResultado.wod_id.in_(wod_ids),
+        )
+        .all()
+    )
+    simples_con_resultado = {
+        r.wod_id for r in registrados if r.bloque_id is None
+    }
+    bloques_con_resultado = {
+        (r.wod_id, r.bloque_id) for r in registrados if r.bloque_id is not None
+    }
+
+    pendientes = []
+    for item in resultado:
+        lista_bloques = bloques_por_wod.get(item["wod_id"], [])
+        item["bloques"] = [
+            {
+                "id": b.id, "wod_id": b.wod_id, "orden": b.orden,
+                "titulo": b.titulo, "tipo_metcon": b.tipo_metcon,
+                "descripcion": b.descripcion,
+                # Para que "Mis WODs" pinte SÓLO los bloques que faltan.
+                "registrado": (b.wod_id, b.id) in bloques_con_resultado,
+            }
+            for b in lista_bloques
+        ]
+        if lista_bloques:
+            completo = all(
+                (b.wod_id, b.id) in bloques_con_resultado
+                for b in lista_bloques
+            )
+        else:
+            completo = item["wod_id"] in simples_con_resultado
+        if not completo:
+            pendientes.append(item)
+    return pendientes
 
 
 @router.post("/me/wods/{wod_id}/resultado")
@@ -887,6 +971,97 @@ def registrar_resultado_wod(
     resultado.tiempo_segundos = datos.tiempo_segundos
     resultado.rondas = datos.rondas
     resultado.reps_extra = datos.reps_extra
+    resultado.peso_kg = datos.peso_kg
+    resultado.nota = datos.nota
+    db.commit()
+    db.refresh(resultado)
+
+    return _resultado_wod_json(resultado, wod)
+
+
+@router.post("/me/wods/{wod_id}/bloques/{bloque_id}/resultado")
+def registrar_resultado_wod_bloque(
+    wod_id: int,
+    bloque_id: int,
+    datos: RegistrarResultadoWod,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Registra (o corrige) el resultado del alumno en UN BLOQUE de un WOD.
+
+    Bloque 3 ("WOD con bloques"): cada metcon/RM tiene su propio resultado y su
+    propio ranking, porque miden cosas distintas y no se pueden comparar en un
+    solo número.
+
+    El candado es el MISMO del endpoint de WOD completo: exige una reserva
+    propia con `asistio=True` para una clase de ESE `wod_id` (no del bloque).
+    El UPSERT también es el mismo: si ya existe un resultado para
+    `(alumno_id, bloque_id)`, se ACTUALIZA la fila (no se duplica).
+    """
+    # 🔒 SEGURIDAD: alumno y tenant SIEMPRE del token JWT.
+    alumno_id = current_user.get("usuario_id")
+    tenant_id = current_user.get("tenant_id")
+
+    wod = db.query(Wod).filter(
+        Wod.id == wod_id, Wod.tenant_id == tenant_id).first()
+    if not wod:
+        raise HTTPException(status_code=404, detail="WOD no encontrado")
+
+    if not _wod_publicado(wod):
+        raise HTTPException(
+            status_code=403,
+            detail="No puedes registrar un WOD que no está publicado",
+        )
+
+    bloque = db.query(WodBloque).filter(
+        WodBloque.id == bloque_id,
+        WodBloque.wod_id == wod.id,
+    ).first()
+    if not bloque:
+        raise HTTPException(status_code=404, detail="Bloque no encontrado")
+
+    # Mismo candado de asistencia que el resultado del WOD completo: la reserva
+    # se valida contra el WOD, no contra el bloque.
+    reserva = (
+        db.query(Reserva)
+        .join(Clase, Reserva.clase_id == Clase.id)
+        .filter(
+            Reserva.alumno_id == alumno_id,
+            Reserva.tenant_id == tenant_id,
+            Reserva.asistio.is_(True),
+            Clase.tenant_id == tenant_id,
+            Clase.wod_id == wod_id,
+        )
+        .order_by(Reserva.fecha_reserva.desc(), Reserva.id.desc())
+        .first()
+    )
+    if reserva is None:
+        raise HTTPException(
+            status_code=403,
+            detail="No puedes registrar un WOD al que no asististe",
+        )
+
+    # El tipo del BLOQUE decide qué campo se exige (tiempo/rondas/peso).
+    _validar_resultado_wod(bloque.tipo_metcon, datos)
+
+    resultado = db.query(WodResultado).filter(
+        WodResultado.alumno_id == alumno_id,
+        WodResultado.bloque_id == bloque.id,
+        WodResultado.tenant_id == tenant_id,
+    ).first()
+
+    if resultado is None:
+        resultado = WodResultado(
+            tenant_id=tenant_id, alumno_id=alumno_id, wod_id=wod_id,
+            bloque_id=bloque.id)
+        db.add(resultado)
+
+    resultado.reserva_id = reserva.id
+    resultado.modo = datos.modo
+    resultado.tiempo_segundos = datos.tiempo_segundos
+    resultado.rondas = datos.rondas
+    resultado.reps_extra = datos.reps_extra
+    resultado.peso_kg = datos.peso_kg
     resultado.nota = datos.nota
     db.commit()
     db.refresh(resultado)
@@ -913,6 +1088,7 @@ def mi_historial_wods(
     filas = (
         db.query(WodResultado, Wod)
         .join(Wod, Wod.id == WodResultado.wod_id)
+        .options(joinedload(Wod.bloques))
         .filter(
             WodResultado.alumno_id == alumno_id,
             WodResultado.tenant_id == tenant_id,

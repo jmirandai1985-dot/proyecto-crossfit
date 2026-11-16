@@ -45,8 +45,8 @@ const AccionesClaseCoach = ({ clase, coachId, coachDisciplinas = [], onAviso }) 
 
     const mia = clase.coach_id != null && clase.coach_id === coachId;
     const libre = clase.coach_id == null;
-    const texto = mia ? '👤 Tú' : libre ? '⚠️ Sin coach'
-        : `👤 ${clase.coach_nombre || `Coach #${clase.coach_id}`}`;
+    const texto = mia ? 'Tú' : libre ? 'Sin coach'
+        : `${clase.coach_nombre || `Coach #${clase.coach_id}`}`;
 
     /** ¿La clase es de una disciplina que este coach NO dicta? (→ cubrir suplencia) */
     const esDeOtraDisciplina = (c) => (
@@ -77,8 +77,8 @@ const AccionesClaseCoach = ({ clase, coachId, coachDisciplinas = [], onAviso }) 
                 : `La clase de ${horaCorta(clase.hora_inicio)} (${clase.disciplina_nombre || '-'})`;
             setAccion(null);
             onAviso?.(cual === 'tomar'
-                ? `✅ ${detalle} quedó a tu nombre${cubrirSuplencia ? ' (suplencia cubierta)' : ''}.`
-                : `✅ ${detalle} quedó sin coach.`);
+                ? `${detalle} quedó a tu nombre${cubrirSuplencia ? ' (suplencia cubierta)' : ''}.`
+                : `${detalle} quedó sin coach.`);
         } catch (e) {
             const status = e.response?.status;
             const detalle = e.response?.data?.detail || e.message || 'No se pudo completar la acción';
@@ -102,7 +102,7 @@ const AccionesClaseCoach = ({ clase, coachId, coachDisciplinas = [], onAviso }) 
                 className={`text-[11px] font-semibold ${mia ? 'text-emerald-400' : libre ? 'text-red-400' : 'text-zinc-400'}`}
                 title={clase.cobertura_emergencia ? 'Cubierta por suplencia' : undefined}
             >
-                {texto}{clase.cobertura_emergencia ? ' ⚠️' : ''}
+                {texto}{clase.cobertura_emergencia ? ' · Suplencia' : ''}
             </span>
             {libre && (
                 <button
@@ -111,7 +111,7 @@ const AccionesClaseCoach = ({ clase, coachId, coachDisciplinas = [], onAviso }) 
                     onClick={() => abrir('tomar')}
                     className="rounded px-2.5 py-1 text-[11px] font-bold bg-emerald-600 text-white hover:bg-emerald-700"
                 >
-                    ✋ Tomar
+                    Tomar
                 </button>
             )}
             {mia && (
@@ -132,7 +132,7 @@ const AccionesClaseCoach = ({ clase, coachId, coachDisciplinas = [], onAviso }) 
                     <div className="w-full max-w-md rounded-xl border-2 border-emerald-600/50 bg-zinc-900 p-5 shadow-2xl"
                         onClick={(e) => e.stopPropagation()} data-testid="accion-clase-modal">
                         <h2 className="text-lg font-bold text-zinc-100">
-                            {accion.accion === 'tomar' ? '✋ Tomar clase' : '🖐️ Soltar clase'}
+                            {accion.accion === 'tomar' ? 'Tomar clase' : 'Soltar clase'}
                         </h2>
                         <p className="mt-1 text-[12.5px] text-zinc-400" data-testid="accion-clase-resumen">
                             {diaSemanaDe(fechaCortaDe(clase))} {fechaCortaDe(clase)} ·{' '}
@@ -142,8 +142,8 @@ const AccionesClaseCoach = ({ clase, coachId, coachDisciplinas = [], onAviso }) 
                         </p>
                         <p className="mt-2 text-[12.5px] text-zinc-500">
                             {accion.accion === 'tomar'
-                                ? 'La clase quedará a tu nombre (✅ en Supervisión).'
-                                : 'La clase quedará sin coach (🔴 en Supervisión).'}
+                                ? 'La clase quedará a tu nombre (visible en Supervisión).'
+                                : 'La clase quedará sin coach (visible en Supervisión).'}
                         </p>
 
                         <div className="mt-3 space-y-2">
@@ -171,7 +171,7 @@ const AccionesClaseCoach = ({ clase, coachId, coachDisciplinas = [], onAviso }) 
                         {accion.error && (
                             <p className="mt-3 rounded-lg border border-red-600/60 bg-red-900/30 px-3 py-2 text-[12px] text-red-200"
                                 data-testid="accion-clase-error">
-                                ⚠️ {accion.error}
+                                <span className="font-bold uppercase tracking-wide">Error</span> {accion.error}
                             </p>
                         )}
 
@@ -182,7 +182,7 @@ const AccionesClaseCoach = ({ clase, coachId, coachDisciplinas = [], onAviso }) 
                                 data-testid="confirmar-accion-clase"
                                 className="flex-1 rounded-lg bg-emerald-600 py-2 font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
                                 {accion.cargando ? 'Guardando…'
-                                    : accion.accion === 'tomar' ? '✅ Tomar' : 'Soltar'}
+                                    : accion.accion === 'tomar' ? 'Tomar' : 'Soltar'}
                             </button>
                             <button onClick={() => setAccion(null)} disabled={accion.cargando}
                                 className="flex-1 rounded-lg bg-zinc-800 py-2 font-medium text-zinc-300 hover:bg-zinc-700 disabled:opacity-50">
@@ -200,7 +200,7 @@ const AccionesClaseCoach = ({ clase, coachId, coachDisciplinas = [], onAviso }) 
                     onClick={() => setSuplencia(null)}>
                     <div className="w-full max-w-md rounded-xl border-2 border-red-500/40 bg-zinc-900 p-5 shadow-2xl"
                         onClick={(e) => e.stopPropagation()} data-testid="cubrir-suplencia-modal">
-                        <h2 className="text-lg font-bold text-red-300">⚠️ Cubrir suplencia</h2>
+                        <h2 className="text-lg font-black uppercase tracking-wide text-red-300">Cubrir suplencia</h2>
                         <p className="mt-2 text-[12.5px] text-zinc-300" data-testid="suplencia-detalle">
                             {suplencia.detalle}
                         </p>
@@ -215,7 +215,7 @@ const AccionesClaseCoach = ({ clase, coachId, coachDisciplinas = [], onAviso }) 
                                 onClick={() => ejecutar('tomar', suplencia.alcance, true)}
                                 data-testid="confirmar-suplencia-clase"
                                 className="flex-1 rounded-lg bg-red-600 py-2 font-bold text-white hover:bg-red-700">
-                                ✅ Sí, cubrir suplencia
+                                Sí, cubrir suplencia
                             </button>
                             <button onClick={() => setSuplencia(null)}
                                 className="flex-1 rounded-lg bg-zinc-800 py-2 font-medium text-zinc-300 hover:bg-zinc-700">

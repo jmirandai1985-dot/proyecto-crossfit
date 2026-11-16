@@ -174,7 +174,7 @@ const ModalAgregarSinReserva = ({ clase, onCerrar, onAgregado }) => {
                 onClick={(e) => e.stopPropagation()}>
                 <div className="p-4 border-b border-zinc-800 flex items-start justify-between gap-3">
                     <div>
-                        <h3 className="font-bold text-zinc-100">➕ Agregar sin reserva</h3>
+                        <h3 className="font-bold text-zinc-100">Agregar sin reserva</h3>
                         <p className="mt-1 text-[12px] text-zinc-500">
                             {hora} · {clase?.disciplina_nombre || 'Clase'} — se agrega como
                             presente ahora mismo
@@ -215,7 +215,7 @@ const ModalAgregarSinReserva = ({ clase, onCerrar, onAgregado }) => {
 
                             {error && (
                                 <div className="rounded-xl border border-red-700 bg-red-900/30 px-4 py-3 text-sm text-red-200">
-                                    ⚠️ {error}
+                                    <span className="font-bold uppercase tracking-wide">Error</span> {error}
                                 </div>
                             )}
 
@@ -264,7 +264,7 @@ const ModalAgregarSinReserva = ({ clase, onCerrar, onAgregado }) => {
 
                     {error && (
                         <div className="rounded-xl border border-red-700 bg-red-900/30 px-4 py-3 text-sm text-red-200">
-                            ⚠️ {error}
+                            <span className="font-bold uppercase tracking-wide">Error</span> {error}
                         </div>
                     )}
 

@@ -775,8 +775,13 @@ export function useWodsHistorial(limite = 20) {
 export function useRegistrarResultadoWod() {
     const qc = useQueryClient();
     return useMutation({
-        mutationFn: ({ wodId, ...datos }) => api.post(
-            `/api/v1/alumnos/me/wods/${wodId}/resultado`, datos,
+        // Bloque 3: con `bloqueId` el resultado es de UN bloque del WOD
+        // (endpoint nuevo); sin él, el comportamiento de siempre.
+        mutationFn: ({ wodId, bloqueId, ...datos }) => api.post(
+            bloqueId
+                ? `/api/v1/alumnos/me/wods/${wodId}/bloques/${bloqueId}/resultado`
+                : `/api/v1/alumnos/me/wods/${wodId}/resultado`,
+            datos,
         ).then((r) => r.data),
         onSuccess: () => qc.invalidateQueries({ queryKey: ['wods', 'resultados'] }),
     });

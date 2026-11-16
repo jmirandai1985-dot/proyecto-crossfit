@@ -134,7 +134,7 @@ const MisReservas = () => {
                     <div className="flex items-start gap-2">
                         <BotonVolver />
                         <div>
-                            <h1 className="text-2xl font-bold text-zinc-100">📋 Mis Reservas</h1>
+                            <h1 className="text-2xl font-bold text-zinc-100">📋 Historial de Reservas</h1>
                             <p className="text-zinc-400 mt-1">Consulta y administra tus clases reservadas</p>
                         </div>
                     </div>

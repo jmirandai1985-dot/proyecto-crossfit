@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useInvitarExterno } from '../hooks/queries';
 
 /**
- * Modal "✉️ Invitar" del Dashboard Coach (Parte H).
+ * Modal "Invitar" del Dashboard Coach (Parte H).
  *
  * Reemplaza la navegación vieja a `/coach/alumnos-prueba` (el panel del ADMIN para reenviar
  * correo a alumnos YA registrados): acá el coach invita a una persona NUEVA con un formulario
@@ -30,8 +30,8 @@ const ModalInvitarExterno = ({ onClose }) => {
             const d = await invitar.mutateAsync({ nombre: nom, correo: cor });
             if (d.exito) {
                 setMsg(d.ya_es_alumno
-                    ? `✉️ Invitación enviada a ${nom}. Ojo: ese correo ya es alumno del box.`
-                    : `✉️ Invitación enviada a ${nom}.`);
+                    ? `Invitación enviada a ${nom}. Ojo: ese correo ya es alumno del box.`
+                    : `Invitación enviada a ${nom}.`);
                 setNombre('');
                 setCorreo('');
             } else {
@@ -47,7 +47,7 @@ const ModalInvitarExterno = ({ onClose }) => {
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl w-full max-w-md">
                 <div className="flex items-start justify-between p-5 border-b border-zinc-800">
                     <div>
-                        <h3 className="text-lg font-bold text-zinc-100">✉️ Invitar a una clase de prueba</h3>
+                        <h3 className="text-lg font-bold text-zinc-100">Invitar a una clase de prueba</h3>
                         <p className="text-sm text-zinc-400">Manda la invitación a alguien que todavía no es alumno.</p>
                     </div>
                     <button type="button" onClick={onClose} aria-label="Cerrar"

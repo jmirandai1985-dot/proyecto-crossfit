@@ -200,7 +200,7 @@ const AsistenciaClases = ({
             cerrarClase();
             // La lista del día y el detalle de la clase se refrescan SOLOS (la mutación
             // invalida `['asistencia']`): la misma verdad para el panel del admin.
-            setAviso({ tipo: 'exito', texto: `✅ Asistencia guardada (${confirmados} alumno(s))` });
+            setAviso({ tipo: 'exito', texto: `Asistencia guardada (${confirmados} alumno(s))` });
         } catch (e) {
             setAviso({ tipo: 'error', texto: e.response?.data?.detail || 'Error al guardar la asistencia' });
         }
@@ -266,7 +266,7 @@ const AsistenciaClases = ({
         <div className="space-y-6">
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <h2 className={`text-2xl font-bold ${osc ? 'text-zinc-100' : 'text-gray-900'}`}>📋 Asistencia de Hoy</h2>
+                    <h2 className={`text-2xl font-bold uppercase tracking-wide ${osc ? 'text-zinc-100' : 'text-gray-900'}`}>Asistencia de Hoy</h2>
                     <p className={`mt-1 ${osc ? 'text-zinc-400' : 'text-gray-600'}`}>
                         Clases de HOY (hora de Chile): las que ya pasaron, la que está en curso y
                         las que vienen. Confirma la asistencia de cada clase con un clic.
@@ -306,8 +306,7 @@ const AsistenciaClases = ({
                 </div>
             ) : clases.length === 0 ? (
                 <div className={`text-center py-16 rounded-xl shadow-sm border ${osc ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-gray-100'}`}>
-                    <p className="text-5xl mb-4">📭</p>
-                    <p className={`text-xl font-bold ${osc ? 'text-zinc-200' : 'text-gray-700'}`}>Sin clases hoy</p>
+                    <p className={`text-sm font-black uppercase tracking-wide ${osc ? 'text-zinc-200' : 'text-gray-700'}`}>Sin clases hoy</p>
                     <p className={`text-sm mt-2 ${osc ? 'text-zinc-500' : 'text-gray-500'}`}>
                         No hay clases de hoy en tus clases asignadas ni en tus disciplinas.
                     </p>
@@ -397,7 +396,7 @@ const AsistenciaClases = ({
                                     {claseSeleccionada.disciplina_nombre}
                                 </h3>
                                 <p className={`text-sm ${osc ? 'text-zinc-400' : 'text-gray-600'}`}>
-                                    🕐 {formatearHora(claseSeleccionada.hora_inicio)} -{' '}
+                                    {formatearHora(claseSeleccionada.hora_inicio)} -{' '}
                                     {formatearHora(claseSeleccionada.hora_fin)} · {reservas.length} reservas
                                 </p>
                             </div>
@@ -437,7 +436,7 @@ const AsistenciaClases = ({
                                         osc ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30' : 'bg-green-100 text-green-700 hover:bg-green-200'
                                     }`}
                                 >
-                                    ✓ Todos asistieron
+                                    Todos asistieron
                                 </button>
                                 <button
                                     onClick={() => marcarTodos(false)}
@@ -445,7 +444,7 @@ const AsistenciaClases = ({
                                         osc ? 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                     }`}
                                 >
-                                    ✗ Ninguno
+                                    Ninguno
                                 </button>
                             </div>
 
@@ -491,7 +490,7 @@ const AsistenciaClases = ({
                                         : 'border-gray-300 text-gray-600 hover:border-orange-400 hover:text-orange-600'
                                         }`}
                                 >
-                                    ➕ Agregar alumno sin reserva
+                                    + Agregar alumno sin reserva
                                 </button>
                             )}
                         </div>

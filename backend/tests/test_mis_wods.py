@@ -42,6 +42,7 @@ from app.models.reserva import Reserva
 from app.models.tenant import Tenant
 from app.models.usuario import RolUsuario, Usuario
 from app.models.wod import EstadoWod, Wod
+from app.models.wod_bloque import WodBloque
 from app.models.wod_resultado import WodResultado
 from app.utils.santiago import SANTIAGO
 
@@ -64,7 +65,7 @@ WOD_BORRADOR = 108          # estado draft: no debe verse NI registrarse
 
 TABLAS = [
     Tenant.__table__, Usuario.__table__, Disciplina.__table__,
-    HorarioBase.__table__, Wod.__table__, Clase.__table__,
+    HorarioBase.__table__, Wod.__table__, WodBloque.__table__, Clase.__table__,
     Reserva.__table__, WodResultado.__table__,
 ]
 
@@ -411,7 +412,9 @@ def test_pendientes_devuelve_la_prescripcion_para_el_formulario(entorno):
     fila = next(i for i in _pendientes(cliente) if i["wod_id"] == WOD_FOR_TIME)
 
     assert set(fila) == {"wod_id", "fecha", "titulo", "wod_principal",
-                         "tipo_metcon"}
+                         "tipo_metcon", "bloques"}
+    # Bloque 3: el WOD simple no tiene bloques (lista vacía, no ausente).
+    assert fila["bloques"] == []
     assert fila["titulo"] == "Fran"
     assert fila["tipo_metcon"] == "FOR TIME"
     assert "Thrusters" in fila["wod_principal"]

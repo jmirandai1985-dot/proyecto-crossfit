@@ -49,6 +49,10 @@ class Wod(Base):
     # Relaciones (mantenemos compatibilidad para migración, se puede eliminar después)
     movimientos = relationship(
         "WodMovimiento", back_populates="wod", cascade="all, delete-orphan")
+    # Bloque 3: los N bloques del WOD ("WOD con bloques"). Sin filas = WOD simple.
+    bloques = relationship(
+        "WodBloque", back_populates="wod", cascade="all, delete-orphan",
+        order_by="WodBloque.orden")
 
     # Índices para búsquedas
     __table_args__ = (

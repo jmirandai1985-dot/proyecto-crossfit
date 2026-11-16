@@ -76,10 +76,10 @@ test('alumno reserva clase, la ve en Mis reservas y se le marca asistencia', asy
   // aserta un valor fijo).
   expect(nueva.estado).toBe('confirmada');
 
-  // 4. Confirmar que aparece en "Mis reservas" (UI). Se usa el encabezado de la
-  //    tarjeta (h3 "🏋️ <disciplina>") y no getByText, porque el chip del filtro de
-  //    disciplinas también contiene el nombre y puede estar oculto.
-  await page.locator('nav').getByRole('link', { name: 'Mis Reservas' }).click();
+  // 4. Confirmar que aparece en el "Historial de Reservas" (UI). Se usa el encabezado
+  //    de la tarjeta (h3 "🏋️ <disciplina>") y no getByText, porque el chip del filtro
+  //    de disciplinas también contiene el nombre y puede estar oculto.
+  await page.locator('nav').getByRole('link', { name: 'Historial de Reservas' }).click();
   await expect(page).toHaveURL(/\/alumno\/mis-reservas/);
   await expect(
     page.getByRole('heading', { name: nueva.disciplina_nombre || 'Clase' }).first()

@@ -152,6 +152,10 @@ class PedidoEntregaResponse(BaseModel):
     pedido_id: int
     alumno_nombre: Optional[str] = None
     producto_nombre: Optional[str] = None
+    # Talla/variante comprada (snapshot de `pedidos.talla`, migración 083).
+    # NULL = producto sin variantes: la pantalla no muestra nada, igual que antes.
+    # Es SÓLO lectura: el descuento/devolución de stock por variante no se toca acá.
+    talla: Optional[str] = None
     cantidad: int
     entregado_en: datetime
     codigo: str

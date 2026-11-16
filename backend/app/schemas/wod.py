@@ -6,6 +6,27 @@ from datetime import date, datetime, time
 from typing import Optional, List
 
 
+class WodBloqueCreate(BaseModel):
+    """Un bloque del WOD (metcon o RM). `orden` decide cómo se muestra."""
+    orden: int = 1
+    titulo: Optional[str] = None
+    # Texto libre, igual que wods.tipo_metcon (AMRAP, EMOM, RFT, FOR TIME, RM).
+    tipo_metcon: Optional[str] = None
+    descripcion: Optional[str] = None
+
+
+class WodBloqueResponse(BaseModel):
+    id: int
+    wod_id: int
+    orden: int
+    titulo: Optional[str] = None
+    tipo_metcon: Optional[str] = None
+    descripcion: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class WodMovimientoCreate(BaseModel):
     movimiento_id: int
     orden: int = 1
@@ -86,6 +107,9 @@ class WodCreate(BaseModel):
     tipo_metcon: Optional[str] = None  # AMRAP, EMOM, RFT, FOR TIME
     coach_id: Optional[int] = None
     estado: Optional[str] = "draft"
+    # Bloque 3: "WOD con bloques" (varios metcons + RM en la misma clase).
+    # Lista vacía = WOD simple (comportamiento histórico).
+    bloques: List["WodBloqueCreate"] = []
     # Mantenemos compatibilidad con formato viejo por ahora
     movimientos: List[WodMovimientoCreate] = []
     fases: List[FaseWodCreate] = []
@@ -152,6 +176,9 @@ class WodUpdate(BaseModel):
     fuerza_habilidad: Optional[str] = None
     wod_principal: Optional[str] = None
     tipo_metcon: Optional[str] = None
+    # Bloque 3: si viene la lista, REEMPLAZA los bloques del WOD (mismo criterio
+    # que movimientos/fases). None = no se toca.
+    bloques: Optional[List[WodBloqueCreate]] = None
     movimientos: Optional[List[WodMovimientoCreate]] = None
     fases: Optional[List[FaseWodCreate]] = None
 
@@ -183,6 +210,8 @@ class WodResponse(BaseModel):
     movimientos: List[WodMovimientoResponse] = []
     # Movimientos agrupados por fase (calculado del campo fase)
     fases: List[FaseWodResponse] = []
+    # Bloque 3: bloques del WOD. Vacío = WOD simple ("WOD simple" intacto).
+    bloques: List[WodBloqueResponse] = []
 
     class Config:
         from_attributes = True
@@ -220,6 +249,8 @@ class WodResponse(BaseModel):
             activo=wod.activo,
             created_at=wod.created_at,
             movimientos=movs,
-            fases=list(fases_map.values())
+            fases=list(fases_map.values()),
+            bloques=[WodBloqueResponse.model_validate(b)
+                     for b in (wod.bloques or [])]
         )
         return wod_response

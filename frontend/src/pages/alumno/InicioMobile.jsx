@@ -343,11 +343,12 @@ const InicioMobile = ({
     const clasesFiltradasPorFranja = filtrarPorFranja(clasesFiltradas, franjaFiltro);
 
     // "Reservar otra clase": baja al bloque "Clases disponibles" (la rejilla del
-    // dashboard reutilizada). Si ese bloque aún no existe, abre Mis Reservas.
+    // dashboard reutilizada). Si ese bloque aún no existe, abre "Agendar Reserva"
+    // (la pestaña para TOMAR una clase; antes este respaldo caía en el historial).
     const irAReservar = () => {
         const destino = document.getElementById('ub-clases');
         if (destino) destino.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        else navigate('/alumno/mis-reservas');
+        else navigate('/alumno/agendar-reserva');
     };
 
     return (
@@ -411,7 +412,7 @@ const InicioMobile = ({
 
                 {/* ── Acciones rápidas de la reserva ── */}
                 <div className="links">
-                    <button type="button" onClick={() => navigate('/alumno/mis-reservas')}>Mis reservas</button>
+                    <button type="button" onClick={() => navigate('/alumno/mis-reservas')}>Historial</button>
                     <button type="button" onClick={irAReservar}>Reservar otra clase</button>
                 </div>
 

@@ -91,10 +91,10 @@ const AsistenciaGrupoDisciplina = ({ grupo, osc, abierta, onToggle, onAbrir, for
                         <div key={clase.id} className="flex flex-wrap items-center gap-3 px-5 py-3">
                             <div className="min-w-0 flex-1">
                                 <p className={`text-sm font-medium ${osc ? 'text-zinc-200' : 'text-gray-800'}`}>
-                                    🕐 {formatearHora(clase.hora_inicio)} - {formatearHora(clase.hora_fin)}
+                                    {formatearHora(clase.hora_inicio)} - {formatearHora(clase.hora_fin)}
                                 </p>
                                 <p className={`text-xs ${osc ? 'text-zinc-500' : 'text-gray-500'}`}>
-                                    👥 {clase.reservas_count || 0} reservas · 🎟️ {clase.asistentes_confirmados || 0}/{cupoActual(clase, cupos)} confirmados
+                                    {clase.reservas_count || 0} reservas · {clase.asistentes_confirmados || 0}/{cupoActual(clase, cupos)} confirmados
                                 </p>
                             </div>
                             {(clase.reservas_count || 0) > 0 && (

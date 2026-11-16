@@ -16,6 +16,10 @@ const GRUPO_POR_TIPO = {
     RFT: 'tiempo',
     AMRAP: 'rondas',
     EMOM: 'rondas',
+    // Bloque 3: un bloque de RM se registra con PESO (kg), no con tiempo/rondas.
+    RM: 'peso',
+    '1RM': 'peso',
+    PR: 'peso',
 };
 
 function grupoResultado(tipo) {
@@ -29,6 +33,12 @@ function grupoResultado(tipo) {
     if (GRUPO_POR_TIPO[normalizado] === 'rondas'
         || normalizado.startsWith('AMRAP') || normalizado.startsWith('EMOM')) {
         return 'rondas';
+    }
+    // "RM", "RM Final", "1RM", "PR"…: el resultado del bloque es un peso en kg.
+    if (GRUPO_POR_TIPO[normalizado] === 'peso'
+        || normalizado.startsWith('RM ') || normalizado.startsWith('1RM ')
+        || normalizado.startsWith('PR ')) {
+        return 'peso';
     }
     return 'libre';
 }
@@ -52,6 +62,11 @@ function parseTiempo(texto) {
 }
 
 function resultadoReal(item) {
+    if (item?.peso_kg !== null && item?.peso_kg !== undefined) {
+        // SIEMPRE kilos (sin selector de unidad). Sin decimales de más.
+        const kg = Number(item.peso_kg);
+        return `${Number.isInteger(kg) ? kg : kg.toFixed(1)} kg`;
+    }
     if (item?.tiempo_segundos !== null && item?.tiempo_segundos !== undefined) {
         return formatTiempo(item.tiempo_segundos);
     }
@@ -99,6 +114,10 @@ function TipoBadge({ tipo }) {
 }
 
 function TarjetaPendiente({ item, onRegistrar }) {
+    const bloques = item.bloques || [];
+    const bloquesPendientes = bloques.filter((b) => !b.registrado);
+    const boton = 'w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 transition-colors';
+
     return (
         <article className="bg-white rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-orange-500 p-4 flex flex-col">
             <div className="flex items-center justify-between gap-2">
@@ -120,24 +139,72 @@ function TarjetaPendiente({ item, onRegistrar }) {
                     {item.wod_principal}
                 </p>
             )}
-            <button
-                type="button"
-                onClick={() => onRegistrar(item)}
-                className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 transition-colors"
-            >
-                Registrar mi resultado
-            </button>
+
+            {bloques.length > 0 ? (
+                /* Bloque 3: una tarjeta de registro POR BLOQUE (no una sola para
+                   todo el WOD). Cada bloque tiene su propio ranking y su propio
+                   modo rx/escalado. Los ya registrados no se repiten. */
+                <div className="mt-4 space-y-2" data-testid={`bloques-pendientes-${item.wod_id}`}>
+                    {bloquesPendientes.map((bloque, indice) => (
+                        <div
+                            key={bloque.id}
+                            className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3"
+                            data-testid={`bloque-pendiente-${bloque.id}`}
+                        >
+                            <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                    <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-700">
+                                        Bloque {indice + 1}
+                                    </p>
+                                    <p className="font-bold text-gray-800 break-words">
+                                        {bloque.titulo || `Bloque ${indice + 1}`}
+                                    </p>
+                                </div>
+                                <TipoBadge tipo={bloque.tipo_metcon} />
+                            </div>
+                            {bloque.descripcion && (
+                                <p className="mt-1 text-sm text-gray-600 whitespace-pre-line break-words">
+                                    {bloque.descripcion}
+                                </p>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => onRegistrar({ ...item, bloque })}
+                                className={`mt-3 ${boton}`}
+                            >
+                                Registrar este bloque
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            ) : (
+                <button
+                    type="button"
+                    onClick={() => onRegistrar(item)}
+                    className={`mt-4 ${boton}`}
+                >
+                    Registrar mi resultado
+                </button>
+            )}
         </article>
     );
 }
 
 function TarjetaHistorial({ item }) {
+    // Bloque 3: si el resultado es de un bloque, se muestra su título y su
+    // prescripción (cada bloque mide algo distinto y tiene su propio ranking).
+    const bloque = (item.bloques || []).find((b) => b.id === item.bloque_id) || null;
     return (
         <article className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                     <BadgeModo modo={item.modo} />
-                    <TipoBadge tipo={item.tipo_metcon} />
+                    <TipoBadge tipo={bloque?.tipo_metcon || item.tipo_metcon} />
+                    {bloque && (
+                        <span className={`${CLASES_BADGE} bg-emerald-50 text-emerald-700`}>
+                            {bloque.titulo || 'Bloque'}
+                        </span>
+                    )}
                 </div>
                 <span className="text-xs font-semibold text-gray-400">
                     {fechaWod(item.fecha)}
@@ -147,10 +214,10 @@ function TarjetaHistorial({ item }) {
             <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="rounded-lg bg-zinc-50 p-3">
                     <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
-                        Prescrito
+                        {bloque ? 'Bloque prescrito' : 'Prescrito'}
                     </p>
                     <p className="mt-1 text-sm text-gray-600 whitespace-pre-line break-words">
-                        {item.wod_principal || 'Sin detalle prescrito'}
+                        {bloque?.descripcion || item.wod_principal || 'Sin detalle prescrito'}
                     </p>
                 </div>
                 <div className="rounded-lg bg-emerald-50 p-3">
@@ -173,13 +240,18 @@ function TarjetaHistorial({ item }) {
 
 
 function ModalRegistro({ pendiente, onClose, registrar }) {
-    const grupo = grupoResultado(pendiente.tipo_metcon);
+    // Bloque 3: si se está registrando UN bloque, su tipo decide el campo
+    // (tiempo/rondas/peso); si no hay bloque, manda el tipo del WOD.
+    const bloque = pendiente.bloque || null;
+    const tipoEfectivo = bloque?.tipo_metcon || pendiente.tipo_metcon;
+    const grupo = grupoResultado(tipoEfectivo);
     const [modo, setModo] = React.useState('rx');
     // Sólo se usa cuando el WOD no trae `tipo_metcon`: el alumno elige qué registró.
     const [tipoLibre, setTipoLibre] = React.useState('tiempo');
     const [tiempo, setTiempo] = React.useState('');
     const [rondas, setRondas] = React.useState('');
     const [repsExtra, setRepsExtra] = React.useState('');
+    const [peso, setPeso] = React.useState('');
     const [nota, setNota] = React.useState('');
     const [errorLocal, setErrorLocal] = React.useState('');
     const efectivo = grupo === 'libre' ? tipoLibre : grupo;
@@ -197,7 +269,14 @@ function ModalRegistro({ pendiente, onClose, registrar }) {
         setErrorLocal('');
         const payload = { modo, nota: nota.trim() || null };
 
-        if (efectivo === 'tiempo') {
+        if (efectivo === 'peso') {
+            const kg = Number(peso);
+            if (peso === '' || !Number.isFinite(kg) || kg <= 0) {
+                setErrorLocal('Escribe el peso en kilos (por ejemplo 100).');
+                return;
+            }
+            payload.peso_kg = kg;
+        } else if (efectivo === 'tiempo') {
             const segundos = parseTiempo(tiempo);
             if (!segundos) {
                 setErrorLocal('Escribe el tiempo en formato mm:ss (por ejemplo 12:30).');
@@ -222,7 +301,9 @@ function ModalRegistro({ pendiente, onClose, registrar }) {
         }
 
         registrar.mutate(
-            { wodId: pendiente.wod_id, ...payload },
+            // `bloqueId` va sólo cuando el resultado es de un bloque: el hook
+            // elige el endpoint nuevo o el de siempre.
+            { wodId: pendiente.wod_id, bloqueId: bloque?.id, ...payload },
             { onSuccess: onClose },
         );
     };
@@ -251,11 +332,12 @@ function ModalRegistro({ pendiente, onClose, registrar }) {
                             Registrar resultado
                         </p>
                         <h2 id="titulo-modal-wod" className="text-xl font-bold text-gray-800">
-                            {pendiente.titulo || 'WOD'}
+                            {bloque?.titulo || pendiente.titulo || 'WOD'}
                         </h2>
                         <p className="mt-0.5 text-xs font-semibold text-gray-400">
                             {fechaWod(pendiente.fecha)}
-                            {pendiente.tipo_metcon ? ` · ${pendiente.tipo_metcon}` : ''}
+                            {bloque ? ` · Bloque de ${pendiente.titulo || 'WOD'}` : ''}
+                            {tipoEfectivo ? ` · ${tipoEfectivo}` : ''}
                         </p>
                     </div>
                     <button
@@ -302,7 +384,7 @@ function ModalRegistro({ pendiente, onClose, registrar }) {
                                 ¿Qué vas a registrar?
                             </legend>
                             <div className="grid grid-cols-2 gap-2">
-                                {[['tiempo', 'Tiempo'], ['rondas', 'Rondas']].map(([valor, texto]) => (
+                                {[['tiempo', 'Tiempo'], ['rondas', 'Rondas'], ['peso', 'Peso (kg)']].map(([valor, texto]) => (
                                     <button
                                         key={valor}
                                         type="button"
@@ -321,7 +403,24 @@ function ModalRegistro({ pendiente, onClose, registrar }) {
                         </fieldset>
                     )}
 
-                    {efectivo === 'tiempo' ? (
+                    {efectivo === 'peso' ? (
+                        <div>
+                            <label htmlFor="peso-wod" className="mb-1 block text-sm font-bold text-gray-700">
+                                Peso (kg)
+                            </label>
+                            <input
+                                id="peso-wod"
+                                value={peso}
+                                onChange={(evento) => setPeso(evento.target.value)}
+                                inputMode="decimal"
+                                placeholder="100"
+                                className={claseInput}
+                            />
+                            <p className="mt-1 text-xs text-gray-400">
+                                Peso levantado en el RM. Siempre en kilos.
+                            </p>
+                        </div>
+                    ) : efectivo === 'tiempo' ? (
                         <div>
                             <label htmlFor="tiempo-wod" className="mb-1 block text-sm font-bold text-gray-700">
                                 Tiempo (mm:ss)
@@ -511,7 +610,7 @@ const MisWods = () => {
                         </p>
                         <button
                             type="button"
-                            onClick={() => navigate('/alumno/mis-reservas')}
+                            onClick={() => navigate('/alumno/agendar-reserva')}
                             className="mt-6 rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 transition-colors"
                         >
                             Ver mis reservas

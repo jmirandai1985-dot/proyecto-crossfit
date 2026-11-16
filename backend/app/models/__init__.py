@@ -5,6 +5,7 @@ from app.models.tenant import Tenant
 from app.models.usuario import Usuario, RolUsuario
 from app.models.wod import Wod, EstadoWod
 from app.models.wod_movimiento import WodMovimiento
+from app.models.wod_bloque import WodBloque
 from app.models.wod_resultado import WodResultado
 from app.models.notificacion import Notificacion
 from app.models.notificacion_enviada import NotificacionEnviada
@@ -47,7 +48,7 @@ from app.models.referidos import (
 )
 
 __all__ = ["Tenant", "Usuario", "RolUsuario",
-           "Wod", "EstadoWod", "WodMovimiento", "WodResultado", "Notificacion",
+           "Wod", "EstadoWod", "WodMovimiento", "WodBloque", "WodResultado", "Notificacion",
            "NotificacionEnviada",
            "Movimiento", "Plan", "Suscripcion", "CoberturaEmergencia",
            "TransaccionFinanciera", "ConfiguracionNegocio",

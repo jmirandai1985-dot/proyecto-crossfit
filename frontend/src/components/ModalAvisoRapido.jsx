@@ -78,7 +78,7 @@ const ModalAvisoRapido = ({ isOpen, onClose, onSuccess }) => {
                 <form onSubmit={enviar} className="p-5 space-y-4">
                     {errores.submit && (
                         <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2.5 text-[12.5px] text-red-200">
-                            ⚠️ {errores.submit}
+                            <span className="font-bold uppercase tracking-wide">Error</span> {errores.submit}
                         </div>
                     )}
 
@@ -152,7 +152,6 @@ const ModalAvisoRapido = ({ isOpen, onClose, onSuccess }) => {
                     </div>
 
                     <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-[11.5px] text-zinc-400">
-                        <span aria-hidden="true">🕐</span>
                         {form.programarManana
                             ? 'Se publica mañana y desaparece al día siguiente.'
                             : `Vigente solo hoy (${formatearFechaCorta(hoyISO())}). Mañana desaparece solo.`}

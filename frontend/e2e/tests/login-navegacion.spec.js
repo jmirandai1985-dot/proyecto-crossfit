@@ -7,13 +7,13 @@ test.describe('Login + navegación básica por rol', () => {
 
     // Aterriza en el dashboard correcto según rol.
     await expect(page).toHaveURL(/\/alumno\/dashboard/);
-    const linkReservas = page.locator('nav').getByRole('link', { name: 'Mis Reservas' });
+    const linkReservas = page.locator('nav').getByRole('link', { name: 'Historial de Reservas' });
     await expect(linkReservas).toBeVisible();
 
-    // Navegación básica: el link de Mis reservas responde y muestra su pantalla.
+    // Navegación básica: el link del historial responde y muestra su pantalla.
     await linkReservas.click();
     await expect(page).toHaveURL(/\/alumno\/mis-reservas/);
-    await expect(page.getByRole('heading', { name: /Mis Reservas/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Historial de Reservas/ })).toBeVisible();
 
     // Volver a Inicio.
     await page.locator('nav').getByRole('link', { name: 'Inicio' }).click();

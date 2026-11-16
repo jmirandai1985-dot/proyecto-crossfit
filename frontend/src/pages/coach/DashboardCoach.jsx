@@ -89,7 +89,7 @@ const DashboardCoach = () => {
     // Bloque 3 del retiro: el "aviso rápido" del día, que vivía en Gestión de Clases.
     const [modalAviso, setModalAviso] = useState(false);
     const [claseSinReserva, setClaseSinReserva] = useState(null);
-    // Modal "✉️ Invitar" (Parte H): formulario de invitación a una persona NUEVA.
+    // Modal "Invitar" (Parte H): formulario de invitación a una persona NUEVA.
     const [modalInvitar, setModalInvitar] = useState(false);
     const [msgPublicado, setMsgPublicado] = useState(null);
     // Bloque 2: el walk-in ahora avisa con un toast (el texto lo escribió el modal pegado a la
@@ -536,7 +536,7 @@ const DashboardCoach = () => {
                 id: alumno.id,
                 tipo: d.exito ? 'exito' : 'error',
                 texto: d.exito
-                    ? `✉️ Correo enviado a ${alumno.nombre} (${d.dias_inactividad} días sin entrenar).`
+                    ? `Correo enviado a ${alumno.nombre} (${d.dias_inactividad} días sin entrenar).`
                     : (d.detalle_error || 'No se pudo enviar el correo.'),
             });
         } catch (e) {
@@ -598,12 +598,6 @@ const DashboardCoach = () => {
         return 'text-gray-500 bg-gray-50 border-gray-200';
     };
 
-    const getProgresoIcon = (estado) => {
-        if (estado === 'activo') return '📈';
-        if (estado === 'iniciando') return '🌱';
-        return '❓';
-    };
-
     if (cargandoInicial && !clasesHoy.length) {
         return (
             <Layout>
@@ -649,7 +643,7 @@ const DashboardCoach = () => {
                         data-testid="btn-invitar-alumnos-prueba"
                         className="shrink-0 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold px-4 py-2 transition-colors"
                     >
-                        ✉️ Invitar
+                        Invitar
                     </button>
                 </div>
 
@@ -659,9 +653,8 @@ const DashboardCoach = () => {
                     ResumenCoach y no se repiten en pantalla. */}
                 {erroresBloque.length > 0 && (
                     <div className="bg-red-50 border-l-4 border-red-500 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center gap-3" data-testid="banner-error-dashboard">
-                        <span className="text-2xl">⚠️</span>
                         <div className="flex-1">
-                            <p className="font-bold text-gray-900">Algunos datos no se pudieron cargar</p>
+                            <p className="text-sm font-black uppercase tracking-wide text-red-700">Algunos datos no se pudieron cargar</p>
                             <ul className="text-sm text-gray-700 mt-1 list-disc list-inside">
                                 {erroresBloque.map((e) => <li key={e}>{e}</li>)}
                             </ul>
@@ -722,7 +715,7 @@ const DashboardCoach = () => {
                             <div className="space-y-6">
                                 <div className="flex items-center justify-between flex-wrap gap-3">
                                     <div>
-                                        <h2 className="text-xl font-bold text-gray-900">📅 Clases y {getTerminoDisciplina('CrossFit')}s de la Semana</h2>
+                                        <h2 className="text-xl font-bold uppercase tracking-wide text-gray-900">Clases y {getTerminoDisciplina('CrossFit')}s de la Semana</h2>
                                         <p className="text-sm text-gray-600 mt-1">
                                             Semana: {weekRange.start} → {weekRange.end}
                                         </p>
@@ -737,15 +730,15 @@ const DashboardCoach = () => {
                                             onClick={irSemanaAnterior}
                                             className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-zinc-600 transition-colors"
                                         >
-                                            ◀ Semana anterior
+                                            Semana anterior
                                         </button>
                                         <button
                                             onClick={irSemanaSiguiente}
                                             className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-zinc-600 transition-colors"
                                         >
-                                            Semana siguiente ▶
+                                            Semana siguiente
                                         </button>
-                                        {/* Acá estaba "📋 Gestionar Clases": navegaba a la
+                                        {/* Acá estaba "Gestionar Clases": navegaba a la
                                             pantalla vieja, ya retirada. La grilla de arriba ES
                                             esa vista semanal (fusionada) y desde acá se llega
                                             a las dos cosas que sólo vivían allá: la carga
@@ -755,14 +748,14 @@ const DashboardCoach = () => {
                                             data-testid="cargar-excel-semana"
                                             className="px-3 py-2 rounded-lg text-sm font-bold text-zinc-900 bg-lime-300 hover:bg-lime-200 transition-colors"
                                         >
-                                            📄 + Cargar {getTerminoDisciplina('CrossFit')}s de la semana (Excel)
+                                            + Cargar {getTerminoDisciplina('CrossFit')}s de la semana (Excel)
                                         </button>
                                         <button
                                             onClick={() => setModalAviso(true)}
                                             data-testid="aviso-rapido-clases"
                                             className="px-3 py-2 rounded-lg text-sm font-medium bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors"
                                         >
-                                            📣 Aviso rápido del día
+                                            Aviso rápido del día
                                         </button>
                                     </div>
                                 </div>
@@ -847,24 +840,21 @@ const DashboardCoach = () => {
                                                                         <p className={`text-xs truncate ${wod ? 'text-green-700 font-medium' : 'text-gray-600'}`}>
                                                                             {wod ? (
                                                                                 <span className="whitespace-pre-line">
-                                                                                    <span className="font-bold text-green-700">💪 {wod.titulo || 'WOD publicado'}</span>
-                                                                                    {wod.calentamiento && <span className="block text-[10px] text-gray-600 mt-0.5">🔥 {wod.calentamiento}</span>}
-                                                                                    {wod.fuerza_habilidad && <span className="block text-[10px] text-gray-600">🏋️ {wod.fuerza_habilidad}</span>}
-                                                                                    {wod.wod_principal && <span className="block text-[10px] text-gray-700">💥 {wod.wod_principal}</span>}
+                                                                                    <span className="font-bold text-green-700">{wod.titulo || 'WOD publicado'}</span>
+                                                                                    {wod.calentamiento && <span className="block text-[10px] text-gray-600 mt-0.5">{wod.calentamiento}</span>}
+                                                                                    {wod.fuerza_habilidad && <span className="block text-[10px] text-gray-600">{wod.fuerza_habilidad}</span>}
+                                                                                    {wod.wod_principal && <span className="block text-[10px] text-gray-700">{wod.wod_principal}</span>}
                                                                                 </span>
                                                                             ) : (
-                                                                                `⬜ Sin ${getTerminoDisciplina(clase.disciplina_nombre)}`
+                                                                                <span className="text-[10px] font-bold uppercase tracking-wide">Sin {getTerminoDisciplina(clase.disciplina_nombre)}</span>
                                                                             )}
                                                                         </p>
                                                                         <p className="text-xs text-gray-500">
-                                                                            👥 {clase.asistentes_confirmados || 0}
+                                                                            {clase.asistentes_confirmados || 0}
                                                                             {clase.cupo_maximo === null || clase.cupo_maximo === undefined
-                                                                                ? ' (acceso libre)'
-                                                                                : `/${clase.cupo_maximo}`}
+                                                                                ? ' inscriptos (acceso libre)'
+                                                                                : `/${clase.cupo_maximo} inscriptos`}
                                                                         </p>
-                                                                    </div>
-                                                                    <div className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-lg ${wod ? 'bg-green-100' : 'bg-yellow-100'}`}>
-                                                                        {wod ? '✅' : '📝'}
                                                                     </div>
                                                                 </button>
                                                                 {/* Tomar / soltar / cubrir suplencia: se hacía en la
@@ -943,7 +933,7 @@ const DashboardCoach = () => {
                                                                 <div>
                                                                 {clase ? (
                                                                     wodDeClase ? (
-                                                                        // Celda con WOD publicado — fondo naranja translúcido sobre dark + ícono ✅
+                                                                        // Celda con WOD publicado — fondo naranja translúcido sobre dark
                                                                         <>
                                                                         <button
                                                                             data-testid="ver-wod-celda"
@@ -955,15 +945,15 @@ const DashboardCoach = () => {
                                                                                 {clase.disciplina_nombre || 'Clase'}
                                                                             </div>
                                                                             <div className="text-sm text-orange-300 font-bold leading-tight max-w-[110px] text-center">
-                                                                                ✅ {wodDeClase.titulo || 'WOD publicado'}
+                                                                                {wodDeClase.titulo || 'WOD publicado'}
                                                                             </div>
                                                                             <div className="text-[9px] text-orange-400 leading-tight max-w-[110px] text-center whitespace-pre-line overflow-hidden">
-                                                                                {wodDeClase.calentamiento && `🔥 ${wodDeClase.calentamiento.split('\n').slice(0, 2).join('\n')}`}
-                                                                                {wodDeClase.fuerza_habilidad && `\n🏋️ ${wodDeClase.fuerza_habilidad.split('\n').slice(0, 2).join('\n')}`}
-                                                                                {wodDeClase.wod_principal && `\n💥 ${wodDeClase.wod_principal.split('\n').slice(0, 2).join('\n')}`}
+                                                                                {wodDeClase.calentamiento && wodDeClase.calentamiento.split('\n').slice(0, 2).join('\n')}
+                                                                                {wodDeClase.fuerza_habilidad && `\n${wodDeClase.fuerza_habilidad.split('\n').slice(0, 2).join('\n')}`}
+                                                                                {wodDeClase.wod_principal && `\n${wodDeClase.wod_principal.split('\n').slice(0, 2).join('\n')}`}
                                                                             </div>
-                                                                            <div className="text-sm text-orange-400">
-                                                                                ✔ Publicado
+                                                                            <div className="text-[10px] font-black uppercase tracking-wide text-emerald-300">
+                                                                                Publicado
                                                                             </div>
                                                                         </button>
                                                                         {/* Editar el WOD ya publicado: el MISMO modal del panel,
@@ -974,7 +964,7 @@ const DashboardCoach = () => {
                                                                             onClick={() => abrirEditarWod({ ...clase, fecha: clase.fecha || date }, wodDeClase)}
                                                                             className="mt-1 w-full rounded-lg border border-orange-500/60 bg-zinc-900 px-2 py-1 text-[10.5px] font-semibold text-orange-200 hover:bg-orange-500/20"
                                                                         >
-                                                                            ✏️ Editar
+                                                                            Editar
                                                                         </button>
                                                                         </>
                                                                     ) : (
@@ -989,14 +979,14 @@ const DashboardCoach = () => {
                                                                             <div className="text-base font-semibold text-zinc-200 leading-tight capitalize">
                                                                                 {clase.disciplina_nombre || 'Clase'}
                                                                             </div>
-                                                                            <div className="text-sm text-zinc-300">
-                                                                                ⬜ Sin {getTerminoDisciplina(clase.disciplina_nombre)}
+                                                                            <div className="text-[10px] font-bold uppercase tracking-wide text-zinc-300">
+                                                                                Sin {getTerminoDisciplina(clase.disciplina_nombre)}
                                                                             </div>
                                                                             <div className="text-sm text-zinc-400">
-                                                                                👥 {clase.asistentes_confirmados || 0}
+                                                                                {clase.asistentes_confirmados || 0}
                                                                                 {clase.cupo_maximo === null || clase.cupo_maximo === undefined
-                                                                                    ? ' (acceso libre)'
-                                                                                    : `/${clase.cupo_maximo}`}
+                                                                                    ? ' inscriptos (acceso libre)'
+                                                                                    : `/${clase.cupo_maximo} inscriptos`}
                                                                             </div>
                                                                         </button>
                                                                     )
@@ -1027,22 +1017,22 @@ const DashboardCoach = () => {
 
                                 {/* Legend */}
                                 <div className="flex flex-wrap gap-4 text-xs text-zinc-400 mt-2 p-3 bg-zinc-900 rounded-lg border border-zinc-800">
-                                    <span className="flex items-center gap-1">
-                                        <span className="w-3 h-3 rounded-sm bg-orange-500/30 border-2 border-orange-500"></span> Con {getTerminoDisciplina('CrossFit')} publicado (naranja)
+                                    <span className="flex items-center gap-1 font-semibold uppercase tracking-wide">
+                                        <span className="w-3 h-3 rounded-sm bg-orange-500/30 border-2 border-orange-500"></span> Con {getTerminoDisciplina('CrossFit')} publicado
                                     </span>
-                                    <span className="flex items-center gap-1">
-                                        <span className="w-3 h-3 rounded-sm bg-zinc-800 border border-zinc-600"></span> Sin {getTerminoDisciplina('CrossFit')} (gris oscuro)
+                                    <span className="flex items-center gap-1 font-semibold uppercase tracking-wide">
+                                        <span className="w-3 h-3 rounded-sm bg-zinc-800 border border-zinc-600"></span> Sin {getTerminoDisciplina('CrossFit')}
                                     </span>
-                                    <span className="flex items-center gap-1">
+                                    <span className="flex items-center gap-1 font-semibold uppercase tracking-wide">
                                         <span className="w-3 h-3 rounded-sm bg-zinc-900/60 border border-zinc-700"></span> Celda vacía
                                     </span>
                                     {!verSoloConWod && (
-                                        <span className="text-zinc-500 italic">📌 Clic en una celda gris oscura para crear el {getTerminoDisciplina('CrossFit')} de esa clase</span>
+                                        <span className="text-zinc-500 italic">Clic en una celda gris oscura para crear el {getTerminoDisciplina('CrossFit')} de esa clase</span>
                                     )}
                                 </div>
                                 <p className="text-xs text-gray-400 text-center">
-                                    ℹ️ Clic en una celda para publicar el {getTerminoDisciplina('CrossFit')} de esa clase
-                                    y en ✏️ para editarlo. Debajo de cada clase están tu estado y las acciones
+                                    Clic en una celda para publicar el {getTerminoDisciplina('CrossFit')} de esa clase
+                                    y en «Editar» para editarlo. Debajo de cada clase están tu estado y las acciones
                                     (tomarla, soltarla o cubrir la suplencia).
                                 </p>
                             </div>
@@ -1057,7 +1047,7 @@ const DashboardCoach = () => {
                                     <p className="text-xs text-gray-500" data-testid="nota-alcance-alumnos">
                                         Por defecto ves <b>tus alumnos</b> (con reserva en alguna de tus
                                         clases). Para ver a todos los del box activa «Todos del box». ¿Quieres
-                                        invitar a alguien que todavía no existe? Usa el botón «✉️ Invitar».
+                                        invitar a alguien que todavía no existe? Usa el botón «Invitar».
                                     </p>
                                     <div className="inline-flex w-full rounded-lg bg-gray-100 p-1 text-sm font-medium">
                                         <button
@@ -1170,8 +1160,7 @@ const DashboardCoach = () => {
                                                 ))
                                             ) : (
                                                 <div className="text-center py-8 bg-gray-50 rounded-lg">
-                                                    <p className="text-3xl mb-2">🏋️</p>
-                                                    <p className="text-gray-600">Sin RMs registrados</p>
+                                                    <p className="text-sm font-black uppercase tracking-wide text-gray-900">Sin RMs registrados</p>
                                                     <p className="text-sm text-gray-500 mt-1">Este alumno no ha registrado marcas personales</p>
                                                 </div>
                                             )}
@@ -1179,8 +1168,7 @@ const DashboardCoach = () => {
                                     )}
                                     {!selectedAlumno && (
                                         <div className="text-center py-12 bg-gray-50 rounded-lg">
-                                            <p className="text-4xl mb-3">👆</p>
-                                            <p className="text-gray-600">Selecciona un alumno de la lista</p>
+                                            <p className="text-sm font-black uppercase tracking-wide text-gray-900">Selecciona un alumno de la lista</p>
                                             <p className="text-sm text-gray-500 mt-1">para ver sus marcas personales (RMs)</p>
                                         </div>
                                     )}
@@ -1192,7 +1180,7 @@ const DashboardCoach = () => {
                         {activeTab === 'progreso' && (
                             <div className="space-y-6">
                                 <div>
-                                    <h2 className="text-xl font-bold text-gray-900">📈 Progreso de Alumnos</h2>
+                                    <h2 className="text-xl font-bold uppercase tracking-wide text-gray-900">Progreso de Alumnos</h2>
                                     <p className="text-sm text-gray-600 mt-1">Estado actual de RMs y actividad de cada alumno</p>
                                 </div>
                                 {/* ── BUSCADOR del padrón (nombre o correo) ──
@@ -1266,7 +1254,7 @@ const DashboardCoach = () => {
 
                                 <p className="text-xs text-gray-500" data-testid="nota-progreso">
                                     {cargandoProgreso
-                                        ? '⏳ Cargando RMs y niveles de esta página…'
+                                        ? 'Cargando RMs y niveles de esta página…'
                                         : `El buscador y la paginación recorren los ${alumnos.length} alumnos del coach; los RMs y el nivel se piden al abrir cada página (una consulta por alumno).`}
                                 </p>
                                 {/* Vista MOBILE (Parte G): fila compacta ~56px por alumno. En ≥768px se
@@ -1294,7 +1282,6 @@ const DashboardCoach = () => {
                                                                 : alumno.estado === 'iniciando' ? 'bg-orange-500 w-1/3' : 'bg-zinc-500 w-1/6'}`}></div>
                                                         </div>
                                                         <span className={`inline-flex items-center gap-1 text-[10px] font-medium rounded-full border px-1.5 py-0.5 ${getProgresoColor(alumno.estado)}`}>
-                                                            {getProgresoIcon(alumno.estado)}
                                                             {alumno.estado === 'activo' ? 'Progresando' : alumno.estado === 'iniciando' ? 'Iniciando' : 'Sin datos'}
                                                         </span>
                                                     </div>
@@ -1361,7 +1348,6 @@ const DashboardCoach = () => {
                                                         </td>
                                                         <td className="px-6 py-4">
                                                             <span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full border ${getProgresoColor(alumno.estado)}`}>
-                                                                {getProgresoIcon(alumno.estado)}
                                                                 {alumno.estado === 'activo' ? 'Progresando' : alumno.estado === 'iniciando' ? 'Iniciando' : 'Sin datos'}
                                                             </span>
                                                         </td>
@@ -1406,13 +1392,13 @@ const DashboardCoach = () => {
                                             onClick={() => irAPaginaProgreso(-1)}
                                             disabled={paginaProgreso <= 1}
                                             className="px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:border-zinc-600 disabled:opacity-40 disabled:cursor-not-allowed">
-                                            ◀ Anterior
+                                            Anterior
                                         </button>
                                         <button type="button" data-testid="progreso-siguiente"
                                             onClick={() => irAPaginaProgreso(1)}
                                             disabled={paginaProgreso >= rangoProgreso.totalPaginas}
                                             className="px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:border-zinc-600 disabled:opacity-40 disabled:cursor-not-allowed">
-                                            Siguiente ▶
+                                            Siguiente
                                         </button>
                                     </div>
                                 </div>
@@ -1423,7 +1409,7 @@ const DashboardCoach = () => {
                         {activeTab === 'riesgo' && (
                             <div className="space-y-4">
                                 <div>
-                                    <h2 className="text-xl font-bold text-gray-900">⚠️ Alumnos en Riesgo de Abandono</h2>
+                                    <h2 className="text-xl font-bold uppercase tracking-wide text-red-700">Alumnos en Riesgo de Abandono</h2>
                                     <p className="text-gray-600 mt-1">Alumnos sin actividad en más de 7 días — requieren contacto</p>
                                 </div>
                                 {alumnosEnRiesgo.length > 0 ? (
@@ -1434,15 +1420,15 @@ const DashboardCoach = () => {
                                                     <div>
                                                         <p className="font-bold text-gray-900">{alumno.nombre}</p>
                                                         <p className="text-sm text-gray-600 mt-1">
-                                                            🕐 {alumno.tiene_historial === false
+                                                            {alumno.tiene_historial === false
                                                                 ? <span className="font-semibold text-red-500">Sin actividad registrada</span>
                                                                 : <>Sin entrenar: <span className="font-semibold text-red-500">{alumno.dias_ausente} días</span></>}
                                                         </p>
                                                         <p className="text-xs text-gray-500 mt-1">Última asistencia: {alumno.ultima_asistencia || 'Nunca'}</p>
-                                                        {alumno.correo && <p className="text-xs text-gray-500">📧 {alumno.correo}</p>}
-                                                        {alumno.telefono && <p className="text-xs text-gray-500">📱 {alumno.telefono}</p>}
+                                                        {alumno.correo && <p className="text-xs text-gray-500"><span className="font-semibold uppercase tracking-wide">Correo</span> {alumno.correo}</p>}
+                                                        {alumno.telefono && <p className="text-xs text-gray-500"><span className="font-semibold uppercase tracking-wide">Teléfono</span> {alumno.telefono}</p>}
                                                     </div>
-                                                    <span className="text-2xl">⚠️</span>
+                                                    <span className="shrink-0 rounded bg-red-600 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-white">Riesgo</span>
                                                 </div>
                                                 {msgContacto?.id === alumno.id && (
                                                     <div className={`mt-3 px-3 py-2 rounded text-sm font-medium ${msgContacto.tipo === 'exito' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`} data-testid="contacto-msg">
@@ -1471,8 +1457,7 @@ const DashboardCoach = () => {
                                     </div>
                                 ) : (
                                     <div className="text-center py-12 bg-green-50 rounded-lg border border-green-200">
-                                        <p className="text-5xl mb-4">🎉</p>
-                                        <p className="text-xl font-bold text-green-700">¡Excelente! Ningún alumno está en riesgo</p>
+                                        <p className="text-xl font-black uppercase tracking-wide text-green-700">¡Excelente! Ningún alumno está en riesgo</p>
                                         <p className="text-sm text-green-600 mt-2">No hay alumnos en riesgo de abandono</p>
                                     </div>
                                 )}
@@ -1529,7 +1514,7 @@ const DashboardCoach = () => {
                             // Portado: editar un WOD publicado YA NO sale del panel — el mismo
                             // ModalPublicarWod se abre precargado con ese WOD y guarda con
                             // `PUT /wods/{id}`. (Antes era la única puerta a Gestión de Clases.)
-                            etiqueta: '✏️ Editar WOD',
+                            etiqueta: 'Editar WOD',
                             onClick: () => {
                                 const c = wodDetalle.clase;
                                 const w = wodDetalle.wod;
@@ -1573,11 +1558,11 @@ const DashboardCoach = () => {
                         onPublicado={(datos) => {
                             cerrarModalWod();
                             setMsgPublicado(datos.origen === 'archivo'
-                                ? `✅ Semana programada: ${datos.dias} día(s) en ${datos.clases} clase(s)`
+                                ? `Semana programada: ${datos.dias} día(s) en ${datos.clases} clase(s)`
                                   + (datos.avisos ? ` y ${datos.avisos} aviso(s) con fecha.` : '.')
                                 : datos.origen === 'edicion'
-                                    ? '✅ WOD actualizado en todas las clases que lo llevan.'
-                                    : `✅ WOD publicado en ${datos.clases} clase(s)`
+                                    ? 'WOD actualizado en todas las clases que lo llevan.'
+                                    : `WOD publicado en ${datos.clases} clase(s)`
                                       + (datos.aviso ? ' y aviso de hoy publicado.' : '.'));
                         }}
                     />
@@ -1590,7 +1575,7 @@ const DashboardCoach = () => {
                         isOpen={modalAviso}
                         onClose={() => setModalAviso(false)}
                         onSuccess={() => setMsgPublicado(
-                            '✅ Aviso rápido publicado: ya aparece en el Inicio de los alumnos.')}
+                            'Aviso rápido publicado: ya aparece en el Inicio de los alumnos.')}
                     />
                 )}
 

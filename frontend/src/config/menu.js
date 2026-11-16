@@ -11,16 +11,16 @@
 
 // Sub-pestañas del Dashboard del coach (dentro de /coach/dashboard?tab=...).
 export const COACH_SUBTABS = [
-    { key: 'resumen', label: '📊 Resumen', path: '/coach/dashboard?tab=resumen' },
-    { key: 'clases', label: '📅 Clases', path: '/coach/dashboard?tab=clases' },
-    { key: 'alumnos', label: '👥 Alumnos & RMs', path: '/coach/dashboard?tab=alumnos' },
-    { key: 'asistencia', label: '📋 Asistencia', path: '/coach/dashboard?tab=asistencia' },
+    { key: 'resumen', label: 'Resumen', path: '/coach/dashboard?tab=resumen' },
+    { key: 'clases', label: 'Clases', path: '/coach/dashboard?tab=clases' },
+    { key: 'alumnos', label: 'Alumnos & RMs', path: '/coach/dashboard?tab=alumnos' },
+    { key: 'asistencia', label: 'Asistencia', path: '/coach/dashboard?tab=asistencia' },
     // Historial (sólo lectura): el mes entero del mismo día que se marca en 'asistencia'. Va
     // pegado a esa pestaña porque es su "después": primero se marca, después se mira lo que
     // quedó (quién vino, quién no y el detalle de cada bloque).
-    { key: 'historial', label: '🗓️ Historial', path: '/coach/dashboard?tab=historial' },
-    { key: 'progreso', label: '📈 Progreso', path: '/coach/dashboard?tab=progreso' },
-    { key: 'riesgo', label: '⚠️ Riesgo', path: '/coach/dashboard?tab=riesgo' },
+    { key: 'historial', label: 'Historial', path: '/coach/dashboard?tab=historial' },
+    { key: 'progreso', label: 'Progreso', path: '/coach/dashboard?tab=progreso' },
+    { key: 'riesgo', label: 'Riesgo', path: '/coach/dashboard?tab=riesgo' },
 ];
 
 // Menú completo por rol.
@@ -28,7 +28,8 @@ export const MENU_BY_ROL = {
     alumno: [
         { label: 'Inicio', path: '/alumno/dashboard', icon: 'home' },
         { label: 'Planes', path: '/alumno/solicitar-plan', icon: 'settings' },
-        { label: 'Mis Reservas', path: '/alumno/mis-reservas', icon: 'calendar' },
+        { label: 'Agendar Reserva', path: '/alumno/agendar-reserva', icon: 'calendarClock' },
+        { label: 'Historial de Reservas', path: '/alumno/mis-reservas', icon: 'calendar' },
         { label: 'Pizarra de RMs', path: '/alumno/rms', icon: 'dumbbell' },
         { label: 'Evolución', path: '/alumno/evolucion', icon: 'home' },
         { label: 'Performance Hub', path: '/alumno/performance-hub', icon: 'dumbbell' },

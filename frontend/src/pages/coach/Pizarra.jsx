@@ -450,7 +450,7 @@ const Pizarra = () => {
                             ← Anterior
                         </button>
                         <div className="text-center">
-                            <h2 className="text-lg font-bold text-gray-900">📅 {formatRangoSemana(diasSemana)}</h2>
+                            <h2 className="text-lg font-bold uppercase tracking-wide text-gray-900">{formatRangoSemana(diasSemana)}</h2>
                             <p className="text-sm text-gray-500">
                                 {semanaOffset === 0 ? 'Semana actual' : semanaOffset < 0 ? `${Math.abs(semanaOffset)} semana(s) atrás` : `${semanaOffset} semana(s) adelante`}
                             </p>
@@ -493,7 +493,7 @@ const Pizarra = () => {
                                             )}
                                         </div>
                                         {diaSeleccionado && esMismoDia(fechaDate, diaSeleccionado) && (
-                                            <span className="text-sm font-medium text-orange-600">✓ Seleccionado</span>
+                                            <span className="text-xs font-black uppercase tracking-wide text-orange-600">Seleccionado</span>
                                         )}
                                     </div>
 
@@ -523,19 +523,18 @@ const Pizarra = () => {
                     {/* Día y hora seleccionados */}
                     {fechaCalculada && (
                         <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2">
-                            <span className="text-lg">📅</span>
                             <span className="text-sm font-medium text-green-800">
                                 Día y hora seleccionado: <strong>{diaSeleccionado ? formatFecha(diaSeleccionado).full : ''} — {horaSeleccionada}</strong>
                                 {' | '}Fecha real: <strong>{fechaCalculada.fecha}</strong>
                             </span>
-                            <span className="ml-auto text-green-600 text-lg">✅</span>
+                            <span className="ml-auto text-xs font-black uppercase tracking-wide text-green-600">Confirmado</span>
                         </div>
                     )}
                 </div>
 
                 {/* Información del WOD (título, descripción) */}
                 <div className="bg-white rounded-lg shadow p-6 space-y-4">
-                    <h2 className="text-lg font-bold text-gray-900">📝 Información del WOD</h2>
+                    <h2 className="text-lg font-bold uppercase tracking-wide text-gray-900">Información del WOD</h2>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
@@ -579,7 +578,7 @@ const Pizarra = () => {
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                                 >
                                     <option value="">Seleccionar...</option>
-                                    <option value="otro">✏️ Otro (movimiento libre)...</option>
+                                    <option value="otro">Otro (movimiento libre)...</option>
                                     {movimientosDisponibles.map((m) => (
                                         <option key={m.id} value={m.id}>{m.nombre}</option>
                                     ))}
@@ -706,17 +705,17 @@ const Pizarra = () => {
                         >
                             {procesando ? (
                                 <>
-                                    <span className="animate-spin">⏳</span> Procesando...
+                                    Procesando...
                                 </>
                             ) : (
-                                <>⚡ Procesar Texto</>
+                                <>Procesar Texto</>
                             )}
                         </button>
 
                         {erroresParser.length > 0 && (
                             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                                <p className="text-sm font-semibold text-red-500 mb-2">
-                                    ⚠️ {erroresParser.length} error(es):
+                                <p className="text-sm font-bold uppercase tracking-wide text-red-600 mb-2">
+                                    {erroresParser.length} error(es):
                                 </p>
                                 <ul className="list-disc list-inside space-y-1">
                                     {erroresParser.map((err, idx) => (
@@ -730,7 +729,7 @@ const Pizarra = () => {
                         )}
 
                         <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                            <p className="text-xs font-semibold text-gray-700 mb-2">📖 Formato aceptado:</p>
+                            <p className="text-xs font-bold uppercase tracking-wide text-gray-700 mb-2">Formato aceptado:</p>
                             <div className="space-y-1 text-xs text-gray-600 font-mono">
                                 <p><span className="text-green-600">✓</span> Clean <b>5x3</b></p>
                                 <p><span className="text-green-600">✓</span> Push Press <b>3x5 @ 80%</b></p>
@@ -762,10 +761,10 @@ const Pizarra = () => {
                                     <div className="flex-1">
                                         <span className="font-medium text-gray-900">{idx + 1}. {m.nombre}</span>
                                         <div className="text-sm text-gray-600 mt-1 space-x-3">
-                                            {m.series && <span>🔢 {m.series} series</span>}
-                                            {m.repeticiones && <span>🔁 {m.repeticiones} reps</span>}
-                                            {m.peso && <span>🏋️ {m.peso} kg</span>}
-                                            {m.tiempo && <span>⏱️ {m.tiempo}</span>}
+                                            {m.series && <span>{m.series} series</span>}
+                                            {m.repeticiones && <span>{m.repeticiones} reps</span>}
+                                            {m.peso && <span>{m.peso} kg</span>}
+                                            {m.tiempo && <span>{m.tiempo}</span>}
                                             {m.notas && <span className="italic">({m.notas})</span>}
                                         </div>
                                     </div>

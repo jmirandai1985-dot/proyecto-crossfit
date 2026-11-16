@@ -890,6 +890,8 @@ def entregar_pedido_con_codigo(
         pedido_id=pedido.id,
         alumno_nombre=alumno.nombre if alumno else None,
         producto_nombre=nombre_producto,
+        # Snapshot de la talla al comprar (083). None en productos sin variantes.
+        talla=pedido.talla,
         cantidad=pedido.cantidad,
         entregado_en=pedido.entregado_en,
         codigo=pedido.codigo_retiro,

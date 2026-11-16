@@ -19,6 +19,20 @@ const fechaDiaDe = (iso) => {
 };
 
 /**
+ * Bloques 3: normaliza la lista de bloques antes de mandarla al backend.
+ * Descarta filas totalmente vacías y renumera `orden` 1..N. "Otro" viaja como
+ * texto libre igual que `wods.tipo_metcon`.
+ */
+const normalizarBloques = (lista) => (lista || [])
+    .map((b, i) => ({
+        orden: i + 1,
+        titulo: (b.titulo || '').trim() || null,
+        tipo_metcon: b.tipo_metcon || null,
+        descripcion: (b.descripcion || '').trim() || null,
+    }))
+    .filter((b) => b.titulo || b.descripcion);
+
+/**
  * Modal "Publicar WOD" del panel del coach (mockup `#modal-wod`).
  * QUÉ RESUELVE: el coach publica el entrenamiento del día desde su Resumen, con el WOD
  * armado en tres partes (calentamiento, musculación, WOD) y un aviso corto opcional que el
@@ -87,6 +101,15 @@ const ModalPublicarWod = ({
         wod_descripcion: wodEdicion?.wod_principal || '',
         aviso: '',
     });
+    // ── BLOQUE 3: "WOD con bloques" (varios metcons + RM en la misma clase) ──
+    // Lista vacía = WOD simple (comportamiento histórico). En modo edición se
+    // precargan los bloques del WOD; si el coach no los toca NO se reenvían (así
+    // el PUT no borra/recrea las filas y los resultados por bloque sobreviven).
+    const [bloques, setBloques] = useState(() => (wodEdicion?.bloques || []).map((b) => ({
+        titulo: b.titulo || '',
+        tipo_metcon: b.tipo_metcon || 'For Time',
+        descripcion: b.descripcion || '',
+    })));
     const [error, setError] = useState('');
     const [previa, setPrevia] = useState(null);        // { dias, errores, nombre }
     const [enviando, setEnviando] = useState(false);
@@ -98,6 +121,8 @@ const ModalPublicarWod = ({
     const avisoRapido = usePublicarAvisoRapido();
 
     const TIPOS = ['For Time', 'AMRAP', 'EMOM', 'Otro'];
+    // Un bloque puede ser un metcon o un RM final (peso en kg).
+    const TIPOS_BLOQUE = ['For Time', 'AMRAP', 'EMOM', 'RM', 'Otro'];
     // Sin clase (carga masiva del Excel) la semana es la de HOY: el archivo trae sus fechas.
     const fechaClase = clase?.fecha ? String(clase.fecha).split('T')[0] : hoyChileStr();
     const hora = (clase?.hora_inicio || '').slice(0, 5);
@@ -169,6 +194,29 @@ const ModalPublicarWod = ({
 
     const setCampo = (campo) => (e) => setForm((prev) => ({ ...prev, [campo]: e.target.value }));
 
+    // ── Bloque 3: normalización de los bloques ──────────────────────────────
+    // (la función vive arriba del componente: no depende del estado)
+    const bloquesNormalizados = useMemo(
+        () => normalizarBloques(bloques), [bloques]);
+    // Copia normalizada de los bloques que YA tenía el WOD en edición: si son
+    // iguales no se manda la clave, así el PUT no reemplaza las filas (y no
+    // borra por CASCADE los resultados que los alumnos ya cargaron).
+    const bloquesOriginales = useMemo(() => normalizarBloques(
+        [...(wodEdicion?.bloques || [])]
+            .sort((a, b) => (a.orden || 0) - (b.orden || 0)),
+    ), [wodEdicion]);
+    const bloquesCambiaron = JSON.stringify(bloquesNormalizados)
+        !== JSON.stringify(bloquesOriginales);
+
+    const agregarBloque = () => setBloques((prev) => [
+        ...prev, { titulo: '', tipo_metcon: 'For Time', descripcion: '' },
+    ]);
+    const editarBloque = (indice, campo, valor) => setBloques((prev) => prev.map(
+        (b, i) => (i === indice ? { ...b, [campo]: valor } : b),
+    ));
+    const quitarBloque = (indice) => setBloques(
+        (prev) => prev.filter((_, i) => i !== indice));
+
     const publicarManual = async () => {
         setError('');
         if (!form.wod_descripcion.trim()) {
@@ -194,6 +242,9 @@ const ModalPublicarWod = ({
                         estado: wodEdicion.estado || 'publicado',
                         fecha: fechaClase,
                         coach_id: coachId,
+                        // Sólo si el coach cambió los bloques: así un PUT que no los
+                        // toca no reemplaza las filas (ni borra sus resultados).
+                        ...(bloquesCambiaron ? { bloques: bloquesNormalizados } : {}),
                     },
                     params: { disciplina_id: disciplinaEfectiva },
                 });
@@ -225,6 +276,8 @@ const ModalPublicarWod = ({
                     wod_principal: form.wod_descripcion.trim(),
                     tipo_metcon: form.wod_tipo || 'Otro',
                     estado: 'publicado',
+                    // Bloque 3: [] = WOD simple (mismo comportamiento de siempre).
+                    bloques: bloquesNormalizados,
                 })),
             };
             // Horarios elegidos = SÓLO esas clases (`clase_ids`, una por día marcado, que es lo
@@ -331,7 +384,7 @@ const ModalPublicarWod = ({
                 <div className="p-4 border-b border-zinc-800 flex items-start justify-between gap-3">
                     <div>
                         <h3 className="font-bold text-zinc-100">
-                            {esEdicion ? '✏️ Editar WOD' : '📝 Publicar WOD'}
+                            {esEdicion ? 'Editar WOD' : 'Publicar WOD'}
                         </h3>
                         <p className="mt-1 text-[12px] text-zinc-500">
                             {esEdicion
@@ -351,7 +404,7 @@ const ModalPublicarWod = ({
                 <div className="p-4 space-y-4">
                     {error && (
                         <div className="rounded-xl border border-red-700 bg-red-900/30 px-4 py-3 text-sm text-red-200">
-                            ⚠️ {error}
+                            <span className="font-bold uppercase tracking-wide">Error</span> {error}
                         </div>
                     )}
 
@@ -371,7 +424,7 @@ const ModalPublicarWod = ({
                                     ? 'bg-orange-500/15 text-orange-200 ring-1 ring-orange-500/50'
                                     : 'text-zinc-400 hover:text-zinc-200'}`}
                             >
-                                📝 Formulario manual
+                                Formulario manual
                             </button>
                             <button
                                 type="button"
@@ -383,7 +436,7 @@ const ModalPublicarWod = ({
                                     ? 'bg-sky-500/15 text-sky-200 ring-1 ring-sky-500/50'
                                     : 'text-zinc-400 hover:text-zinc-200'}`}
                             >
-                                📄 Cargar Excel
+                                Cargar Excel
                             </button>
                         </div>
                     )}
@@ -395,7 +448,7 @@ const ModalPublicarWod = ({
                             {esEdicion && (
                                 <div className="rounded-xl border border-amber-700/60 bg-amber-900/20 px-4 py-3 text-[11.5px] text-amber-100"
                                     data-testid="aviso-edicion-wod">
-                                    ⚠️ Al guardar se actualiza el WOD que comparten estas clases:
+                                    <span className="font-bold uppercase tracking-wide">Atención</span> Al guardar se actualiza el WOD que comparten estas clases:
                                     no se crea otro ni se cambia su alcance.
                                 </div>
                             )}
@@ -447,6 +500,69 @@ const ModalPublicarWod = ({
                                     placeholder="Ej. 21-15-9 Thrusters / Pull-ups"
                                     data-testid="wod-descripcion" className={CAMPO} />
                             </label>
+
+                            {/* ── BLOQUE 3: bloques del WOD (opcional) ──
+                                Un WOD real puede tener 2 metcons + un RM final. Sin
+                                bloques se comporta EXACTAMENTE como antes (WOD simple). */}
+                            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3" data-testid="wod-bloques">
+                                <div className="flex items-start justify-between gap-2">
+                                    <div>
+                                        <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Bloques del WOD</p>
+                                        <p className="mt-0.5 text-[10.5px] text-zinc-500">
+                                            Opcional: metcons encadenados y/o un RM final. Sin bloques = un único resultado.
+                                        </p>
+                                    </div>
+                                    <button type="button" onClick={agregarBloque}
+                                        data-testid="agregar-bloque"
+                                        className="shrink-0 rounded-lg border border-emerald-600/60 bg-emerald-600/15 px-2.5 py-1.5 text-[11px] font-bold text-emerald-200 hover:bg-emerald-600/25">
+                                        + Agregar bloque
+                                    </button>
+                                </div>
+                                {bloques.length === 0 ? (
+                                    <p className="mt-2 text-[11px] italic text-zinc-600">
+                                        Este WOD no tiene bloques.
+                                    </p>
+                                ) : (
+                                    <div className="mt-2 space-y-2">
+                                        {bloques.map((bloque, indice) => (
+                                            <div key={indice} className="rounded-lg border border-zinc-800 bg-zinc-900 p-2.5"
+                                                data-testid={`bloque-${indice}`}>
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <span className="text-[10.5px] font-black uppercase tracking-wide text-zinc-400">
+                                                        Bloque {indice + 1}
+                                                    </span>
+                                                    <button type="button" onClick={() => quitarBloque(indice)}
+                                                        data-testid={`quitar-bloque-${indice}`}
+                                                        className="rounded px-2 py-0.5 text-[11px] font-semibold text-red-300 hover:bg-red-500/10">
+                                                        Quitar
+                                                    </button>
+                                                </div>
+                                                <input type="text" value={bloque.titulo}
+                                                    onChange={(e) => editarBloque(indice, 'titulo', e.target.value)}
+                                                    maxLength={200} placeholder="Título (ej. Metcon 1, RM Final)"
+                                                    data-testid={`bloque-titulo-${indice}`}
+                                                    className={`${CAMPO} mt-1.5`} />
+                                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                                    {TIPOS_BLOQUE.map((t) => (
+                                                        <button key={t} type="button"
+                                                            onClick={() => editarBloque(indice, 'tipo_metcon', t)}
+                                                            data-testid={`bloque-tipo-${indice}-${t}`}
+                                                            className={tagBtn(bloque.tipo_metcon === t)}>
+                                                            {t}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                                <textarea rows={2} value={bloque.descripcion}
+                                                    onChange={(e) => editarBloque(indice, 'descripcion', e.target.value)}
+                                                    maxLength={2000}
+                                                    placeholder="Detalle del bloque (ej. 21-15-9 Thrusters / Pull-ups)"
+                                                    data-testid={`bloque-descripcion-${indice}`}
+                                                    className={`${CAMPO} mt-1.5`} />
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
 
                             {/* ── BLOQUE 1: días + horarios (lo que antes era "Aplicar a") ──
                                 En modo EDICIÓN no se muestran: el PUT actualiza el WOD que ya
@@ -536,7 +652,7 @@ const ModalPublicarWod = ({
                                 {planPublicacion.diasSinClase.length > 0 && (
                                     <p className="mt-1 text-[10.5px] text-amber-300"
                                         data-testid="dias-sin-horario">
-                                        ⚠️ {planPublicacion.diasSinClase.join(', ')}: no hay clase a ese
+                                        <span className="font-bold uppercase tracking-wide">Aviso</span> {planPublicacion.diasSinClase.join(', ')}: no hay clase a ese
                                         horario — esos días no se publican.
                                     </p>
                                 )}
@@ -560,7 +676,7 @@ const ModalPublicarWod = ({
                                 className="w-full rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-white hover:bg-orange-600 disabled:opacity-50">
                                 {enviando
                                     ? (esEdicion ? 'Guardando…' : 'Publicando…')
-                                    : (esEdicion ? '💾 Guardar cambios' : 'Publicar')}
+                                    : (esEdicion ? 'Guardar cambios' : 'Publicar')}
                             </button>
                         </>
                     ) : (
@@ -592,7 +708,6 @@ const ModalPublicarWod = ({
                                         data-testid="cargar-archivo-semana"
                                         className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-sky-700/60 bg-sky-950/20 px-4 py-8 text-center transition-colors hover:border-sky-500"
                                     >
-                                        <span className="text-3xl" aria-hidden="true">📄</span>
                                         <span className="text-sm font-bold text-sky-200">Elige el Excel de la semana</span>
                                         <span className="text-[11.5px] text-zinc-400">Archivo .xlsx, una fila por día</span>
                                     </label>
@@ -634,7 +749,7 @@ const ModalPublicarWod = ({
                             )}
                             {previa && (
                             <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5">
-                                <span aria-hidden="true">✅</span>
+                                <span className="text-xs font-black uppercase tracking-wide text-emerald-400">Listo</span>
                                 <span className="text-[11.5px] font-semibold text-sky-300">
                                     {previa.nombre} — {previa.dias?.length ?? 0} días detectados
                                 </span>

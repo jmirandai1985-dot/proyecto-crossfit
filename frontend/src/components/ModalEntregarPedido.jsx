@@ -89,7 +89,7 @@ const ModalEntregarPedido = ({
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full max-h-[90dvh] overflow-y-auto md:max-h-none shadow-2xl"
                 onClick={(e) => e.stopPropagation()}>
                 <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
-                    <h3 className="font-bold text-zinc-100">📦 Entregar pedido</h3>
+                    <h3 className="font-bold text-zinc-100">Entregar pedido</h3>
                     <button type="button" onClick={onCerrar}
                         className="text-zinc-400 hover:text-zinc-200 text-xl font-bold leading-none">
                         ✕
@@ -110,7 +110,7 @@ const ModalEntregarPedido = ({
                                 data-testid="abrir-escaner-retiro"
                                 title="Leer el QR del código de retiro con la cámara"
                                 className="flex-none rounded-xl border border-zinc-700 px-4 py-3 text-sm font-bold text-zinc-200 hover:border-orange-500 hover:text-orange-300 transition-colors">
-                                📷 Escanear
+                                Escanear
                             </button>
                         )}
                         <input
@@ -130,16 +130,18 @@ const ModalEntregarPedido = ({
                     </div>
                     {error && (
                         <div className="rounded-xl border border-red-700 bg-red-900/30 px-4 py-3 text-sm text-red-200">
-                            ⚠️ {error}
+                            <span className="font-bold uppercase tracking-wide">Error</span> {error}
                         </div>
                     )}
 
                     {resultado && (
                         <div className="rounded-xl border border-emerald-700 bg-emerald-900/25 px-4 py-3 text-sm text-emerald-100 space-y-1">
-                            <p className="font-bold">✅ Pedido entregado</p>
+                            <p className="font-bold uppercase tracking-wide">Pedido entregado</p>
                             <p>
                                 <strong>{resultado.producto_nombre
-                                    || `Producto #${resultado.pedido_id}`}</strong>{' '}
+                                    || `Producto #${resultado.pedido_id}`}
+                                    {resultado.talla ? ` (Talla: ${resultado.talla})` : ''}
+                                </strong>{' '}
                                 x{resultado.cantidad} a{' '}
                                 <strong>{resultado.alumno_nombre || 'el alumno'}</strong>
                             </p>

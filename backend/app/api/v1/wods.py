@@ -3,12 +3,13 @@ Router de endpoints para gestión de WODs (Workout of the Day)
 """
 import re
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from app.db.database import get_db
 from app.models.wod import Wod, EstadoWod
 from app.core.dependencies import get_current_user, get_current_coach, verificar_coach_disciplina
 from app.core.estados import no_cancelada   # "reserva viva": la lista compartida con el job
 from app.models.wod_movimiento import WodMovimiento
+from app.models.wod_bloque import WodBloque
 from app.models.movimiento import Movimiento
 from app.models.clase import Clase
 from app.models.asistencia import Asistencia
@@ -684,6 +685,17 @@ def _crear_wod_obj(db: Session, tenant_id: int, wod_data: schemas.WodCreate) -> 
     db.add(nueva_wod)
     db.flush()
 
+    # Bloque 3: los bloques del WOD (0 = WOD simple). Se guardan con el orden
+    # normalizado 1..N para que el panel y "Mis WODs" los pinten en secuencia.
+    for i, bloque in enumerate(wod_data.bloques or [], start=1):
+        db.add(WodBloque(
+            wod_id=nueva_wod.id,
+            orden=bloque.orden or i,
+            titulo=bloque.titulo,
+            tipo_metcon=bloque.tipo_metcon,
+            descripcion=bloque.descripcion,
+        ))
+
     # Procesar movimientos: si viene fases[], aplanar a movimientos[] con campo fase
     if wod_data.fases:
         # Formato con fases agrupadas (del parser)
@@ -782,7 +794,7 @@ def listar_wods(
 ):
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
-    query = db.query(Wod).filter(
+    query = db.query(Wod).options(joinedload(Wod.bloques)).filter(
         Wod.tenant_id == tenant_id, Wod.activo == True)
     if fecha:
         query = query.filter(Wod.fecha == fecha)
@@ -848,7 +860,7 @@ def obtener_wod_hoy(
                 Clase.tenant_id == tenant_id
             ).first()
             if clase_reservada and clase_reservada.wod_id:
-                wod = db.query(Wod).filter(
+                wod = db.query(Wod).options(joinedload(Wod.bloques)).filter(
                     Wod.id == clase_reservada.wod_id,
                     Wod.tenant_id == tenant_id,
                     Wod.activo == True
@@ -858,7 +870,7 @@ def obtener_wod_hoy(
         return None
 
     # Sin alumno_id: comportamiento anterior (primer WOD del día)
-    wod = db.query(Wod).filter(
+    wod = db.query(Wod).options(joinedload(Wod.bloques)).filter(
         Wod.tenant_id == tenant_id,
         Wod.fecha == hoy,
         Wod.activo == True
@@ -986,7 +998,7 @@ def obtener_wod(
 ):
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
-    wod = db.query(Wod).filter(
+    wod = db.query(Wod).options(joinedload(Wod.bloques)).filter(
         Wod.id == wod_id, Wod.tenant_id == tenant_id).first()
     if not wod:
         raise HTTPException(status_code=404, detail="WOD no encontrado")
@@ -1105,6 +1117,20 @@ def actualizar_wod(
                     fase=mov_data.fase or None
                 )
                 db.add(wod_mov)
+
+    # Bloque 3: si el body trae `bloques`, se REEMPLAZAN los del WOD (mismo
+    # criterio que movimientos/fases). None = no se toca; [] = WOD simple.
+    if wod_data.bloques is not None:
+        db.query(WodBloque).filter(WodBloque.wod_id == wod.id).delete(
+            synchronize_session=False)
+        for i, bloque in enumerate(wod_data.bloques, start=1):
+            db.add(WodBloque(
+                wod_id=wod.id,
+                orden=bloque.orden or i,
+                titulo=bloque.titulo,
+                tipo_metcon=bloque.tipo_metcon,
+                descripcion=bloque.descripcion,
+            ))
 
     db.commit()
     db.refresh(wod)

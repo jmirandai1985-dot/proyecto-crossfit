@@ -111,7 +111,7 @@ const AlumnoFichaCoach = ({ alumnoId, coachId, onClose }) => {
 
                     {!cargando && error && (
                         <div className="bg-red-500/10 border-l-4 border-red-500 rounded p-3 text-sm text-red-300">
-                            <p className="font-medium">⚠️ {error}</p>
+                            <p className="font-medium"><span className="font-bold uppercase tracking-wide">Error</span> {error}</p>
                             <button onClick={() => fichaQ.refetch()} className="mt-2 px-3 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">
                                 Reintentar
                             </button>
@@ -254,7 +254,7 @@ const AlumnoFichaCoach = ({ alumnoId, coachId, onClose }) => {
                             </div>
                         ) : errorRms ? (
                             <div className="bg-red-500/10 border-l-4 border-red-500 rounded p-3 text-sm text-red-300">
-                                <p className="font-medium" data-testid="ficha-rms-error">⚠️ {errorRms}</p>
+                                <p className="font-medium" data-testid="ficha-rms-error"><span className="font-bold uppercase tracking-wide">Error</span> {errorRms}</p>
                                 <button onClick={() => rmsQ.refetch()} className="mt-2 px-3 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">
                                     Reintentar
                                 </button>
@@ -287,8 +287,7 @@ const AlumnoFichaCoach = ({ alumnoId, coachId, onClose }) => {
                             </ul>
                         ) : (
                             <div className="text-center py-4" data-testid="ficha-sin-rms">
-                                <p className="text-2xl mb-1">🏋️</p>
-                                <p className="text-zinc-400 text-sm">Sin RMs registrados</p>
+                                <p className="text-sm font-black uppercase tracking-wide text-zinc-300">Sin RMs registrados</p>
                                 <p className="text-xs text-zinc-500 mt-0.5">Este alumno no ha registrado marcas personales</p>
                             </div>
                         )}

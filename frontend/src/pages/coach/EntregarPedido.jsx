@@ -31,7 +31,6 @@ const CoachEntregarPedido = () => {
                     {/* Flecha "Volver" sólo en móvil (<768px): en ≥768px se
                         oculta (md:hidden) y el título queda igual que siempre. */}
                     <BotonVolver fallback="/coach/dashboard" />
-                    <span className="text-3xl">📦</span>
                     <div>
                         <h1 className="text-2xl font-extrabold text-zinc-100">
                             Entregar pedido
@@ -39,7 +38,7 @@ const CoachEntregarPedido = () => {
                         <p className="mt-1 text-sm text-zinc-400">
                             Pídele al alumno su <strong className="text-zinc-200">código de
                             retiro</strong> y escríbelo acá — o tócalo con la cámara en
-                            <strong className="text-zinc-200"> 📷 Escanear</strong>: el sistema
+                            <strong className="text-zinc-200"> Escanear</strong>: el sistema
                             cierra la entrega y el alumno recibe el aviso en su campana.
                         </p>
                     </div>
@@ -51,7 +50,7 @@ const CoachEntregarPedido = () => {
                         onClick={() => setAbierto(true)}
                         className="w-full rounded-xl bg-orange-500 hover:bg-orange-600 px-5 py-3.5 text-sm font-bold text-white transition-colors"
                     >
-                        📦 Abrir pantalla de entrega
+                        Abrir pantalla de entrega
                     </button>
                 )}
 
@@ -60,7 +59,9 @@ const CoachEntregarPedido = () => {
                         <p className="font-bold">Última entrega</p>
                         <p className="mt-1">
                             <strong>{ultima.producto_nombre
-                                || `Producto #${ultima.pedido_id}`}</strong>{' '}
+                                || `Producto #${ultima.pedido_id}`}
+                                {ultima.talla ? ` (Talla: ${ultima.talla})` : ''}
+                            </strong>{' '}
                             x{ultima.cantidad} a{' '}
                             <strong>{ultima.alumno_nombre || 'el alumno'}</strong>
                         </p>

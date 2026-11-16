@@ -77,6 +77,8 @@ const CoachEntregarPedido = lazy(() => import('./pages/coach/EntregarPedido'));
 const CoachAlumnosPrueba = lazy(() => import('./pages/coach/AlumnosPrueba'));
 // · Familia ALUMNO
 const AlumnoDashboard = lazy(() => import('./pages/alumno/Dashboard'));
+// Bloque 2: pestaña propia para TOMAR una clase nueva (grilla compartida con el Inicio).
+const AlumnoAgendarReserva = lazy(() => import('./pages/alumno/AgendarReserva'));
 const AlumnoMisReservas = lazy(() => import('./pages/alumno/MisReservas'));
 const AlumnoPizarraRMs = lazy(() => import('./pages/alumno/PizarraRMs'));
 const AlumnoAjustes = lazy(() => import('./pages/alumno/Ajustes'));
@@ -217,6 +219,7 @@ function App() {
           {/* ── Rutas de Alumno ─────────────────────────────────── */}
           <Route path="/alumno/*" element={<ProtectedRoute roles={ROLES_ALUMNO} />}>
             <Route path="dashboard" element={<AlumnoDashboard />} />
+            <Route path="agendar-reserva" element={<AlumnoAgendarReserva />} />
             <Route path="mis-reservas" element={<AlumnoMisReservas />} />
             <Route path="rms" element={<AlumnoPizarraRMs />} />
             <Route path="ajustes" element={<AlumnoAjustes />} />
