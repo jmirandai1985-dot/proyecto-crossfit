@@ -8,6 +8,17 @@ import { hoyChileStr, semanaEnCurso } from '../utils/fecha';
 // El corte Mañana/Tarde/Noche de los horarios sale del MISMO util que la pestaña Asistencia
 // (una sola definición de franja en todo el panel).
 import { FRANJAS, franjaDe } from '../utils/franjasAsistencia';
+// Familias de formulario: el admin elige una por disciplina y acá se decide qué
+// componente renderizar. `wod_metcon` sigue siendo el formulario histórico.
+import {
+    TIPO_FORMULARIO_DEFAULT, familiasDesdeWod, familiaDeEtiqueta,
+    mapearFamiliaAWod, normalizarTipoFormulario, validarFamilia,
+} from '../utils/formulariosWod';
+import FormularioFuerza from './wod/FormularioFuerza';
+import FormularioSecuencia from './wod/FormularioSecuencia';
+import FormularioRoundsTecnica from './wod/FormularioRoundsTecnica';
+import FormularioIntervalos from './wod/FormularioIntervalos';
+import FormularioLibre from './wod/FormularioLibre';
 
 // Días de la semana (0 = domingo, el índice de `Date.getUTCDay()`).
 const DIAS_CORTOS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -129,6 +140,32 @@ const ModalPublicarWod = ({
     // Disciplina del flujo: la de la clase; sin clase, la que el coach elige en el modal.
     const disciplinaEfectiva = clase?.disciplina_id
         ?? (disciplinaSel ? Number(disciplinaSel) : null);
+
+    // ── Familia de formulario de la disciplina ──────────────────────────────
+    // La clase ya trae `disciplina_tipo_formulario` (GET /clases); si no, se
+    // busca la disciplina en el catálogo que recibe el modal. En EDICIÓN manda
+    // el `tipo_metcon` del WOD guardado, para poder precargar su familia aunque
+    // después se haya cambiado la configuración de la disciplina.
+    const disciplinaDeLista = useMemo(() => (disciplinas || []).find(
+        (d) => Number(d.id) === Number(disciplinaEfectiva),
+    ), [disciplinas, disciplinaEfectiva]);
+    const tipoDeLaDisciplina = normalizarTipoFormulario(
+        clase?.disciplina_tipo_formulario || disciplinaDeLista?.tipo_formulario,
+    );
+    const tipoFormulario = esEdicion
+        ? (familiaDeEtiqueta(wodEdicion?.tipo_metcon) || tipoDeLaDisciplina)
+        : tipoDeLaDisciplina;
+    const esMetcon = tipoFormulario === TIPO_FORMULARIO_DEFAULT;
+    // Un borrador por familia: cambiar de disciplina no pierde lo ya escrito.
+    const [datosFamilias, setDatosFamilias] = useState(() => familiasDesdeWod(wodEdicion));
+    const datosFamilia = datosFamilias[tipoFormulario];
+    const setDatosFamilia = (nuevo) => setDatosFamilias(
+        (prev) => ({ ...prev, [tipoFormulario]: nuevo }),
+    );
+    // El Excel semanal es del parser de CrossFit: en las otras familias sólo
+    // tiene sentido el formulario manual.
+    const modoEfectivo = esMetcon ? modo : 'manual';
+
     const lunesDeLaSemana = useMemo(() => semanaEnCurso(fechaClase), [fechaClase]);
     const horaDe = (c) => String(c?.hora_inicio || '').slice(0, 5);
     const fechaDe = (c) => String(c?.fecha || '').slice(0, 10);
@@ -220,16 +257,35 @@ const ModalPublicarWod = ({
     const quitarBloque = (indice) => setBloques(
         (prev) => prev.filter((_, i) => i !== indice));
 
+    // Payload del WOD: el formulario histórico de metcon o el mapeo de la
+    // familia elegida (bloques + resumen en `wod_principal`, sin columnas nuevas).
+    const construirContenidoWod = () => (esMetcon ? {
+        titulo: form.wod_nombre.trim() || null,
+        calentamiento: form.calentamiento.trim() || null,
+        fuerza_habilidad: form.musculacion.trim() || null,
+        wod_principal: form.wod_descripcion.trim(),
+        tipo_metcon: form.wod_tipo || 'Otro',
+        bloques: bloquesNormalizados,
+    } : mapearFamiliaAWod(tipoFormulario, datosFamilia));
+
     const publicarManual = async () => {
         setError('');
-        if (!form.wod_descripcion.trim()) {
-            setError('La descripción del WOD es obligatoria.');
+        const errorContenido = esMetcon
+            ? (form.wod_descripcion.trim() ? '' : 'La descripción del WOD es obligatoria.')
+            : validarFamilia(tipoFormulario, datosFamilia);
+        if (errorContenido) {
+            setError(errorContenido);
             return;
         }
         if (!fechaClase || !disciplinaEfectiva) {
             setError('No se pudo identificar la clase (fecha o disciplina).');
             return;
         }
+        const contenido = construirContenidoWod();
+        const { bloques: bloquesContenido, ...contenidoSinBloques } = contenido;
+        const bloquesContenidoNormalizados = normalizarBloques(bloquesContenido || []);
+        const bloquesContenidoCambiaron = JSON.stringify(bloquesContenidoNormalizados)
+            !== JSON.stringify(bloquesOriginales);
         // ── Modo edición: actualiza el WOD que YA está en la clase (`PUT /wods/{id}`) ──
         if (esEdicion) {
             setEnviando(true);
@@ -237,17 +293,18 @@ const ModalPublicarWod = ({
                 await guardarWod.mutateAsync({
                     wodId: wodEdicion.id,
                     payload: {
-                        titulo: form.wod_nombre.trim() || null,
-                        calentamiento: form.calentamiento.trim() || null,
-                        fuerza_habilidad: form.musculacion.trim() || null,
-                        wod_principal: form.wod_descripcion.trim(),
-                        tipo_metcon: form.wod_tipo || 'Otro',
+                        ...contenidoSinBloques,
                         estado: wodEdicion.estado || 'publicado',
                         fecha: fechaClase,
                         coach_id: coachId,
-                        // Sólo si el coach cambió los bloques: así un PUT que no los
-                        // toca no reemplaza las filas (ni borra sus resultados).
-                        ...(bloquesCambiaron ? { bloques: bloquesNormalizados } : {}),
+                        // En metcon y en las familias nuevas sólo se reemplazan los bloques
+                        // si el coach los cambió: un PUT que no los toca no borra por CASCADE
+                        // los resultados que los alumnos ya cargaron.
+                        ...(esMetcon
+                            ? (bloquesCambiaron ? { bloques: bloquesNormalizados } : {})
+                            : (bloquesContenidoCambiaron
+                                ? { bloques: bloquesContenidoNormalizados }
+                                : {})),
                     },
                     params: { disciplina_id: disciplinaEfectiva },
                 });
@@ -273,14 +330,8 @@ const ModalPublicarWod = ({
             const body = {
                 wods: planPublicacion.fechas.map((fecha) => ({
                     fecha,
-                    titulo: form.wod_nombre.trim() || null,
-                    calentamiento: form.calentamiento.trim() || null,
-                    fuerza_habilidad: form.musculacion.trim() || null,
-                    wod_principal: form.wod_descripcion.trim(),
-                    tipo_metcon: form.wod_tipo || 'Otro',
+                    ...contenido,
                     estado: 'publicado',
-                    // Bloque 3: [] = WOD simple (mismo comportamiento de siempre).
-                    bloques: bloquesNormalizados,
                 })),
             };
             // Horarios elegidos = SÓLO esas clases (`clase_ids`, una por día marcado, que es lo
@@ -387,13 +438,17 @@ const ModalPublicarWod = ({
                 <div className="p-4 border-b border-zinc-800 flex items-start justify-between gap-3">
                     <div>
                         <h3 className="font-bold text-zinc-100">
-                            {esEdicion ? 'Editar WOD' : 'Publicar WOD'}
+                            {esEdicion
+                                ? 'Editar WOD'
+                                : (esMetcon ? 'Publicar WOD' : 'Publicar entrenamiento')}
                         </h3>
                         <p className="mt-1 text-[12px] text-zinc-500">
                             {esEdicion
                                 ? 'Ya está publicado en esta clase: el cambio se ve en TODAS las clases que lo llevan'
                                 : soloArchivo
-                                    ? 'Carga masiva: el Excel de la semana completa'
+                                    ? (esMetcon
+                                        ? 'Carga masiva: el Excel de la semana completa'
+                                        : 'Publica el entrenamiento de la disciplina elegida')
                                     : `${hora} · ${clase?.disciplina_nombre || 'Clase'} · `
                                         + `${clase?.reservas_count ?? clase?.asistentes_confirmados ?? 0} inscritos`}
                         </p>
@@ -413,8 +468,10 @@ const ModalPublicarWod = ({
 
                     {/* ── Pestañas (Parte E): Formulario manual / Cargar Excel ──
                         Reemplazan el link chico "— o completa manualmente —". En modo EDICIÓN no
-                        se muestran: el Excel crea WODs NUEVOS por día, no actualiza el existente. */}
-                    {!esEdicion && (
+                        se muestran: el Excel crea WODs NUEVOS por día, no actualiza el existente.
+                        En familias distintas de `wod_metcon` tampoco: el parser del Excel es de
+                        CrossFit y esas disciplinas se publican con su formulario manual. */}
+                    {!esEdicion && esMetcon && (
                         <div role="tablist" aria-label="Forma de publicar"
                             className="grid grid-cols-2 gap-1.5 rounded-xl border border-zinc-800 bg-zinc-950 p-1.5">
                             <button
@@ -444,7 +501,7 @@ const ModalPublicarWod = ({
                         </div>
                     )}
 
-                    {modo === 'manual' ? (
+                    {modoEfectivo === 'manual' ? (
                         <>
                             {/* El WOD ya está vinculado a su(s) clase(s): el PUT actualiza ese
                                 MISMO WOD. El alcance (días/horarios) sólo aplica al crear. */}
@@ -479,6 +536,8 @@ const ModalPublicarWod = ({
                                 </label>
                             )}
 
+                            {esMetcon ? (
+                            <>
                             {/* Sección "contenido": los campos del WOD en sí, agrupados para que la
                                 jerarquía sea clara (arriba el contenido, abajo el alcance). */}
                             <p className="pt-1 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
@@ -589,6 +648,29 @@ const ModalPublicarWod = ({
                                     </div>
                                 )}
                             </div>
+                            </>
+                            ) : (
+                            <>
+                            <p className="pt-1 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                                Contenido del entrenamiento
+                            </p>
+                            {tipoFormulario === 'fuerza' && (
+                                <FormularioFuerza valor={datosFamilia} onChange={setDatosFamilia} />
+                            )}
+                            {tipoFormulario === 'secuencia' && (
+                                <FormularioSecuencia valor={datosFamilia} onChange={setDatosFamilia} />
+                            )}
+                            {tipoFormulario === 'rounds_tecnica' && (
+                                <FormularioRoundsTecnica valor={datosFamilia} onChange={setDatosFamilia} />
+                            )}
+                            {tipoFormulario === 'intervalos' && (
+                                <FormularioIntervalos valor={datosFamilia} onChange={setDatosFamilia} />
+                            )}
+                            {tipoFormulario === 'libre' && (
+                                <FormularioLibre valor={datosFamilia} onChange={setDatosFamilia} />
+                            )}
+                            </>
+                            )}
 
                             {/* ── BLOQUE 1: días + horarios (lo que antes era "Aplicar a") ──
                                 En modo EDICIÓN no se muestran: el PUT actualiza el WOD que ya

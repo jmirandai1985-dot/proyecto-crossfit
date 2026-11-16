@@ -67,7 +67,7 @@ def resumen_pendientes(
     Es una sola llamada para los badges (pestañas, menú lateral, campana y
     Dashboard): cuatro `COUNT` indexados en el box del token, sin traer filas.
 
-      * `solicitudes` → solicitudes de plan esperando revisión (`pending`);
+      * `solicitudes` → solicitudes de plan CON comprobante esperando revisión (`pending`);
       * `pedidos`     → pedidos del Bazar con comprobante sin validar;
       * `registros`   → alumnos en `pendiente_activacion`;
       * `premios`     → premios de referidos por confirmar (premio ganado):
@@ -77,9 +77,15 @@ def resumen_pendientes(
     """
     tenant_id = current_user["tenant_id"]
 
+    # Parte I (Solicitudes de plan): el badge "Pendientes → Solicitudes" sólo cuenta las
+    # `pending` CON comprobante (transferencia, requiere validación manual). Las `pending`
+    # SIN voucher son pagos ONLINE (Mercado Pago) que se resuelven solos vía webhook o
+    # expiran a las 24 h (`expirar_pendientes`, services/pagos.py) — mismo criterio que
+    # `pedidos` abajo: una intención de pago abandonada no es trabajo del admin.
     solicitudes = db.query(func.count(SolicitudPlan.id)).filter(
         SolicitudPlan.tenant_id == tenant_id,
         SolicitudPlan.estado == "pending",
+        SolicitudPlan.voucher_url.isnot(None),
     ).scalar() or 0
 
     # Parte I: el badge "Pendientes → Pedidos" sólo cuenta los `pendiente` CON comprobante

@@ -348,6 +348,11 @@ def test_grupo_resultado_tolera_sufijos_del_tipo_metcon():
     assert _grupo_resultado("EMOM 10") == "rondas"
     assert _grupo_resultado("for_time (cap 20)") == "tiempo"
     assert _grupo_resultado(None) == "libre"
+    # Familias nuevas (migración 085): cada estructura mide lo que corresponde.
+    assert _grupo_resultado("Fuerza") == "peso"
+    assert _grupo_resultado("Intervalos") == "tiempo"
+    assert _grupo_resultado("Rounds + técnica") == "rondas"
+    assert _grupo_resultado("Secuencia") == "libre"
 
 
 

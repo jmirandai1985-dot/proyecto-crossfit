@@ -2,6 +2,15 @@ import React, { useState } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useDisciplinas, useGuardarDisciplina, useEliminarDisciplina, SIN_DATOS } from '../../hooks/queries';
+import {
+    TIPOS_FORMULARIO, TIPO_FORMULARIO_DEFAULT, etiquetaTipoFormulario,
+} from '../../utils/formulariosWod';
+import DisciplinasMobile from './DisciplinasMobile';
+
+const FORM_VACIO = {
+    nombre: '', requiere_coach: true, es_open_box: false, activo: true,
+    tipo_formulario: TIPO_FORMULARIO_DEFAULT,
+};
 
 const Disciplinas = () => {
     const { tenant_id } = useAuth();
@@ -13,13 +22,23 @@ const Disciplinas = () => {
     const items = data || SIN_DATOS;
     const guardar = useGuardarDisciplina();
     const eliminar = useEliminarDisciplina();
-    const [formData, setFormData] = useState({ nombre: '', requiere_coach: true, es_open_box: false, activo: true });
+    const [formData, setFormData] = useState(FORM_VACIO);
     const [editingId, setEditingId] = useState(null);
     const [showForm, setShowForm] = useState(false);
     const [msgError, setMsgError] = useState('');
 
-    const openNew = () => { setMsgError(''); setEditingId(null); setFormData({ nombre: '', requiere_coach: true, es_open_box: false, activo: true }); setShowForm(true); };
-    const openEdit = (d) => { setEditingId(d.id); setFormData({ nombre: d.nombre, requiere_coach: d.requiere_coach ?? true, es_open_box: d.es_open_box ?? false, activo: d.activo ?? true }); setShowForm(true); };
+    const openNew = () => { setMsgError(''); setEditingId(null); setFormData(FORM_VACIO); setShowForm(true); };
+    const openEdit = (d) => {
+        setEditingId(d.id);
+        setFormData({
+            nombre: d.nombre,
+            requiere_coach: d.requiere_coach ?? true,
+            es_open_box: d.es_open_box ?? false,
+            activo: d.activo ?? true,
+            tipo_formulario: d.tipo_formulario || TIPO_FORMULARIO_DEFAULT,
+        });
+        setShowForm(true);
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -50,7 +69,7 @@ const Disciplinas = () => {
     return (
         <Layout>
             <div className="space-y-6">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div><h1 className="text-3xl font-bold text-zinc-100">Disciplinas</h1><p className="text-zinc-400 mt-1">Administra las disciplinas del box</p></div>
                     <button onClick={openNew} className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium text-sm">+ Nueva Disciplina</button>
                 </div>
@@ -63,11 +82,23 @@ const Disciplinas = () => {
                 )}
 
                 <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
-                    <div className="overflow-x-auto">
+                    {/* Móvil (<768px): las mismas disciplinas como tarjetas.
+                        En escritorio no se monta; la tabla de abajo no cambia. */}
+                    <div className="md:hidden" data-testid="disciplinas-movil">
+                        <DisciplinasMobile
+                            items={items}
+                            onEditar={openEdit}
+                            onEliminar={handleDelete}
+                        />
+                    </div>
+
+                    {/* Escritorio (>=768px): la tabla de siempre. */}
+                    <div className="hidden md:block overflow-x-auto">
                         <table className="w-full">
                             <thead className="bg-blue-900 text-white">
                                 <tr>
                                     <th className="px-6 py-3 text-left text-sm font-medium">Nombre</th>
+                                    <th className="px-6 py-3 text-left text-sm font-medium">Formulario</th>
                                     <th className="px-6 py-3 text-left text-sm font-medium">Coach</th>
                                     <th className="px-6 py-3 text-left text-sm font-medium">Estado</th>
                                     <th className="px-6 py-3 text-left text-sm font-medium">Acciones</th>
@@ -75,10 +106,13 @@ const Disciplinas = () => {
                             </thead>
                             <tbody className="divide-y divide-zinc-800">
                                 {items.length === 0 ? (
-                                    <tr><td colSpan="4" className="px-6 py-8 text-center text-zinc-400">No hay disciplinas</td></tr>
+                                    <tr><td colSpan="5" className="px-6 py-8 text-center text-zinc-400">No hay disciplinas</td></tr>
                                 ) : items.map((d, i) => (
                                     <tr key={d.id} className={i % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
                                         <td className="px-6 py-4 text-sm font-medium text-zinc-100">{d.nombre}</td>
+                                        <td className="px-6 py-4 text-sm text-zinc-300">
+                                            {etiquetaTipoFormulario(d.tipo_formulario)}
+                                        </td>
                                         <td className="px-6 py-4 text-sm">
                                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${d.requiere_coach ? 'bg-blue-500/20 text-blue-300' : 'bg-zinc-800 text-zinc-400'}`}>
                                                 {d.requiere_coach ? '🤼 Requiere coach' : 'Acceso libre'}{d.es_open_box ? ' · 🔓 Open box' : ''}
@@ -107,6 +141,27 @@ const Disciplinas = () => {
                             <form onSubmit={handleSubmit} className="space-y-4">
                                 <div><label className="block text-sm font-medium text-zinc-300 mb-1">Nombre</label>
                                     <input type="text" value={formData.nombre} onChange={e => setFormData({ ...formData, nombre: e.target.value })} required className="w-full border rounded px-3 py-2" /></div>
+                                <div>
+                                    <label className="block text-sm font-medium text-zinc-300 mb-1" htmlFor="tipo_formulario">
+                                        Tipo de formulario
+                                    </label>
+                                    <select
+                                        id="tipo_formulario"
+                                        value={formData.tipo_formulario}
+                                        onChange={e => setFormData({ ...formData, tipo_formulario: e.target.value })}
+                                        data-testid="disciplina-tipo-formulario"
+                                        className="w-full border rounded px-3 py-2 bg-zinc-950 text-zinc-100"
+                                    >
+                                        {TIPOS_FORMULARIO.map((tipo) => (
+                                            <option key={tipo.valor} value={tipo.valor}>
+                                                {tipo.etiqueta}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <p className="mt-1 text-xs text-zinc-500">
+                                        Define qué formulario verá el coach al publicar un entrenamiento de esta disciplina.
+                                    </p>
+                                </div>
                                 <div className="flex items-center gap-2">
                                     <input type="checkbox" checked={formData.requiere_coach} onChange={e => setFormData({ ...formData, requiere_coach: e.target.checked })} id="requiere_coach" />
                                     <label htmlFor="requiere_coach" className="text-sm text-zinc-300">🤼 Requiere Coach</label>

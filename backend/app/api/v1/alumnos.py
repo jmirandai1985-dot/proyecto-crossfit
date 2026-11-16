@@ -632,10 +632,11 @@ def rechazar_alumno(
 # ─── Mis WODs (Performance Hub): resultado REAL vs. lo prescrito ───
 # El alumno registra cómo le fue en un WOD al que asistió de verdad. La prescripción
 # vive en `wods` y el resultado en `wod_resultados` (un registro por alumno y WOD).
-TIPOS_WOD_POR_TIEMPO = frozenset({"FOR TIME", "FORTIME", "RFT"})
+TIPOS_WOD_POR_TIEMPO = frozenset({"FOR TIME", "FORTIME", "RFT", "INTERVALOS"})
 TIPOS_WOD_POR_RONDAS = frozenset({"AMRAP", "EMOM"})
 # Bloque 3: un bloque de RM se registra con PESO (kg), no con tiempo/rondas.
-TIPOS_BLOQUE_RM = frozenset({"RM", "1RM", "PR", "1 PR"})
+# Las familias nuevas de la migración 085: Fuerza también se mide en kg.
+TIPOS_BLOQUE_RM = frozenset({"RM", "1RM", "PR", "1 PR", "FUERZA"})
 
 
 class RegistrarResultadoWod(BaseModel):
@@ -673,7 +674,7 @@ def _grupo_resultado(tipo_metcon) -> str:
     tipo = _tipo_metcon_normalizado(tipo_metcon)
     if tipo in TIPOS_WOD_POR_TIEMPO or tipo.startswith("FOR TIME"):
         return "tiempo"
-    if tipo in TIPOS_WOD_POR_RONDAS or tipo.startswith(("AMRAP", "EMOM")):
+    if tipo in TIPOS_WOD_POR_RONDAS or tipo.startswith(("AMRAP", "EMOM", "ROUNDS")):
         return "rondas"
     # "RM", "RM Final", "1RM", "PR"…: el resultado del bloque es un peso en kg.
     if tipo in TIPOS_BLOQUE_RM or tipo.startswith(("RM ", "1RM ", "PR ")):

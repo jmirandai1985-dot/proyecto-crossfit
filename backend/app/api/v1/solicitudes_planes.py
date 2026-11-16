@@ -226,10 +226,21 @@ def solicitar_plan(
 @router.get("/pendientes")
 def listar_solicitudes_pendientes(
     tenant_id: Optional[int] = None,
+    solo_con_voucher: bool = False,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Lista solicitudes pendientes para el admin (solo admin, tenant del token)."""
+    """Lista solicitudes pendientes para el admin (solo admin, tenant del token).
+
+    `solo_con_voucher=True` es el filtro de la cola "Pendientes → Solicitudes" del admin:
+    sólo trae las `pending` que TIENEN comprobante (transferencia, requieren validación
+    manual). Las `pending` SIN voucher son pagos ONLINE (Mercado Pago) que se resuelven
+    solos vía webhook o expiran a las 24 h (`expirar_pendientes`, services/pagos.py): no
+    requieren acción del admin y no deben listarse en esa cola. Sin el flag se devuelve
+    TODO, por compatibilidad con los consumidores que necesitan ver también la intención
+    de pago online (p. ej. la pestaña "Solicitudes" del admin, que la explica con su
+    badge del estado real del pago).
+    """
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
     # ── Sin N+1 (era N+N): plan y alumno vienen en la MISMA consulta ────────
@@ -238,7 +249,7 @@ def listar_solicitudes_pendientes(
     # AHORA: 1 SELECT con LEFT JOIN a `planes` y `usuarios` por `id` — el mismo
     # criterio de antes (el nombre se resolvía por id, sin filtro de tenant), así
     # que una solicitud huérfana sigue mostrando "Desconocido" en vez de romper.
-    filas = db.query(
+    query = db.query(
         SolicitudPlan, Plan.nombre, Plan.precio_clp, Usuario.nombre,
         Usuario.correo, Pago.estado, Pago.external_reference, Pago.pagado_en,
     ).outerjoin(
@@ -250,7 +261,15 @@ def listar_solicitudes_pendientes(
     ).filter(
         SolicitudPlan.tenant_id == tenant_id,
         SolicitudPlan.estado == "pending"
-    ).order_by(SolicitudPlan.created_at.desc()).all()
+    )
+
+    # Las solicitudes de pago online nacen SIN voucher (se crean antes de redirigir a
+    # Mercado Pago): no son un comprobante que el admin deba revisar. Mismo criterio
+    # que `GET /pedidos?solo_con_voucher=true` (Parte I de Pedidos).
+    if solo_con_voucher:
+        query = query.filter(SolicitudPlan.voucher_url.isnot(None))
+
+    filas = query.order_by(SolicitudPlan.created_at.desc()).all()
 
     results = []
     for (s, plan_nombre, plan_precio_clp, alumno_nombre, alumno_correo,

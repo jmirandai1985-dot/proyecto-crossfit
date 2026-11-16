@@ -192,6 +192,7 @@ def listar_clases(
                c.cupo_maximo, c.cupo_original, c.asistentes_confirmados, c.cancelada,
                c.horario_base_id, c.tenant_id, c.created_at, c.updated_at,
                d.nombre AS disciplina_nombre,
+               d.tipo_formulario AS disciplina_tipo_formulario,
                u.nombre AS coach_nombre,
                -- B2: quién y cómo se asignó el coach (✅ coach / 🟦 admin)
                c.asignacion_origen, c.asignada_por, c.asignada_en,
@@ -273,6 +274,7 @@ def listar_clases(
             "asistentes_confirmados": row.asistentes_confirmados,
             "cancelada": row.cancelada,
             "disciplina_nombre": row.disciplina_nombre,
+            "disciplina_tipo_formulario": row.disciplina_tipo_formulario,
             "coach_nombre": coach_nombre,
             "cobertura_emergencia": bool(row.cobertura_emergencia),
             # B2: cómo se asignó el coach (marca ✅/🟦 de Supervisión) + si el

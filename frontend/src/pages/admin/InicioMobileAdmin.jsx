@@ -283,8 +283,10 @@ const InicioMobileAdmin = () => {
             api.get('/api/v1/reportes/', { params: { tenant_id } }),
             // Vencen en los próximos 5 días: el endpoint que ya usa Fidelización.
             api.get(`/api/v1/fidelizacion/tenant/${tenant_id}/vencimientos`),
-            // Vouchers por aprobar: el MISMO listado de "Pendientes".
-            api.get('/api/v1/solicitudes/pendientes'),
+            // Solicitudes de plan CON COMPROBANTE (transferencia): esperan validación
+            // manual y son parte de "En revisión". Las de pago ONLINE (sin voucher) se
+            // resuelven solas (webhook / expiran a las 24 h) y no entran acá.
+            api.get('/api/v1/solicitudes/pendientes', { params: { solo_con_voucher: true } }),
             // Caja del día (endpoint aditivo: suma la tabla de los KPIs).
             api.get('/api/v1/finanzas/resumen-hoy'),
             // Pedidos validados sin retirar: el indicador del Bazar (y su pantalla).

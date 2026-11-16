@@ -20,6 +20,10 @@ const GRUPO_POR_TIPO = {
     RM: 'peso',
     '1RM': 'peso',
     PR: 'peso',
+    // Familias de formulario (migración 085): el bloque de fuerza se mide en kg
+    // y el de intervalos en tiempo. Rounds se reconoce por prefijo más abajo.
+    FUERZA: 'peso',
+    INTERVALOS: 'tiempo',
 };
 
 function grupoResultado(tipo) {
@@ -31,7 +35,8 @@ function grupoResultado(tipo) {
         return 'tiempo';
     }
     if (GRUPO_POR_TIPO[normalizado] === 'rondas'
-        || normalizado.startsWith('AMRAP') || normalizado.startsWith('EMOM')) {
+        || normalizado.startsWith('AMRAP') || normalizado.startsWith('EMOM')
+        || normalizado.startsWith('ROUNDS')) {
         return 'rondas';
     }
     // "RM", "RM Final", "1RM", "PR"…: el resultado del bloque es un peso en kg.

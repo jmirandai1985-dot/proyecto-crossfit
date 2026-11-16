@@ -70,6 +70,9 @@ class ClaseListItem(BaseModel):
     cancelada: bool
     coach_nombre: Optional[str] = None
     disciplina_nombre: Optional[str] = None
+    # Familia de formulario de la disciplina (migración 085): el ModalPublicarWod
+    # la usa para decidir qué formulario mostrar sin pedir la disciplina aparte.
+    disciplina_tipo_formulario: Optional[str] = None
     # ⚠️ Cobertura de emergencia: la query ya la calculaba, pero al no estar
     # declarada el response_model la BORRABA de la respuesta (el indicador del
     # panel nunca aparecía). Declarada acá, viaja de verdad.

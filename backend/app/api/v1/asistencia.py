@@ -176,10 +176,12 @@ def clases_hoy(
 
     disc_ids_set = {c.disciplina_id for c in clases if c.disciplina_id}
     disc_map, disc_req = {}, {}
+    disc_tipo = {}
     if disc_ids_set:
         for d in db.query(Disciplina).filter(Disciplina.id.in_(disc_ids_set)).all():
             disc_map[d.id] = d.nombre
             disc_req[d.id] = bool(d.requiere_coach)
+            disc_tipo[d.id] = d.tipo_formulario
 
     # Nombre del coach de cada clase (None = "sin coach asignado": lo pinta el frontend).
     coach_ids = {c.coach_id for c in clases if c.coach_id}
@@ -200,6 +202,7 @@ def clases_hoy(
             "hora_fin": str(c.hora_fin),
             "disciplina_id": c.disciplina_id,
             "disciplina_nombre": disc_map.get(c.disciplina_id, "Clase"),
+            "disciplina_tipo_formulario": disc_tipo.get(c.disciplina_id),
             "requiere_coach": disc_req.get(c.disciplina_id, False),
             "coach": coach_map.get(c.coach_id) if c.coach_id else None,
             "cupo_maximo": c.cupo_maximo,
@@ -293,9 +296,11 @@ def historial_mes(
 
     disc_ids = {c.disciplina_id for c in clases if c.disciplina_id}
     disc_map = {}
+    disc_tipo = {}
     if disc_ids:
-        disc_map = {d.id: d.nombre for d in db.query(Disciplina).filter(
-            Disciplina.id.in_(disc_ids)).all()}
+        for d in db.query(Disciplina).filter(Disciplina.id.in_(disc_ids)).all():
+            disc_map[d.id] = d.nombre
+            disc_tipo[d.id] = d.tipo_formulario
 
     coach_ids = {c.coach_id for c in clases if c.coach_id}
     coach_map = {}
@@ -322,6 +327,7 @@ def historial_mes(
                 "hora_fin": str(c.hora_fin),
                 "disciplina_id": c.disciplina_id,
                 "disciplina_nombre": disc_map.get(c.disciplina_id, "Clase"),
+                "disciplina_tipo_formulario": disc_tipo.get(c.disciplina_id),
                 "coach": coach_map.get(c.coach_id) if c.coach_id else None,
                 "cupo_maximo": c.cupo_maximo,
                 "cupo_original": c.cupo_original,

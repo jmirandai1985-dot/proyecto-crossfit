@@ -1,9 +1,12 @@
 ﻿"""
 Modelo SQLAlchemy para la tabla disciplinas
 """
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Index
+from sqlalchemy import (
+    CheckConstraint, Column, Integer, String, Boolean, ForeignKey, Index,
+)
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 
+from app.core.formularios_wod import TIPO_FORMULARIO_DEFAULT, TIPOS_FORMULARIO
 from app.db.database import Base
 
 
@@ -18,11 +21,24 @@ class Disciplina(Base):
     es_open_box = Column(Boolean, nullable=False, default=False)
     requiere_coach = Column(Boolean, nullable=False, default=True)
     activo = Column(Boolean, nullable=False, default=True)
+    # Familia de formulario con la que se publican los entrenamientos de esta
+    # disciplina (ver `app/core/formularios_wod.py`). Default `wod_metcon` para
+    # no romper las disciplinas históricas tipo CrossFit.
+    tipo_formulario = Column(
+        String(20), nullable=False,
+        server_default=TIPO_FORMULARIO_DEFAULT,
+        default=TIPO_FORMULARIO_DEFAULT,
+    )
     updated_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     __table_args__ = (
         Index('ix_disciplinas_tenant_nombre',
               'tenant_id', 'nombre', unique=True),
+        CheckConstraint(
+            "tipo_formulario IN (" + ", ".join(
+                f"'{tipo}'" for tipo in TIPOS_FORMULARIO) + ")",
+            name='ck_disciplinas_tipo_formulario',
+        ),
     )
 
     def __repr__(self):

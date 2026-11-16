@@ -160,10 +160,12 @@ def box(db, request):
     db.add_all([plan, producto])
     db.flush()
 
-    # Solicitudes: 1 `pending` (+1 `approved`, que ya no es trabajo del admin).
+    # Solicitudes: 1 `pending` CON comprobante (transferencia, SÍ cuenta)
+    # (+1 `approved`, que ya no es trabajo del admin).
+    # Parte I (Solicitudes de plan): la `pending` SIN voucher (pago online) NO cuenta.
     db.add_all([
         SolicitudPlan(tenant_id=tenant, alumno_id=pendiente, plan_id=plan.id,
-                      estado="pending"),
+                      estado="pending", voucher_url="test://voucher.png"),
         SolicitudPlan(tenant_id=tenant, alumno_id=activo, plan_id=plan.id,
                       estado="approved"),
     ])
@@ -260,4 +262,31 @@ def test_d_un_pedido_pendiente_sin_voucher_no_se_cuenta(box):
 
     db.rollback()  # deja el box como estaba (el fixture lo borra al final)
 
+
+# ── E. Parte I (Solicitudes de plan): una `pending` SIN voucher NO suma ─────
+def test_e_una_solicitud_pendiente_sin_voucher_no_se_cuenta(box):
+    """El pago ONLINE (Mercado Pago, sin comprobante) se resuelve solo: no contamina
+    la cola de solicitudes de plan (mismo criterio que `pedidos` en el test D)."""
+    from app.models.solicitud_plan import SolicitudPlan
+
+    db = box["db"]
+    plan_id = db.execute(text(
+        "SELECT id FROM planes WHERE tenant_id = :t LIMIT 1"),
+        {"t": box["tenant_id"]}).scalar()
+    assert plan_id is not None, "el fixture deja un plan en el box temporal"
+    assert resumen_pendientes(db, _contexto(box["tenant_id"]))["solicitudes"] == 1, (
+        "el fixture deja 1 solicitud pending CON voucher")
+
+    # Lo que crea el checkout de Mercado Pago ANTES de redirigir: `pending` SIN voucher.
+    db.add(SolicitudPlan(tenant_id=box["tenant_id"],
+                         alumno_id=box["ids"]["alumno_pendiente"],
+                         plan_id=plan_id, estado="pending",
+                         voucher_url=None, origen_pago="mercadopago"))
+    db.commit()
+
+    resumen = resumen_pendientes(db, _contexto(box["tenant_id"]))
+    assert resumen["solicitudes"] == 1, (
+        "la solicitud SIN voucher (pago online) no requiere acción del admin: no se cuenta")
+
+    db.rollback()  # deja el box como estaba (el fixture lo borra al final)
 

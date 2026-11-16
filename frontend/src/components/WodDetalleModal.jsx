@@ -48,6 +48,8 @@ const WodDetalleModal = ({ wod, clase, loading = false, error = '', onClose, acc
     const hIni = clase?.hora_inicio || wod?.hora_inicio;
     const hFin = clase?.hora_fin || wod?.hora_fin;
     const fases = (wod?.fases || []).filter(f => (f?.movimientos || []).length > 0);
+    const bloques = [...(wod?.bloques || [])]
+        .sort((a, b) => (a.orden || 0) - (b.orden || 0));
     const estado = (wod?.estado || '').toLowerCase();
 
     return (
@@ -126,6 +128,41 @@ const WodDetalleModal = ({ wod, clase, loading = false, error = '', onClose, acc
                                     ? <span className="text-gray-400 italic">Sin WOD principal cargado</span>
                                     : wod.wod_principal}
                             </Seccion>
+
+                            {/* Familias de formulario (fuerza/secuencia/rounds/intervalos):
+                                el detalle estructurado vive en `wod_bloques`. */}
+                            {bloques.length > 0 && (
+                                <div>
+                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                                        Bloques
+                                    </p>
+                                    <div className="space-y-2">
+                                        {bloques.map((bloque, indice) => (
+                                            <div key={bloque.id || indice}
+                                                className="border border-gray-200 rounded-lg p-3">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">
+                                                        Bloque {indice + 1}
+                                                    </span>
+                                                    <span className="text-sm font-bold text-gray-800">
+                                                        {bloque.titulo || `Bloque ${indice + 1}`}
+                                                    </span>
+                                                    {bloque.tipo_metcon && (
+                                                        <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-bold">
+                                                            {bloque.tipo_metcon}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                {!vacio(bloque.descripcion) && (
+                                                    <p className="mt-1 text-sm text-gray-700 whitespace-pre-line">
+                                                        {bloque.descripcion}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
 
                             {fases.length > 0 && (
                                 <div>
