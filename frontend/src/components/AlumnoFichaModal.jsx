@@ -9,10 +9,11 @@ import api from '../services/api';
  *   - alumnoId: ID del alumno a mostrar
  *   - tenantId: ID del tenant (box)
  *   - onClose: callback al cerrar el modal
- *   - onVerHistorial: (opcional) abre el Historial del alumno (`PanelHistorial`), la
- *     MISMA pantalla que ve el alumno. Se ofrece desde Alumnos y desde Fidelización
- *     para que el admin no tenga que salir del flujo en el que está. Sin esta prop no
- *     se dibuja el botón (el modal sigue sirviendo donde no haya historial).
+ *   - onVerHistorial: (opcional) abre la FICHA del alumno en el padrón de Alumnos
+ *     (`/admin/alumnos?alumno_id=<id>`), que ya incluye todas las pestañas del
+ *     historial (`FichaAlumnoTabs`). Se ofrece desde Fidelización para que el
+ *     admin no tenga que salir del flujo en el que está. Sin esta prop no se
+ *     dibuja el botón (el modal sigue sirviendo donde no haya ficha).
  */
 const AlumnoFichaModal = ({ alumnoId, tenantId, onClose, onVerHistorial }) => {
     const [data, setData] = useState(null);
@@ -242,8 +243,8 @@ const AlumnoFichaModal = ({ alumnoId, tenantId, onClose, onVerHistorial }) => {
                 </div>
 
                 {/* Footer. "Ver historial" sólo aparece si el contenedor lo habilita
-                    (Alumnos y Fidelización): abre `PanelHistorial`, la misma pantalla
-                    del alumno, en la pestaña Resumen. */}
+                    (Fidelización): abre la ficha del alumno en el padrón de Alumnos,
+                    que ya trae todas las pestañas del historial. */}
                 <div className="p-4 border-t border-zinc-700 flex justify-between gap-2">
                     {onVerHistorial ? (
                         <button onClick={onVerHistorial} data-testid="ficha-ver-historial"

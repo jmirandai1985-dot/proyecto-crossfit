@@ -138,6 +138,33 @@ def test_h_el_badge_pagado_online_exige_confirmacion_real():
         "el botón Aprobar no puede habilitarse para un pago online"
 
 
+def test_j_la_pantalla_de_retorno_permite_cancelar_un_pago_abierto():
+    """El alumno que VUELVE sin haber pagado tiene que poder cerrar la intención.
+
+    Mercado Pago no genera ningún pago cuando el alumno abandona el checkout, así
+    que no hay webhook: la solicitud queda `pending` y el guard "ya tienes una
+    solicitud pendiente" le impide comprar otra vez. Mientras el pago siga
+    abierto, la pantalla de retorno ofrece "Cancelar".
+    """
+    r = _fuente(RESULTADO)
+    assert "useCancelarPago" in r
+    assert "['pendiente', 'en_proceso'].includes(pago.estado)" in r, \
+        "el botón sólo puede aparecer con el pago todavía abierto"
+    assert 'data-testid="cancelar-pago"' in r
+    assert "navigate(volverA)" in r, \
+        "después de cancelar se vuelve a planes/bazar (el guard ya está libre)"
+    # El hook pega al endpoint nuevo y refresca la cola del admin.
+    q = _fuente(QUERIES)
+    assert "api.post(`/api/v1/pagos/${pagoId}/cancelar`)" in q
+    assert "export function useCancelarPago(pagoId)" in q
+    # Y el backend expone el endpoint con el MISMO contrato.
+    api = _fuente("backend/app/api/v1/pagos.py")
+    assert '@router.post("/{pago_id}/cancelar", response_model=PagoEstadoResponse)' in api
+    assert "pagos.cancelar_pago(db, pago)" in api
+    assert 'ROLES_ADMIN = ("admin", "administrador")' in api, \
+        "cancelar es del dueño o de un admin (el coach no cancela cobros ajenos)"
+
+
 def test_i_el_badge_del_bazar_tambien_exige_confirmacion_real():
     """El Bazar tenía el MISMO bug que Solicitudes: el badge "Pagado online ✓"
     salía por la intención de pagar, no por el cobro confirmado. Mismo fix en la

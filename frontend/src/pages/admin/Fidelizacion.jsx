@@ -152,9 +152,10 @@ const Fidelizacion = () => {
     const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
     const [detalleReco, setDetalleReco] = useState(null);
     const [msg, setMsg] = useState('');
-    // Navegación al Historial del alumno (`/admin/alumnos/:id/historial`): desde la ficha
-    // el admin entra a la MISMA pantalla "Mi historial" que ve el alumno (con la gestión
-    // del box, incluida la pestaña Bazar), reutilizando `PanelHistorial`.
+    // Navegación a la FICHA del alumno: desde el modal se abre el padrón de Alumnos
+    // con el deep-link `?alumno_id=` (el mismo patrón que las notificaciones). La
+    // pantalla aparte `/admin/alumnos/:id/historial` ya no existe: la ficha inline
+    // (`FichaAlumnoTabs`) trae TODAS sus secciones, incluida la gestión del box.
     const navigate = useNavigate();
 
     // (La carga del churn y sus sugerencias la maneja `useChurn`/`useSugerenciasChurn`.)
@@ -748,7 +749,7 @@ const Fidelizacion = () => {
                 <AlumnoFichaModal
                     alumnoId={fichaAlumnoId}
                     tenantId={tenant_id}
-                    onVerHistorial={() => navigate(`/admin/alumnos/${fichaAlumnoId}/historial`)}
+                    onVerHistorial={() => navigate(`/admin/alumnos?alumno_id=${fichaAlumnoId}`)}
                     onClose={() => {
                         setFichaAlumnoId(null);
                         // Limpia el deep-link para no re-abrir la ficha.

@@ -1133,6 +1133,31 @@ export function usePago(pagoId, { refetchIntervalMs = 0 } = {}) {
     });
 }
 
+/**
+ * Cancela un pago ABANDONADO (`POST /pagos/{id}/cancelar`).
+ *
+ * El checkout de Mercado Pago no genera ningún pago si el alumno se devuelve
+ * sin meter la tarjeta, así que no hay webhook que rechace nada: la solicitud
+ * queda `pending` y el guard "ya tienes una solicitud pendiente" le impide
+ * volver a comprar. Este POST la cierra al toque (el backend la marca `rejected`
+ * y el pago `cancelado`; el CAS del servicio responde 409 si ya se cobró).
+ *
+ * Invalida las tres familias que muestran la intención: el detalle del pago (la
+ * pantalla de retorno), la cola de solicitudes del admin y el plan del alumno.
+ */
+export function useCancelarPago(pagoId) {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: () =>
+            api.post(`/api/v1/pagos/${pagoId}/cancelar`).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: claves.pago(pagoId) });
+            qc.invalidateQueries({ queryKey: ['solicitudes'] });
+            qc.invalidateQueries({ queryKey: claves.membresia });
+        },
+    });
+}
+
 // Subir un documento del alumno (comprobante de pago, certificado de estudiante) es una
 // ORDEN, no un dato cacheable: devuelve la URL privada que la solicitud manda después.
 // `privado=1` => el archivo va a la carpeta privada y sólo lo sirve el endpoint

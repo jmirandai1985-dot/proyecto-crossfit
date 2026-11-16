@@ -74,12 +74,9 @@ const Alumnos = () => {
     const [avisoComprobante, setAvisoComprobante] = useState('');
     const [editingAlumno, setEditingAlumno] = useState(null);
     // Ficha unificada inline en la tabla: el id del alumno cuya ficha está abierta
-    // (null = ninguna). La abren el nombre de la fila, "Ver ficha" y el deep-link.
+    // (null = ninguna). La abren el nombre de la fila, "Ver ficha", "Ver historial"
+    // y el deep-link `?alumno_id=`.
     const [alumnoConsultaId, setAlumnoConsultaId] = useState(null);
-    // Alias con el MISMO nombre que usa la ficha en Fidelización (`fichaAlumnoId`): el id
-    // del alumno cuya ficha está abierta. Es el que alimenta el botón "Ver historial
-    // completo" de la ficha inline (`/admin/alumnos/:id/historial`).
-    const fichaAlumnoId = alumnoConsultaId;
     const [searchParams, setSearchParams] = useSearchParams();
     // Navegación interna del panel (p. ej. aprobar un pago en Pendientes).
     const navigate = useNavigate();
@@ -517,13 +514,22 @@ const Alumnos = () => {
                         />
                         {alumnoConsultaId && (
                             <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900">
-                                <FichaAlumnoTabs
-                                    alumnoId={alumnoConsultaId}
-                                    onVerHistorial={() => navigate(`/admin/alumnos/${fichaAlumnoId}/historial`)}
-                                />
+                                <FichaAlumnoTabs alumnoId={alumnoConsultaId} />
                             </div>
                         )}
                     </div>
+
+                    {/* Escritorio: el deep-link `?alumno_id=` puede apuntar a un alumno que
+                        NO está en la página/filtro actual (Fidelización y Convertidos
+                        traen alumnos de todo el padrón). Sin este bloque la ficha no se
+                        vería: en >=768px se monta DENTRO de la fila del alumno. En móvil
+                        ya la pinta el bloque de arriba, así que acá es sólo escritorio. */}
+                    {!cargandoAlumnos && alumnoConsultaId
+                        && !alumnos.some((a) => a.id === alumnoConsultaId) && (
+                        <div className="hidden md:block mb-4 rounded-xl border border-zinc-800 bg-zinc-900">
+                            <FichaAlumnoTabs alumnoId={alumnoConsultaId} />
+                        </div>
+                    )}
 
                     {/* Vista de ESCRITORIO (>=768px): la tabla con la ficha del alumno inline. */}
                     <div className="overflow-x-auto hidden md:block">
@@ -592,12 +598,13 @@ const Alumnos = () => {
                                                 >
                                                     Ver ficha
                                                 </button>
-                                                {/* Historial del alumno (misma pantalla que "Mi historial" del
-                                                    alumno, con todas sus pestañas incluida Bazar). Sin este
-                                                    botón el admin sólo llegaba al historial desde la pestaña
-                                                    Membresías de la ficha (regresión del commit 316f222). */}
+                                                {/* Historial del alumno: abre la MISMA ficha unificada de
+                                                    "Ver ficha" (que ya trae todas las pestañas del
+                                                    historial, incluida Bazar). La pantalla aparte
+                                                    `/admin/alumnos/:id/historial` se eliminó: era un
+                                                    subconjunto de esta ficha. */}
                                                 <button
-                                                    onClick={() => navigate(`/admin/alumnos/${alumno.id}/historial`)}
+                                                    onClick={() => setAlumnoConsultaId(alumno.id)}
                                                     data-testid={`btn-ver-historial-${alumno.id}`}
                                                     className="px-3 py-1 text-sky-400 hover:bg-zinc-800 rounded transition-colors text-xs font-medium"
                                                 >
@@ -621,10 +628,7 @@ const Alumnos = () => {
                                             <tr>
                                                 <td colSpan="8" className="p-0">
                                                     <div className="bg-zinc-950 border-t-2 border-orange-500/40 p-5">
-                                                        <FichaAlumnoTabs
-                                                            alumnoId={alumnoConsultaId}
-                                                            onVerHistorial={() => navigate(`/admin/alumnos/${fichaAlumnoId}/historial`)}
-                                                        />
+                                                        <FichaAlumnoTabs alumnoId={alumnoConsultaId} />
                                                     </div>
                                                 </td>
                                             </tr>

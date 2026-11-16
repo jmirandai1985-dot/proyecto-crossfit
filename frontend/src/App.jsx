@@ -25,7 +25,6 @@ const AdminAlumnos = lazy(() => import('./pages/admin/Alumnos'));
 // Detalle de "Convertidos": mismos números del BI para el mes cerrado, con el
 // listado de alumnos que compraron plan (se abre desde la tarjeta del Dashboard).
 const AdminAlumnosConvertidos = lazy(() => import('./pages/admin/AlumnosConvertidos'));
-const AdminHistorialAlumno = lazy(() => import('./pages/admin/HistorialAlumno'));
 const AdminCoaches = lazy(() => import('./pages/admin/Coaches'));
 const AdminClases = lazy(() => import('./pages/admin/Clases'));
 const AdminBazar = lazy(() => import('./pages/admin/Bazar'));
@@ -164,8 +163,8 @@ function App() {
           <Route path="/admin/*" element={<ProtectedRoute roles={ROLES_ADMIN} />}>
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="alumnos" element={<AdminAlumnos />} />
-            {/* Historial de UN alumno (se entra desde la tabla de Alumnos o desde la ficha). */}
-            <Route path="alumnos/:alumnoId/historial" element={<AdminHistorialAlumno />} />
+            {/* El historial de UN alumno ya no tiene ruta propia: se abre en la ficha
+                unificada del padrón (`/admin/alumnos?alumno_id=<id>`). */}
             <Route path="alumnos-pendientes" element={<AdminAlumnosPendientes />} />
             {/* Pantalla unificada "Pendientes" (Tanda 4). El `?tab=` lo resuelve la
                 propia pantalla; la ruta vieja de arriba redirige acá. */}

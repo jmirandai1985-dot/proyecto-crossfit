@@ -215,9 +215,12 @@ services:
 
   # 5b) Expiración de pagos online no cobrados — migración 067 (Cron horario).
   #     Replica `services/pagos.expirar_pendientes` en SQL (la imagen de cron no
-  #     importa la app): membresía 24 h → solicitud `expirada`; Bazar 30 min →
-  #     pedido `rechazado` + stock devuelto. `DRY_RUN` es fail-closed (exit 2 si
-  #     falta). `DIRECT_URL` (sync:false) se pega en el dashboard.
+  #     importa la app): membresía 30 min → solicitud `expirada`; Bazar 30 min →
+  #     pedido `rechazado` + stock devuelto. OJO: al correr cada hora, el cierre
+  #     efectivo llega hasta ~60 min después de vencer — el camino rápido es el
+  #     botón "Cancelar" de la pantalla de retorno (POST /pagos/{id}/cancelar).
+  #     `DRY_RUN` es fail-closed (exit 2 si falta). `DIRECT_URL` (sync:false) se
+  #     pega en el dashboard.
   - type: cron
     name: box-crossfit-expirar-pendientes
     runtime: docker

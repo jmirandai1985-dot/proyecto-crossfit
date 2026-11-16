@@ -235,7 +235,7 @@ def listar_solicitudes_pendientes(
     `solo_con_voucher=True` es el filtro de la cola "Pendientes → Solicitudes" del admin:
     sólo trae las `pending` que TIENEN comprobante (transferencia, requieren validación
     manual). Las `pending` SIN voucher son pagos ONLINE (Mercado Pago) que se resuelven
-    solos vía webhook o expiran a las 24 h (`expirar_pendientes`, services/pagos.py): no
+    solos vía webhook o expiran a los 30 min (`expirar_pendientes`, services/pagos.py): no
     requieren acción del admin y no deben listarse en esa cola. Sin el flag se devuelve
     TODO, por compatibilidad con los consumidores que necesitan ver también la intención
     de pago online (p. ej. la pestaña "Solicitudes" del admin, que la explica con su

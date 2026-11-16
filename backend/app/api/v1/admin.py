@@ -80,7 +80,7 @@ def resumen_pendientes(
     # Parte I (Solicitudes de plan): el badge "Pendientes → Solicitudes" sólo cuenta las
     # `pending` CON comprobante (transferencia, requiere validación manual). Las `pending`
     # SIN voucher son pagos ONLINE (Mercado Pago) que se resuelven solos vía webhook o
-    # expiran a las 24 h (`expirar_pendientes`, services/pagos.py) — mismo criterio que
+    # expiran a los 30 min (`expirar_pendientes`, services/pagos.py) — mismo criterio que
     # `pedidos` abajo: una intención de pago abandonada no es trabajo del admin.
     solicitudes = db.query(func.count(SolicitudPlan.id)).filter(
         SolicitudPlan.tenant_id == tenant_id,

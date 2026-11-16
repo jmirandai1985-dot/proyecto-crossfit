@@ -3,8 +3,10 @@
 Tests AISLADOS (sin red y sin base de datos): la regla del umbral y los guardas
 de estado, no la consulta real.
 
-  * `pago_vencido` es una función PURA: vence JUSTO en el límite de 24 h (no un
-    minuto después) y no vence antes; un concepto sin expiración nunca vence.
+  * `pago_vencido` es una función PURA: vence JUSTO en el límite de 30 min (no
+    un minuto después) y no vence antes; un concepto sin expiración nunca vence.
+  * Membresía y Bazar comparten el MISMO criterio (minutos): una intención de
+    pago abandonada no puede bloquear al alumno ni reservar stock.
   * `expirar_pendientes` sólo mira pagos abiertos (`pendiente`/`en_proceso`): un
     pago `aprobado` no entra a la lista, así que no expira.
   * La solicitud pasa a `expirada` sólo si seguía `pending`; una ya `rejected`
@@ -44,14 +46,25 @@ def _solicitud(estado="pending", solicitud_id=10):
 
 
 # ── pago_vencido (puro) ───────────────────────────────────────────────────────
-def test_justo_en_el_limite_de_24h_expira():
-    pago = _pago(creado=AHORA - timedelta(hours=24))
+def test_justo_en_el_limite_de_30_minutos_expira():
+    pago = _pago(creado=AHORA - timedelta(minutes=30))
     assert servicio_pagos.pago_vencido(pago, ahora=AHORA) is True
 
 
 def test_antes_del_limite_no_expira():
-    pago = _pago(creado=AHORA - timedelta(hours=23, minutes=59))
+    pago = _pago(creado=AHORA - timedelta(minutes=29))
     assert servicio_pagos.pago_vencido(pago, ahora=AHORA) is False
+
+
+def test_membresia_y_bazar_comparten_el_mismo_umbral():
+    """Una sola decisión de negocio: la membresía NO espera horas. Si alguien
+    vuelve a separar los criterios, este test lo obliga a justificarlo."""
+    assert servicio_pagos.MINUTOS_MEMBRESIA == servicio_pagos.MINUTOS_BAZAR == 30
+    for concepto in ("membresia", "bazar"):
+        vencido = _pago(concepto=concepto, creado=AHORA - timedelta(minutes=30))
+        fresco = _pago(concepto=concepto, creado=AHORA - timedelta(minutes=29))
+        assert servicio_pagos.pago_vencido(vencido, ahora=AHORA) is True, concepto
+        assert servicio_pagos.pago_vencido(fresco, ahora=AHORA) is False, concepto
 
 
 def test_bazar_vence_a_los_30_minutos():
@@ -133,9 +146,9 @@ class _FakeDBExpirar:
         self.rollbacks += 1
 
 
-def test_solicitud_pendiente_pasada_24h_se_marca_expirada(monkeypatch):
+def test_solicitud_pendiente_pasados_30_min_se_marca_expirada(monkeypatch):
     monkeypatch.setattr(servicio_pagos, "ahora_santiago", lambda: AHORA)
-    pago = _pago(creado=AHORA - timedelta(hours=25))
+    pago = _pago(creado=AHORA - timedelta(minutes=31))
     solicitud = _solicitud(estado="pending")
     db = _FakeDBExpirar([pago], solicitud)
 
@@ -144,13 +157,13 @@ def test_solicitud_pendiente_pasada_24h_se_marca_expirada(monkeypatch):
     assert resultado["expirados"] == 1
     assert resultado["solicitudes_expiradas"] == 1
     assert solicitud.estado == "expirada"
-    assert solicitud.comentario_admin == "Expirada: pago online no completado en 24 h"
+    assert solicitud.comentario_admin == "Expirada: pago online no completado en 30 min"
     assert db.pago_valores and db.pago_valores[0].get("estado") == "expirado"
 
 
-def test_antes_de_24h_no_se_toca_nada(monkeypatch):
+def test_antes_de_30_min_no_se_toca_nada(monkeypatch):
     monkeypatch.setattr(servicio_pagos, "ahora_santiago", lambda: AHORA)
-    pago = _pago(creado=AHORA - timedelta(hours=23))
+    pago = _pago(creado=AHORA - timedelta(minutes=29))
     solicitud = _solicitud(estado="pending")
     db = _FakeDBExpirar([pago], solicitud)
 
@@ -163,7 +176,7 @@ def test_antes_de_24h_no_se_toca_nada(monkeypatch):
 
 def test_solicitud_ya_rechazada_no_se_toca(monkeypatch):
     monkeypatch.setattr(servicio_pagos, "ahora_santiago", lambda: AHORA)
-    pago = _pago(creado=AHORA - timedelta(hours=25))
+    pago = _pago(creado=AHORA - timedelta(minutes=31))
     solicitud = _solicitud(estado="rejected")
     db = _FakeDBExpirar([pago], solicitud)
 
@@ -201,4 +214,28 @@ def test_pago_aprobado_sobre_solicitud_expirada_avisa_admins(monkeypatch):
 
     assert avisos and avisos[0][0] == "pago_aprobado_solicitud_rechazada"
     assert "EXPIRADA" in avisos[0][1]
+
+
+# ── La regla está duplicada en el cron SQL: tiene que decir LO MISMO ──────────
+def test_el_cron_sql_replica_los_mismos_umbrales_que_el_servicio():
+    """`maintenance/expirar_pendientes.py` no puede importar la app (imagen de
+    cron mínima), así que repite la regla en SQL. Este test es el candado para
+    que los dos números no se separen (el de antes: 24 h en la app, 30 min en
+    el Bazar)."""
+    fuente = (_BACKEND / "maintenance" / "expirar_pendientes.py").read_text(
+        encoding="utf-8")
+    assert f"MINUTOS_MEMBRESIA = {servicio_pagos.MINUTOS_MEMBRESIA}" in fuente
+    assert f"MINUTOS_BAZAR = {servicio_pagos.MINUTOS_BAZAR}" in fuente
+    # SQL: intervalos en MINUTOS para los dos conceptos (ningún `hours`).
+    assert "interval '{MINUTOS_MEMBRESIA} minutes'" in fuente
+    assert "interval '{MINUTOS_BAZAR} minutes'" in fuente
+    assert "hours" not in fuente
+    # El comentario que ve el admin es el MISMO de la app.
+    assert "COMENTARIO_EXPIRADA = f\"Expirada: pago online no completado en " in fuente
+    assert (servicio_pagos.COMENTARIO_EXPIRADA
+            == "Expirada: pago online no completado en 30 min")
+    # Y el cron es horario: el umbral nuevo se aplica con hasta ~1 h de retraso.
+    render = (_BACKEND.parent / "render.yaml").read_text(encoding="utf-8")
+    assert 'name: box-crossfit-expirar-pendientes' in render
+    assert 'schedule: "0 * * * *"' in render
 

@@ -182,8 +182,8 @@ const AlumnosConvertidos = () => {
                                         <tr
                                             key={`${a.suscripcion_id}-${a.id}`}
                                             className={`${index % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'} cursor-pointer hover:bg-zinc-800`}
-                                            onClick={() => navigate(`/admin/alumnos/${a.id}/historial`)}
-                                            title="Ver el historial del alumno"
+                                            onClick={() => navigate(`/admin/alumnos?alumno_id=${a.id}`)}
+                                            title="Ver la ficha del alumno"
                                         >
                                             <td className="px-6 py-4">
                                                 <p className="text-sm font-semibold text-zinc-100">{a.nombre}</p>

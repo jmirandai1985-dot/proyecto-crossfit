@@ -1,7 +1,7 @@
-import React from 'react';
-import { Link, useParams } from 'react-router-dom';
+import React, { useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { usePago } from '../../hooks/queries';
+import { useCancelarPago, usePago } from '../../hooks/queries';
 
 /**
  * Retorno de Mercado Pago Checkout Pro.
@@ -10,6 +10,12 @@ import { usePago } from '../../hooks/queries';
  * Acá sólo se le pregunta al backend (`GET /pagos/{id}`) hasta que el estado
  * esté resuelto, porque el webhook puede tardar de 1 a 30 segundos. Si el alumno
  * cierra el navegador sin llegar acá, el pago se aplica igual.
+ *
+ * Mientras el pago siga ABIERTO (`pendiente`/`en_proceso`) se ofrece "Cancelar":
+ * el caso del alumno que vuelve sin haber metido la tarjeta, donde Mercado Pago
+ * no generó ningún pago que rechazar (`POST /pagos/{id}/cancelar` cierra la
+ * solicitud y libera el guard "ya tienes una solicitud pendiente"). El que NO
+ * vuelve lo cierra la expiración automática a los 30 min.
  *
  * La URL es `/alumno/pago/resultado/:pagoId`: Mercado Pago agrega sus propios
  * query params (`collection_id`, `status`, ...) y no se leen a propósito —
@@ -56,10 +62,13 @@ const MENSAJES = {
 
 const PagoResultado = () => {
     const { pagoId } = useParams();
+    const navigate = useNavigate();
     // 3 s: el webhook tarda segundos. El hook corta el polling cuando el pago
     // queda resuelto (ver `usePago`).
     const pagoQ = usePago(pagoId, { refetchIntervalMs: 3000 });
     const pago = pagoQ.data;
+    const cancelarM = useCancelarPago(pagoId);
+    const [errorCancelar, setErrorCancelar] = useState('');
 
     const volverA = pago?.concepto === 'bazar'
         ? '/alumno/bazar' : '/alumno/solicitar-plan';
@@ -68,6 +77,24 @@ const PagoResultado = () => {
     const info = pago ? MENSAJES[pago.estado] : null;
     // Aprobado pero el negocio todavía no se aplicó: el webhook está en camino.
     const activando = pago?.estado === 'aprobado' && !pago.aplicado;
+    // Sólo se puede cancelar lo que sigue abierto. Si el webhook lo aprobó
+    // mientras el alumno volvía, el backend responde 409 y NO deshace el cobro.
+    const cancelable = Boolean(
+        pago && ['pendiente', 'en_proceso'].includes(pago.estado));
+
+    const handleCancelar = async () => {
+        setErrorCancelar('');
+        try {
+            await cancelarM.mutateAsync();
+            // El backend ya cerró el pago y la solicitud: al volver a planes el
+            // guard "ya tienes una solicitud pendiente" no bloquea otra compra.
+            navigate(volverA);
+        } catch (err) {
+            setErrorCancelar(
+                err.response?.data?.detail
+                || 'No pudimos cancelar el pago. Intenta de nuevo.');
+        }
+    };
 
     return (
         <Layout>
@@ -122,6 +149,20 @@ const PagoResultado = () => {
                                 className="px-6 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm transition-colors">
                                 Ver mi {pago.concepto === 'bazar' ? 'pedido' : 'plan'}
                             </Link>
+                        )}
+                        {cancelable && (
+                            <button type="button" onClick={handleCancelar}
+                                disabled={cancelarM.isPending}
+                                data-testid="cancelar-pago"
+                                className="px-6 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 disabled:opacity-60 font-bold text-sm transition-colors">
+                                {cancelarM.isPending ? 'Cancelando...' : 'Cancelar pago'}
+                            </button>
+                        )}
+                        {errorCancelar && (
+                            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3"
+                                data-testid="cancelar-pago-error">
+                                {errorCancelar}
+                            </p>
                         )}
                         {pago && ['rechazado', 'cancelado', 'expirado'].includes(pago.estado) && (
                             <Link to={volverA}

@@ -288,8 +288,9 @@ def test_g1_la_tarjeta_y_la_pantalla_usan_los_endpoints_nuevos():
 def test_g2_la_fila_muestra_el_envio_manual_y_lleva_a_la_ficha():
     panel = _fuente("frontend/src/components/PanelAlumnosPrueba.jsx")
     assert "Correo enviado " in panel and "textoHace(a.ultimo_envio)" in panel
-    # Tocar un nombre abre la FICHA del alumno (misma ruta que el buscador).
-    assert "/admin/alumnos/${alumnoId}/historial" in panel
+    # Tocar un nombre abre la FICHA del alumno en Alumnos (deep-link `?alumno_id=`),
+    # la misma que el buscador; la pantalla aparte del historial ya no existe.
+    assert "/admin/alumnos?alumno_id=${alumnoId}" in panel
     # La vista previa se muestra en un iframe sandbox (no editable, sin scripts).
     assert 'sandbox="" srcDoc={correo.preview.html}' in panel
 

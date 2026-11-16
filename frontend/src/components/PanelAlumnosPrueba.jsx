@@ -85,8 +85,10 @@ const PanelAlumnosPrueba = ({
         }
     };
 
-    /** Tocar un nombre lleva a la FICHA del alumno (Historial), igual que el buscador. */
-    const irAFicha = (alumnoId) => navigate(`/admin/alumnos/${alumnoId}/historial`);
+    /** Tocar un nombre abre la FICHA del alumno en Alumnos (mismo deep-link que el
+     *  patrón `?alumno_id=` de esa pantalla: la ficha unificada ya trae todas las
+     *  pestañas del historial). */
+    const irAFicha = (alumnoId) => navigate(`/admin/alumnos?alumno_id=${alumnoId}`);
 
     // Cuántos de los altas del mes YA compraron un plan: el mismo `convertido` que
     // publica `/admin/alumnos-nuevos` y que respalda la tarjeta "Convertidos".

@@ -47,6 +47,29 @@ logger = logging.getLogger(__name__)
 CONCEPTO_MEMBRESIA = "membresia"
 CONCEPTO_BAZAR = "bazar"
 
+# ── Cuándo se cierra un cobro ABANDONADO ─────────────────────────────────────
+# Si el alumno no completa el checkout, Mercado Pago NO genera ningún pago que
+# rechazar: no hay webhook y el backend no se entera. Lo único que queda es
+# cerrar la intención:
+#   • el botón "Cancelar" de la pantalla de retorno (`POST /pagos/{id}/cancelar`)
+#     para el alumno que SÍ vuelve a la app;
+#   • esta expiración automática para el que nunca vuelve.
+# Los dos conceptos usan el MISMO criterio (30 min), porque los dos reservan algo
+# que otro alumno no puede usar: el Bazar descuenta stock y la membresía deja una
+# solicitud `pending` que bloquea el guard "ya tienes una solicitud pendiente".
+# ⚠️ El cron de producción (`render.yaml`, job `box-crossfit-expirar-pendientes`)
+# corre cada HORA: con 30 min de umbral, el cierre efectivo ocurre dentro de la
+# hora siguiente a vencer (hasta ~60 min). El botón Cancelar es el camino rápido.
+MINUTOS_BAZAR = 30
+MINUTOS_MEMBRESIA = 30
+# Comentario que ve el admin cuando la expiración automática cierra la solicitud.
+COMENTARIO_EXPIRADA = f"Expirada: pago online no completado en {MINUTOS_MEMBRESIA} min"
+# Comentario cuando es el PROPIO alumno el que cancela desde la app.
+COMENTARIO_CANCELADO_ALUMNO = "Cancelado por el alumno antes de completar el pago"
+# Estados desde los que un pago todavía se puede cancelar desde la app: si el
+# webhook ya dijo `aprobado`, la plata existe y no se deshace desde acá.
+ESTADOS_PAGO_CANCELABLES = ("pendiente", "en_proceso")
+
 
 class ErrorPago(Exception):
     """Error de negocio del checkout (el endpoint lo traduce a HTTP).
@@ -312,7 +335,7 @@ def _limpiar_cobro_fallido(db: Session, pago: Pago) -> None:
     solicitud `pending` (y no podría ni mandar el voucher) o con el stock del
     Bazar reservado por un cobro imposible.
 
-    Best-effort: si falla, el job de expiración (30 min / 24 h) lo cierra igual.
+    Best-effort: si falla, el job de expiración (30 min) lo cierra igual.
     """
     try:
         if pago.concepto == CONCEPTO_BAZAR:
@@ -751,13 +774,87 @@ def estado_publico(db: Session, pago: Pago) -> dict:
     }
 
 
-def pago_vencido(pago, *, ahora, minutos_bazar: int = 30,
-                 horas_membresia: int = 24) -> bool:
+def cancelar_pago(db: Session, pago: Pago, *,
+                  comentario: str = COMENTARIO_CANCELADO_ALUMNO) -> dict:
+    """Cierra un checkout ABANDONADO por el propio alumno (o el admin).
+
+    El caso que resuelve: el alumno tocó "Pagar con tarjeta", el backend creó la
+    solicitud `pending` + el pago `pendiente`, y volvió a la app SIN meter los
+    datos de la tarjeta. Mercado Pago no generó ningún pago, así que no hay
+    webhook que rechace nada y hay que cerrarlo desde acá: la solicitud sigue
+    viva en "Pendientes > Solicitudes" (badge "Esperando pago") y el guard "ya
+    tienes una solicitud pendiente" le impide generar otra.
+
+    Reglas:
+
+    * **CAS (`UPDATE ... WHERE estado IN (pendiente, en_proceso)`)**: si el
+      webhook aprobó el pago mientras el alumno volvía a la app, el UPDATE no
+      toca ninguna fila y se lanza `ErrorPago` (409). Un cobro confirmado NO se
+      cancela desde acá: se devuelve con un reembolso en Mercado Pago.
+    * **Membresía** → la `SolicitudPlan` asociada pasa a `rejected` (el MISMO
+      valor que usa el rechazo por webhook, ver `_limpiar_cobro_fallido`) y sólo
+      si seguía `pending`: un admin pudo haberla aprobado en paralelo.
+    * **Bazar** → el pedido se rechaza por el camino ya probado
+      (`pedidos_estado.rechazar_pedido`), que devuelve el stock reservado.
+
+    Un medio que se acredita DESPUÉS (efectivo/ticket) puede confirmarse cuando
+    el pago ya está `cancelado`: lo aplica `aplicar_pago` igual y avisa a los
+    admins porque la solicitud quedó `rejected` (ver `_aplicar_beneficio`). Es
+    el mismo camino que un pago aprobado sobre una solicitud expirada.
+
+    Es seguro ante reintentos: la segunda cancelación simultánea responde 409
+    porque el pago ya no está abierto.
+    """
+    cerrado = db.execute(
+        update(Pago)
+        .where(Pago.id == pago.id)
+        .where(Pago.tenant_id == pago.tenant_id)
+        .where(Pago.estado.in_(ESTADOS_PAGO_CANCELABLES))
+        .values(estado="cancelado")
+    )
+    if cerrado.rowcount == 0:
+        # El webhook (o la expiración) ya movió el pago: no hay nada que
+        # cancelar y lo cobrado, si existe, se devuelve por fuera de la app.
+        db.rollback()
+        raise ErrorPago(
+            "Este pago ya no se puede cancelar: Mercado Pago lo confirmó o "
+            "el cobro ya venció. Revisa tu plan o tus pedidos.", 409)
+
+    if pago.concepto == CONCEPTO_MEMBRESIA:
+        db.execute(
+            update(SolicitudPlan)
+            .where(SolicitudPlan.id == pago.referencia_id)
+            .where(SolicitudPlan.tenant_id == pago.tenant_id)
+            .where(SolicitudPlan.estado == "pending")
+            .values(estado="rejected", comentario_admin=comentario)
+        )
+    elif pago.concepto == CONCEPTO_BAZAR:
+        pedido = (
+            db.query(Pedido)
+            .filter(Pedido.id == pago.referencia_id,
+                    Pedido.tenant_id == pago.tenant_id)
+            .with_for_update()
+            .first()
+        )
+        if pedido is not None and pedido.estado == "pendiente":
+            pedidos_estado.rechazar_pedido(
+                db, pedido, comentario,
+                origen=pedidos_estado.ORIGEN_MERCADOPAGO)
+    db.commit()
+    # El UPDATE se hizo por SQL: hay que refrescar el ORM para no seguir
+    # leyendo el estado viejo en memoria (mismo criterio que `aplicar_pago`).
+    db.expire(pago)
+    return {"estado": "cancelado"}
+
+
+def pago_vencido(pago, *, ahora, minutos_bazar: int = MINUTOS_BAZAR,
+                 minutos_membresia: int = MINUTOS_MEMBRESIA) -> bool:
     """True si un pago abierto superó el umbral de expiración de su concepto.
 
     Puro (sin DB): decide por `created_at` contra `ahora`. `None` (fila sin
     fecha) y los conceptos sin expiración definida (emergencia, futuro) nunca
     vencen. `<=` hace que el pago venza JUSTO en el límite (no un minuto después).
+    Los dos conceptos comparten criterio (minutos): ver `MINUTOS_MEMBRESIA`.
     """
     from datetime import timedelta
 
@@ -766,25 +863,28 @@ def pago_vencido(pago, *, ahora, minutos_bazar: int = 30,
     if pago.concepto == CONCEPTO_BAZAR:
         return pago.created_at <= ahora - timedelta(minutes=minutos_bazar)
     if pago.concepto == CONCEPTO_MEMBRESIA:
-        return pago.created_at <= ahora - timedelta(hours=horas_membresia)
+        return pago.created_at <= ahora - timedelta(minutes=minutos_membresia)
     return False
 
 
-def expirar_pendientes(db: Session, *, minutos_bazar: int = 30,
-                       horas_membresia: int = 24) -> dict:
+def expirar_pendientes(db: Session, *, minutos_bazar: int = MINUTOS_BAZAR,
+                       minutos_membresia: int = MINUTOS_MEMBRESIA) -> dict:
     """Cierra los pagos que nunca se cobraron y libera lo que reservaban.
 
     * **Bazar (30 min)**: el stock vuelve por `rechazar_pedido` (el mismo camino
       del rechazo manual). Un pedido `pendiente` con la plata sin llegar es un
       producto bloqueado que otro alumno no puede comprar.
-    * **Membresía (24 h)**: la solicitud pasa a `expirada` con
-      `comentario_admin='Expirada: pago online no completado en 24 h'` para que
-      salga de la cola de pendientes del admin (no se crea basura que nadie va
-      a aprobar). ⚠️ NO se notifica al alumno al expirar (mejora futura: avisar
-      en su campana para que pueda volver a intentar el pago).
+    * **Membresía (30 min)**: la solicitud pasa a `expirada` con
+      `comentario_admin=COMENTARIO_EXPIRADA` para que salga de la cola de
+      pendientes del admin (no se crea basura que nadie va a aprobar). ⚠️ NO se
+      notifica al alumno al expirar (mejora futura: avisar en su campana para
+      que pueda volver a intentar el pago).
 
     Un pago aprobado DESPUÉS de esto no revive nada: lo detecta `aplicar_pago`
-    y avisa a los admins (ver `_aplicar_beneficio`).
+    y avisa a los admins (ver `_aplicar_beneficio`). Eso incluye un medio
+    `ticket` (efectivo), que se acredita días después: la membresía NO excluye
+    ese medio en la preferencia (el Bazar sí, `mp.MEDIOS_EXCLUIDOS_BAZAR`), así
+    que si esos casos empiezan a aparecer, la salida es excluirlo igual.
 
     Lo llama `maintenance/reconciliar_pagos.py` y el cron
     `maintenance/expirar_pendientes.py`; es idempotente.
@@ -797,7 +897,7 @@ def expirar_pendientes(db: Session, *, minutos_bazar: int = 30,
                   "solicitudes_expiradas": 0}
     for pago in abiertos:
         if not pago_vencido(pago, ahora=ahora, minutos_bazar=minutos_bazar,
-                            horas_membresia=horas_membresia):
+                            minutos_membresia=minutos_membresia):
             continue
 
         # CAS: si el webhook lo aprobó mientras recorríamos la lista, no se toca.
@@ -833,7 +933,7 @@ def expirar_pendientes(db: Session, *, minutos_bazar: int = 30,
                 .where(SolicitudPlan.id == pago.referencia_id)
                 .where(SolicitudPlan.estado == "pending")
                 .values(estado="expirada",
-                        comentario_admin="Expirada: pago online no completado en 24 h")
+                        comentario_admin=COMENTARIO_EXPIRADA)
             )
             if cambiadas.rowcount:
                 contadores["solicitudes_expiradas"] += 1

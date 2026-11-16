@@ -7,6 +7,7 @@ Endpoints de pago online (Mercado Pago Checkout Pro).
 | POST | `/pagos/membresia` | alumno con acceso completo | solicitud + pago + `init_point` |
 | POST | `/pagos/bazar` | alumno con acceso completo | pedido (reserva stock) + pago + `init_point` |
 | GET | `/pagos/{id}` | dueño o staff del box | estado del cobro + si ya se aplicó (polling del retorno) |
+| POST | `/pagos/{id}/cancelar` | dueño del pago o admin | cierra el checkout ABANDONADO (`pendiente`/`en_proceso`) |
 | POST | `/pagos/webhook/mercadopago` | NADIE (público, firmado) | el estado real del pago |
 
 El monto SIEMPRE lo calcula el backend; el front sólo recibe `init_point` y
@@ -45,6 +46,10 @@ router = APIRouter()
 
 # Personal del box: puede ver el estado de cualquier pago de su tenant.
 ROLES_STAFF = ("coach", "admin", "administrador")
+# Cancelar es una acción de NEGOCIO (cierra la solicitud y libera el guard del
+# alumno), no una lectura: sólo el dueño del pago o un admin. El coach ve el
+# estado con `GET /pagos/{id}`, pero no cancela cobros ajenos.
+ROLES_ADMIN = ("admin", "administrador")
 
 
 def _no_disponible(error: mp.PagoOnlineNoDisponible) -> HTTPException:
@@ -182,6 +187,47 @@ def estado_pago(
     if rol not in ROLES_STAFF and pago.usuario_id != current_user["usuario_id"]:
         raise HTTPException(
             status_code=403, detail="No puedes ver el pago de otra persona")
+
+    return pagos.estado_publico(db, pago)
+
+
+@router.post("/{pago_id}/cancelar", response_model=PagoEstadoResponse)
+def cancelar_pago(
+    pago_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Cancela un pago ABANDONADO antes de completar el checkout.
+
+    El alumno abandona Mercado Pago (cierra el checkout o se devuelve sin meter
+    la tarjeta): MP no genera ningún pago, así que no hay webhook. La solicitud
+    queda `pending` y el guard "ya tienes una solicitud pendiente" le impide
+    volver a comprar. Este POST la cierra al toque, sin esperar la expiración
+    automática.
+
+    🔒 Sólo el dueño del pago o un ADMIN del mismo box (tenant del token). No
+    basta con ser staff: cerrar una solicitud es una acción de negocio.
+
+    El estado lo decide el CAS del servicio (`pagos.cancelar_pago`): si el
+    webhook ya aprobó el cobro, responde 409 y no toca nada. Se devuelve el
+    estado público del pago para que la pantalla de retorno pueda pintarlo.
+    """
+    tenant_id = current_user["tenant_id"]
+    pago = db.query(Pago).filter(
+        Pago.id == pago_id, Pago.tenant_id == tenant_id).first()
+    if not pago:
+        raise HTTPException(status_code=404, detail="Pago no encontrado")
+
+    rol = current_user.get("rol", "")
+    es_dueno = pago.usuario_id == current_user["usuario_id"]
+    if rol not in ROLES_ADMIN and not es_dueno:
+        raise HTTPException(
+            status_code=403, detail="No puedes cancelar el pago de otra persona")
+
+    try:
+        pagos.cancelar_pago(db, pago)
+    except pagos.ErrorPago as error:
+        raise _error_pago(error)
 
     return pagos.estado_publico(db, pago)
 

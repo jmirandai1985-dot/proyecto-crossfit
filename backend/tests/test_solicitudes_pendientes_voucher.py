@@ -5,8 +5,9 @@ RÉPLICA DE LA PARTE I DE PEDIDOS (commit 656ef8b) para membresías: cuando el a
 toca "Pagar con tarjeta", el backend crea la `SolicitudPlan` en `pending` ANTES de
 redirigir a Mercado Pago (`origen_pago='mercadopago'`, sin voucher). Si el alumno
 abandona el pago, esa solicitud queda huérfana hasta que `expirar_pendientes`
-(backend/app/services/pagos.py) la cierra a las 24 h: NO es un comprobante que el
-admin deba revisar.
+(backend/app/services/pagos.py) la cierra a los 30 min (o hasta que el alumno
+apriete "Cancelar" en la pantalla de retorno, `POST /pagos/{id}/cancelar`): NO
+es un comprobante que el admin deba revisar.
 
 CONTRATO QUE SE PRUEBA ACÁ:
   GET /solicitudes/pendientes?solo_con_voucher=true

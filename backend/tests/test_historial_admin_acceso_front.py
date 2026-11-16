@@ -1,31 +1,37 @@
-"""Historial del alumno: el admin entra a la MISMA pantalla "Mi historial" (todas las
-pestañas, incluida Bazar) desde Alumnos y desde Fidelización, reutilizando PanelHistorial.
+"""Historial del alumno: UNA sola ficha (la del padrón) y el panel del alumno, sin
+pantallas puente.
 
 Qué fija este archivo (guard de fuente del FRONTEND + del BACKEND, sin red y sin base):
 
-  A. Hay UNA sola pantalla (`PanelHistorial`) y la comparten el box y el alumno: la del
-     box (`HistorialAlumno.jsx`) le pasa `alumnoId`; la del alumno (`MiHistorial.jsx`) no.
+  A. Hay UNA sola pantalla de historial "completa" (`PanelHistorial`) y la usa el
+     PROPIO alumno (`MiHistorial.jsx`). La vista del box NO la monta aparte: la ficha
+     inline del padrón (`FichaAlumnoTabs.jsx`) reutiliza sus SECCIONES.
   B. El menú de pestañas incluye las 7 secciones, `bazar` entre ellas, y la sección Bazar
      tiene su render (`SeccionBazar`) sobre la MISMA envoltura del backend.
   C. El backend define las 7 secciones en el SERVICIO (`SECCIONES`) y reserva el historial
      de un alumno al staff admin/administrador; el COACH queda fuera (403). El caso del
      coach ya está fijado por `test_historial_alumno_api.py::test_b2_...`.
-  D. Alumnos y Fidelización abren el historial REUTILIZANDO la ficha: ambos ofrecen
-     `onVerHistorial` y navegan a `/admin/alumnos/:id/historial` (la ruta ya existe en
-     `App.jsx`). El botón sólo se dibuja si el contenedor lo habilita.
+  D. La pantalla aparte `/admin/alumnos/:id/historial` YA NO EXISTE (se eliminó por
+     redundante): no hay ruta, no hay archivo y nada navega ahí. Todo lo que la abría
+     ahora lleva a la ficha del padrón (`/admin/alumnos?alumno_id=<id>` o el acordeón
+     inline), que trae todas las secciones MÁS Datos/Planes/Referidos/Suspensión.
 
 Correr (aislado):
     cd backend && py -3.12 -m pytest tests/test_historial_admin_acceso_front.py -q --noconftest
 """
+import re
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[2]          # .../proyecto-crossfit
 
 PANEL = "frontend/src/components/historial/PanelHistorial.jsx"
-HISTORIAL_ALUMNO = "frontend/src/pages/admin/HistorialAlumno.jsx"
+FICHA_TABS = "frontend/src/components/FichaAlumnoTabs.jsx"
+HISTORIAL_ALUMNO_VIEJO = "frontend/src/pages/admin/HistorialAlumno.jsx"
 MI_HISTORIAL = "frontend/src/pages/alumno/MiHistorial.jsx"
 APP = "frontend/src/App.jsx"
 ALUMNOS = "frontend/src/pages/admin/Alumnos.jsx"
+ALUMNOS_CONVERTIDOS = "frontend/src/pages/admin/AlumnosConvertidos.jsx"
+PANEL_PRUEBA = "frontend/src/components/PanelAlumnosPrueba.jsx"
 FIDELIZACION = "frontend/src/pages/admin/Fidelizacion.jsx"
 MODAL = "frontend/src/components/AlumnoFichaModal.jsx"
 SERVICIO = "backend/app/services/historial_alumno_service.py"
@@ -37,15 +43,18 @@ def _fuente(relativa: str) -> str:
     return (RAIZ / relativa).read_text(encoding="utf-8")
 
 
-# ── A. Una sola pantalla para el box y para el alumno ─────────────────────────
-def test_a_el_panel_es_uno_solo_para_el_box_y_para_el_alumno():
-    box = _fuente(HISTORIAL_ALUMNO)
+# ── A. Una sola pantalla completa y una sola fuente de secciones ──────────────
+def test_a_el_panel_lo_usa_el_alumno_y_la_ficha_del_box_reutiliza_sus_secciones():
     alumno = _fuente(MI_HISTORIAL)
-    assert "<PanelHistorial alumnoId={id} />" in box        # puerta del staff
-    assert "<PanelHistorial />" in alumno                   # puerta del propio alumno
-    # Ambas importan el MISMO componente.
-    for fuente in (box, alumno):
-        assert "components/historial/PanelHistorial" in fuente
+    assert "<PanelHistorial />" in alumno                 # puerta del propio alumno
+    assert "components/historial/PanelHistorial" in alumno
+    # El box NO monta otra pantalla: la ficha inline reutiliza las secciones del panel.
+    ficha = _fuente(FICHA_TABS)
+    assert "from './historial/PanelHistorial'" in ficha
+    for seccion in ("SeccionGestion", "SeccionBazar", "SeccionPagos"):
+        assert seccion in ficha, seccion
+    assert "<PanelHistorial />" not in ficha, \
+        "la ficha del padrón no monta la pantalla completa: reutiliza sus secciones"
 
 
 # ── B. Las 7 pestañas, con Bazar ───────────────────────────────────────────────
@@ -79,22 +88,50 @@ def test_c_el_router_reserva_el_historial_al_staff_admin():
     assert "def test_b2_el_coach_recibe_403" in api
 
 
-# ── D. Alumnos y Fidelización abren el historial reutilizando el panel ──────────
-def test_d_la_ruta_del_historial_existe_en_el_router_del_front():
-    assert 'alumnos/:alumnoId/historial' in _fuente(APP)
+# ── D. La pantalla vieja se eliminó: ruta, archivo y navegaciones ─────────────
+def test_d_la_ruta_del_historial_ya_no_existe_y_el_archivo_se_borro():
+    app = _fuente(APP)
+    assert "alumnos/:alumnoId/historial" not in app
+    assert "AdminHistorialAlumno" not in app
+    assert "/pages/admin/HistorialAlumno" not in app
+    assert not (RAIZ / HISTORIAL_ALUMNO_VIEJO).exists(), \
+        "HistorialAlumno.jsx se elimina: la ficha del padrón muestra lo mismo y más"
 
 
-def test_d2_alumnos_y_fidelizacion_ofrecen_ver_el_historial():
-    alumnaje = _fuente(ALUMNOS)
+def test_d2_nada_navega_a_la_ruta_eliminada_y_todo_abre_la_ficha_del_padron():
+    # Alumnos: la ficha inline se abre con el estado local (acordeón y deep-link).
+    alumnos = _fuente(ALUMNOS)
+    assert "onVerHistorial" not in alumnos, \
+        "el botón 'Ver historial completo' de la ficha inline ya no existe"
+    assert "setAlumnoConsultaId(alumno.id)" in alumnos
+    # Fidelización: el modal abre el padrón con el deep-link de siempre.
     ficha = _fuente(FIDELIZACION)
-    # Alumnos: el botón de la tabla y la ficha modal apuntan a la misma ruta.
-    assert "navigate(`/admin/alumnos/${alumno.id}/historial`)" in alumnaje
-    assert "onVerHistorial={() => navigate(`/admin/alumnos/${fichaAlumnoId}/historial`)}" in alumnaje
-    # Fidelización: la ficha modal ofrece el historial (antes sólo abría la ficha corta).
-    assert "onVerHistorial={() => navigate(`/admin/alumnos/${fichaAlumnoId}/historial`)}" in ficha
+    assert "onVerHistorial={() => navigate(`/admin/alumnos?alumno_id=${fichaAlumnoId}`)}" in ficha
+    # Alumnos nuevos y Convertidos: mismo patrón.
+    assert "navigate(`/admin/alumnos?alumno_id=${alumnoId}`)" in _fuente(PANEL_PRUEBA)
+    assert "navigate(`/admin/alumnos?alumno_id=${a.id}`)" in _fuente(ALUMNOS_CONVERTIDOS)
+    # Nadie conserva la ruta vieja (los comentarios pueden nombrarla para explicar
+    # por qué se eliminó; lo que no puede quedar es una navegación construida con ella).
+    for fuente in (alumnos, ficha, _fuente(PANEL_PRUEBA),
+                   _fuente(ALUMNOS_CONVERTIDOS)):
+        assert not re.search(r"\$\{[^}]+\}/historial", fuente), \
+            "quedó una navegación a la ruta eliminada"
 
 
-def test_d3_el_boton_solo_aparece_si_el_contenedor_lo_habilita():
+def test_d3_el_boton_del_modal_sigue_siendo_opcional():
     modal = _fuente(MODAL)
     assert "onVerHistorial" in modal
     assert 'data-testid="ficha-ver-historial"' in modal
+    # La ficha del padrón ya no ofrece ese botón (no hay pantalla aparte a la que ir).
+    assert "ficha-tabs-ver-historial" not in _fuente(FICHA_TABS)
+
+
+def test_d4_el_deep_link_abre_la_ficha_aunque_el_alumno_no_este_en_la_pagina():
+    """`?alumno_id=` llega desde Notificaciones, Fidelización y Convertidos, que
+    listan alumnos de TODO el padrón. Como en escritorio la ficha se monta dentro
+    de la fila, sin el bloque de respaldo un alumno fuera de la página actual no
+    mostraría nada (regresión de acceso al eliminar la pantalla propia)."""
+    alumnos = _fuente(ALUMNOS)
+    assert "!alumnos.some((a) => a.id === alumnoConsultaId)" in alumnos
+    assert ('className="hidden md:block mb-4 rounded-xl border border-zinc-800 '
+            'bg-zinc-900"') in alumnos
