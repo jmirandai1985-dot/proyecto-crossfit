@@ -239,7 +239,7 @@ const ResumenCoach = ({
             {/* ── 5. Avisos para alumnos (Bloque 10) ──
                 El coach sólo puede publicar AVISOS DEL DÍA: el resto de los tipos los elige el
                 admin en Marketing. Punto 2 del reporte móvil: esta sección mostraba las cuatro
-                categorías mezcladas (promoción, colaboración, evento y aviso del box); la lista
+                categorías mezcladas (promoción, colaboración, evento y aviso del coach); la lista
                 que llega por props ya viene filtrada al tipo `aviso` —el aviso rápido del día—
                 desde el panel, que es donde se decide qué le toca ver al coach. */}
             <div className={TARJETA} data-testid="resumen-avisos">
@@ -266,7 +266,7 @@ const ResumenCoach = ({
                                         {etiquetaTipo(aviso.tipo)}
                                     </span>
                                     <span className="min-w-0 flex-1 truncate text-[12.5px] font-bold text-zinc-100">
-                                        {aviso.titulo || 'Aviso del box'}
+                                        {aviso.titulo || 'Aviso del Coach'}
                                     </span>
                                 </div>
                                 <p className="mt-1 text-[11.5px] text-zinc-400">{aviso.texto}</p>

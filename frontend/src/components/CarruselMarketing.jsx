@@ -48,7 +48,7 @@ const IconoRegalo = () => (
     </svg>
 );
 
-// La etiqueta del tipo, con el color del mockup (el de "Aviso del box" es ámbar
+// La etiqueta del tipo, con el color del mockup (el de "Aviso del Coach" es ámbar
 // con texto oscuro, por ejemplo).
 const Etiqueta = ({ tipo }) => (
     <span className="cm-tag" style={{ background: tipo.tagFondo, color: tipo.tagTexto }}>

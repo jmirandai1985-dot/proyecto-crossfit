@@ -37,7 +37,7 @@ eq(TIPOS_AVISO.map((t) => t.acento).join(','),
 eq(TIPOS_EDITABLES.length, 4, 'el admin sólo elige 4');
 eq(esTipoEditable('producto_bazar'), false, 'producto_bazar NO se crea a mano');
 eq(esTipoEditable('promocion'), true, 'promocion sí se crea a mano');
-eq(etiquetaTipo('aviso'), 'Aviso del box', 'el rótulo del aviso operativo');
+eq(etiquetaTipo('aviso'), 'Aviso del Coach', 'el rótulo del aviso operativo');
 eq(etiquetaTipo('producto_bazar'), 'Nuevo en la tienda', 'el rótulo del producto');
 eq(etiquetaTipo('evento'), 'Evento', 'el rótulo del evento');
 eq(acentoDeTipo('promocion'), '#d9472e', 'el acento de la promoción');
@@ -84,7 +84,7 @@ eq(estadoVigencia({}, AHORA), 'programado', 'sin fechas no está vigente');
 console.log('== 4. El pie de la tarjeta ==');
 eq(resumenVigencia(vigente, AHORA), 'Hasta 31 oct', 'una promoción muestra hasta cuándo');
 eq(resumenVigencia({ ...vigente, tipo: 'colaboracion' }, AHORA), 'Vigente', 'una colaboración dice "Vigente"');
-eq(resumenVigencia({ ...vigente, tipo: 'aviso' }, AHORA), '31 oct', 'el aviso del box muestra su fecha');
+eq(resumenVigencia({ ...vigente, tipo: 'aviso' }, AHORA), '31 oct', 'el aviso del coach muestra su fecha');
 eq(resumenVigencia({ ...vigente, tipo: 'evento' }, AHORA), '', 'el evento usa la fecha grande');
 eq(resumenVigencia({ ...vigente, tipo: 'producto_bazar' }, AHORA), '', 'el producto usa el precio');
 eq(resumenVigencia(futuro, AHORA), 'Desde 5 nov', 'un aviso programado dice desde cuándo');

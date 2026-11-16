@@ -116,7 +116,7 @@ const ModalAvisoRapido = ({ isOpen, onClose, onSuccess }) => {
                                 {tipo.tag}
                             </span>
                             <div className="mt-2 text-[13px] font-bold" style={{ color: tipo.titulo }}>
-                                {titulo || 'Aviso del box'}
+                                {titulo || 'Aviso del Coach'}
                             </div>
                             <div className="mt-0.5 text-[11.5px]" style={{ color: tipo.detalle }}>
                                 {mensaje || 'Así se verá tu mensaje en el Inicio de los alumnos.'}

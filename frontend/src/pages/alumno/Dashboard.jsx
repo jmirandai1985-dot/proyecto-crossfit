@@ -125,6 +125,7 @@ const AlumnoDashboard = () => {
                     clasesPorDia={clasesPorDia}
                     proximosDias={proximosDias}
                     onReservar={handleAbrirReserva}
+                    wodHoy={wodHoy}
                 />
             </div>
 

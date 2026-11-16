@@ -62,6 +62,10 @@ const diasDeLaSemana = (hoyStr) => {
 // 'YYYY-MM-DD' de un valor de fecha (a veces llega con hora ISO).
 const soloFecha = (v) => (v ? String(v).slice(0, 10) : '');
 
+// Texto de un campo del WOD del día: null si viene vacío, para no dibujar
+// secciones en blanco (Calentamiento, Musculación, etc.).
+const textoWod = (v) => (typeof v === 'string' && v.trim() ? v : null);
+
 // Estado VISIBLE de una reserva: lo calcula el backend (`estado_visible`) con
 // la MISMA regla del Historial. El fallback mantiene la pantalla usable si una
 // respuesta antigua todavía no trae el campo.
@@ -149,6 +153,7 @@ const InicioMobile = ({
     clasesPorDia = {},
     proximosDias = [],
     onReservar,
+    wodHoy = null,
 }) => {
     const navigate = useNavigate();
     const location = useLocation();
@@ -167,6 +172,9 @@ const InicioMobile = ({
     const { data: boxPublicId = null } = usePublicIdBox();
     // Overlay del lector QR (abre la cámara de inmediato al tocar "Marcar").
     const [escanerAbierto, setEscanerAbierto] = useState(false);
+    // Tarjeta "WOD del día": colapsada por defecto para no ocupar espacio de
+    // entrada; se despliega al tocar la fila.
+    const [wodAbierto, setWodAbierto] = useState(false);
 
     // Momento del día (Chile) para el copy de "Tu clase de hoy". Se recalcula
     // cada minuto: si la pantalla queda abierta, a las 12:00 el saludo cambia
@@ -274,9 +282,23 @@ const InicioMobile = ({
     // ── Bloque "Barra inferior": items desde config/menu.js ──
     const itemMenu = (label) => MENU_BY_ROL.alumno.find((i) => i.label === label);
     const navInicio = itemMenu('Inicio');
-    const navReservas = itemMenu('Mis Reservas');
+    // La pestaña se llama "Historial de Reservas" en config/menu.js; buscar el
+    // nombre viejo ("Mis Reservas") devolvía undefined y el botón no se pintaba
+    // (los 5 elementos del `.ub-nav` quedaban corridos una columna).
+    const navReservas = itemMenu('Historial de Reservas');
     const navMarcas = itemMenu('Pizarra de RMs');
     const navBazar = itemMenu('Bazar');
+
+    // ── Bloque "WOD del día" (afiche para toda la comunidad) ──
+    // El backend ya devuelve el primer WOD publicado hoy del tenant cuando se
+    // llama sin `alumno_id`: no depende de reserva ni asistencia. Sólo se
+    // dibujan las secciones que traen contenido.
+    const wodTitulo = textoWod(wodHoy?.titulo);
+    const wodTipo = textoWod(wodHoy?.tipo_metcon);
+    const wodCalentamiento = textoWod(wodHoy?.calentamiento);
+    const wodFuerza = textoWod(wodHoy?.fuerza_habilidad);
+    const wodPrincipal = textoWod(wodHoy?.wod_principal);
+    const wodBloques = Array.isArray(wodHoy?.bloques) ? wodHoy.bloques : [];
     // FAB: escanea el QR del box (public_id); si no está, va a Mis Reservas.
     const irAAsistencia = () => setEscanerAbierto(true);
 
@@ -347,6 +369,73 @@ const InicioMobile = ({
                         </>
                     )}
                 </section>
+
+                {/* ── WOD del día: afiche del entrenamiento para TODA la comunidad.
+                    Colapsado por defecto (una fila angosta); al tocarlo se
+                    despliega lo que publicó el coach, sin exigir reserva ni
+                    asistencia. No es la pantalla de registro (MisWods). ── */}
+                {wodHoy && (
+                    <section className="card wod" aria-label="WOD del día">
+                        <button
+                            type="button"
+                            className="wod-toggle"
+                            aria-expanded={wodAbierto}
+                            aria-controls="ub-wod-dia"
+                            onClick={() => setWodAbierto((abierto) => !abierto)}
+                        >
+                            <span className="wod-title">WOD del día</span>
+                            {wodTitulo && <span className="wod-nombre">{wodTitulo}</span>}
+                            {wodTipo && <span className="pill lvl">{wodTipo}</span>}
+                            <span className={`wod-arrow${wodAbierto ? ' up' : ''}`} aria-hidden="true">
+                                ▾
+                            </span>
+                        </button>
+
+                        {wodAbierto && (
+                            <div className="wod-body" id="ub-wod-dia">
+                                {wodCalentamiento && (
+                                    <div className="wod-sec">
+                                        <h3>Calentamiento</h3>
+                                        <p>{wodCalentamiento}</p>
+                                    </div>
+                                )}
+                                {wodFuerza && (
+                                    <div className="wod-sec">
+                                        <h3>Musculación</h3>
+                                        <p>{wodFuerza}</p>
+                                    </div>
+                                )}
+                                {wodPrincipal && (
+                                    <div className="wod-sec principal">
+                                        <h3>WOD principal</h3>
+                                        <p>{wodPrincipal}</p>
+                                    </div>
+                                )}
+                                {wodBloques.length > 0 && (
+                                    <div className="wod-bloques">
+                                        {wodBloques.map((bloque, indice) => {
+                                            const tipoBloque = textoWod(bloque?.tipo_metcon);
+                                            return (
+                                                <div className="wod-bloque" key={bloque?.id || indice}>
+                                                    <div className="wod-bloque-head">
+                                                        <div className="wod-bloque-info">
+                                                            <span className="wod-bloque-n">Bloque {indice + 1}</span>
+                                                            <b>{bloque?.titulo || `Bloque ${indice + 1}`}</b>
+                                                        </div>
+                                                        {tipoBloque && <span className="pill lvl">{tipoBloque}</span>}
+                                                    </div>
+                                                    {textoWod(bloque?.descripcion) && (
+                                                        <p>{bloque.descripcion}</p>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </section>
+                )}
 
                 {/* ── Acciones rápidas de la reserva ── */}
                 <div className="links">

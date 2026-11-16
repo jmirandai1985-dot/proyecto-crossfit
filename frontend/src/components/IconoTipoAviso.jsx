@@ -22,7 +22,7 @@ const DIBUJOS = {
             <path d="M10.5 14h3" />
         </>
     ),
-    // Aviso del box: megáfono.
+    // Aviso del Coach: megáfono.
     megafono: (
         <>
             <path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z" />

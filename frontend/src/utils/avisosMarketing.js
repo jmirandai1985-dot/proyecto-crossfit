@@ -49,10 +49,10 @@ export const TIPOS_AVISO = [
     },
     {
         id: 'aviso',
-        // El del mockup dice "Aviso del box": es el aviso operativo del propio box
+        // El del mockup dice "Aviso del Coach": es el aviso operativo del propio box
         // (mantenciones, cambios de horario), no una promoción.
         label: 'Aviso',
-        tag: 'Aviso del box',
+        tag: 'Aviso del Coach',
         acento: '#e8a93b',
         icono: 'megafono',
         fondo: 'linear-gradient(145deg, #231f14, #15130d)',
@@ -103,7 +103,7 @@ export const TIPO_REFERIDOS = {
     fondo: 'linear-gradient(145deg, #3a2c10, #1a1408 62%)',
     tagFondo: '#e6b54e',
     // Dorado claro: el texto de la etiqueta va OSCURO (mismo criterio que el
-    // ámbar de "Aviso del box").
+    // ámbar de "Aviso del Coach").
     tagTexto: '#231a05',
     titulo: '#f8eed7',
     detalle: '#f3cf82',
@@ -273,7 +273,7 @@ export function estaVigente(aviso, ahora = new Date()) {
 // El pie de la tarjeta, tal como lo escribe el mockup:
 //   Promoción     -> "Hasta 31 oct"  (la promo muestra su fecha de cierre)
 //   Colaboración  -> "Vigente"       (una alianza no muestra fecha de cierre)
-//   Aviso del box -> "18 oct"        (la fecha del aviso, pelada)
+//   Aviso del Coach -> "18 oct"        (la fecha del aviso, pelada)
 //   Evento        -> ''              (usa la fecha GRANDE de la esquina)
 //   Producto      -> ''              (usa el precio)
 export function resumenVigencia(aviso, ahora = new Date()) {
@@ -286,7 +286,7 @@ export function resumenVigencia(aviso, ahora = new Date()) {
         return estado === 'programado'
             ? `Desde ${formatearFechaCorta(aviso.vigente_desde)}` : 'Vencido';
     }
-    // El aviso del box muestra su fecha pelada ("18 oct"); la promoción, hasta
+    // El aviso del coach muestra su fecha pelada ("18 oct"); la promoción, hasta
     // cuándo corre ("Hasta 31 oct").
     if (tipo === 'aviso') {
         if (estado === 'vigente') return formatearFechaCorta(aviso.vigente_hasta);
