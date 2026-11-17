@@ -42,6 +42,7 @@ from app.core.urls import url_frontend
 from app.core.estados import vigente_hoy
 from app.services import beneficios_service as beneficios  # noqa: F401
 from app.services import churn_service
+from app.services import matricula_service
 from app.services import referidos_service as referidos
 from app.services.auditoria_service import registrar_auditoria
 from app.utils.planes import creditos_de_plan
@@ -373,6 +374,27 @@ def activar_plan(db: Session, solicitud_id: int, *, tenant_id: Optional[int] = N
         db.rollback()
         logger.warning(f"No se pudo registrar transaccion financiera: {e}")
 
+    # ── Matrícula (cobro ÚNICO del alumno nuevo): ingreso SEPARADO ──
+    # Va en su propia `TransaccionFinanciera` (`categoria='matricula'`) y con el
+    # monto CONGELADO en la solicitud: apagar/cambiar la matrícula después no mueve
+    # esta compra. Así el ingreso total la suma (Reportes, Ingreso Mensual, caja)
+    # sin inflar el ticket promedio de las membresías. No debe impedir la
+    # aprobación si falla.
+    if solicitud.matricula_clp_snapshot:
+        try:
+            matricula_service.registrar_ingreso(
+                db,
+                tenant_id=suscripcion.tenant_id,
+                alumno_id=solicitud.alumno_id,
+                monto=solicitud.matricula_clp_snapshot,
+                referencia_tipo="suscripcion",
+                referencia_id=suscripcion.id,
+            )
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.warning(f"No se pudo registrar el ingreso de la matrícula: {e}")
+
     # ── Auditoría interna: quién, cuándo, qué ──
     # `usuario_id=None` = lo hizo la pasarela (no hay humano que auditar).
     registrar_auditoria(
@@ -505,6 +527,27 @@ def _registrar_plan_en_cola(db: Session, solicitud, plan, ahora, actor_id,
     except Exception as e:
         db.rollback()
         logger.warning(f"No se pudo registrar transaccion financiera: {e}")
+
+    # ── Matrícula (cobro único del alumno nuevo): ingreso separado ──
+    # En la rama EN COLA todavía NO existe la `Suscripcion` (se crea al activarse),
+    # así que la referencia es la SOLICITUD — el mismo criterio que la transacción
+    # de membresía de arriba. Por la regla de la cola (`_plan_vigente_usable` exige
+    # un plan PAGADO vigente) acá el snapshot es siempre None: el bloque queda como
+    # guarda explícita para que la matrícula no se pierda si esa regla cambia.
+    if solicitud.matricula_clp_snapshot:
+        try:
+            matricula_service.registrar_ingreso(
+                db,
+                tenant_id=solicitud.tenant_id,
+                alumno_id=solicitud.alumno_id,
+                monto=solicitud.matricula_clp_snapshot,
+                referencia_tipo="solicitud_plan",
+                referencia_id=solicitud.id,
+            )
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.warning(f"No se pudo registrar el ingreso de la matrícula: {e}")
 
     registrar_auditoria(
         db,

@@ -35,6 +35,10 @@ from app.services import aprobacion_planes
 # y el ciclo de vida del beneficio (`vigente`/`usar`) viven en su servicio, no acá.
 from app.services import beneficios_service as beneficios
 
+# Matrícula configurable: el monto del alumno NUEVO se congela en la solicitud
+# (una sola función decide activa + alumno nuevo; ver `services/matricula_service`).
+from app.services import matricula_service
+
 # F3b: el descuento del programa de referidos tiene que conocerse ANTES de cobrar
 # (el alumno transfiere el precio final, no el de lista). El servicio es el mismo
 # que después CONVIERTE el referido al aprobar: una sola regla para las dos cosas.
@@ -189,6 +193,11 @@ def solicitar_plan(
         # ── P0-4 (S-01): snapshot del precio vigente AL SOLICITAR ──
         # La aprobación/ingreso NO debe depender de cambios de precio posteriores.
         precio_clp_snapshot=plan.precio_clp,
+        # Matrícula (cobro único del alumno nuevo): se CONGELA acá. Si el admin la
+        # apaga o la cambia después, esta solicitud conserva su monto (y la
+        # transacción de `activar_plan` usa el snapshot, no el valor vigente).
+        matricula_clp_snapshot=matricula_service.monto_para_alumno(
+            db, data.tenant_id, data.alumno_id),
         **descuento,
     )
     db.add(solicitud)
@@ -234,6 +243,8 @@ def solicitar_plan(
         "descuento_pct": solicitud.descuento_pct,
         "precio_final_clp": solicitud.precio_final_clp,
         "beneficio_id": solicitud.beneficio_id,
+        # Matrícula congelada en ESTA solicitud (None = no aplica).
+        "matricula_clp": solicitud.matricula_clp_snapshot,
     }
 
 
@@ -308,6 +319,8 @@ def listar_solicitudes_pendientes(
                                    if s.precio_clp_snapshot is not None
                                    else precio_lista)),
             "beneficio_id": s.beneficio_id,
+            # Matrícula de esta compra (el alumno transfiere plan + matrícula).
+            "matricula_clp": s.matricula_clp_snapshot,
             "voucher_url": s.voucher_url,
             "certificado_estudiante_url": s.certificado_estudiante_url,
             # ── Pago online (migración 067) ──
@@ -402,6 +415,8 @@ def listar_solicitudes_de_alumno(
                              else (s.precio_clp_snapshot
                                    if s.precio_clp_snapshot is not None
                                    else (plan.precio_clp if plan else 0))),
+            # Matrícula congelada en la solicitud (None = no aplica).
+            "matricula_clp": s.matricula_clp_snapshot,
             "voucher_url": s.voucher_url,
             "certificado_estudiante_url": s.certificado_estudiante_url,
             "comentario_admin": s.comentario_admin,

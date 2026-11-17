@@ -946,6 +946,22 @@ const AdminKpis = () => {
                                 </div>
                                 <div>
                                     <KpiCard
+                                        label="Matrícula"
+                                        value={financiero?.matricula?.ingreso_total ?? null}
+                                        unit="CLP"
+                                        icon={Banknote}
+                                        color="border-orange-500"
+                                        onDetalle={verKpiBi('bi:matricula',
+                                            financiero?.matricula?.ingreso_total ?? null, 'CLP',
+                                            `Matrículas (${financiero?.matricula?.n_transacciones ?? 0} cobros)`)}
+                                    />
+                                    <p className="mt-1 text-[11px] text-zinc-500">
+                                        {financiero?.matricula?.n_transacciones ?? 0} cobros ·
+                                        {' '}ticket {fmtCLP(financiero?.matricula?.global ?? 0)}
+                                    </p>
+                                </div>
+                                <div>
+                                    <KpiCard
                                         label="LTV estimado"
                                         value={ltvEstimado}
                                         unit="CLP"

@@ -38,6 +38,12 @@ class SolicitudPlan(Base):
         "beneficios.id", ondelete="SET NULL"), nullable=True)
     descuento_pct = Column(Integer, nullable=True)
     precio_final_clp = Column(Integer, nullable=True)
+    # ── Matrícula (cobro único del alumno nuevo) ─────────────────────────────
+    # Se CONGELA al crear la solicitud (igual que `precio_clp_snapshot`): apagar o
+    # cambiar el monto de la matrícula después NO afecta una compra en curso.
+    # NULL = esta compra no lleva matrícula (alumno ya existente, matrícula
+    # apagada, o fila histórica anterior a la migración 088).
+    matricula_clp_snapshot = Column(Integer, nullable=True)
     comentario_admin = Column(String(500), nullable=True)
     aprobado_por = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
     # ── Pago online (migración 067) ──

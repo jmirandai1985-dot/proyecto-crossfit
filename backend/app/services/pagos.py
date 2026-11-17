@@ -39,6 +39,7 @@ from app.models.solicitud_plan import SolicitudPlan
 from app.models.usuario import Usuario
 from app.services import aprobacion_planes, pedidos_estado
 from app.services import beneficios_service as beneficios
+from app.services import matricula_service
 from app.services import mercadopago_cliente as mp
 from app.services import referidos_service as referidos
 from app.services.notificaciones_panel import notificar_admins_del_tenant
@@ -383,6 +384,14 @@ def crear_pago_membresia(db: Session, *, current_user: dict, plan_id: int,
             "Este plan no tiene un precio cobrable online. Usa transferencia.",
             400)
 
+    # ── Matrícula configurable (cobro ÚNICO del alumno nuevo) ──
+    # Se cobra junto con el plan en la MISMA preferencia: MP recibe el total
+    # (`pago.monto_clp`) y el webhook lo compara con ESE número. El snapshot queda
+    # en la solicitud (no en el pago) porque es lo que después registra
+    # `activar_plan` como ingreso separado de `categoria='matricula'`.
+    matricula = matricula_service.monto_para_alumno(db, tenant_id, alumno_id)
+    monto_total = monto + (matricula or 0)
+
     solicitud = SolicitudPlan(
         tenant_id=tenant_id,
         alumno_id=alumno_id,
@@ -397,7 +406,9 @@ def crear_pago_membresia(db: Session, *, current_user: dict, plan_id: int,
         # Precio final SIEMPRE congelado (aunque no haya descuento): así
         # `activar_plan` no aplica un descuento de referido que MP no cobró y la
         # `TransaccionFinanciera` coincide con el pago, peso por peso.
+        # OJO: es el precio del PLAN; la matrícula va aparte (snapshot propio).
         precio_final_clp=monto,
+        matricula_clp_snapshot=matricula,
         origen_pago=aprobacion_planes.ORIGEN_MERCADOPAGO,
         beneficio_id=descuento.get("beneficio_id"),
         descuento_pct=descuento.get("descuento_pct"),
@@ -411,7 +422,9 @@ def crear_pago_membresia(db: Session, *, current_user: dict, plan_id: int,
         concepto=CONCEPTO_MEMBRESIA,
         referencia_tipo="solicitud_plan",
         referencia_id=solicitud.id,
-        monto_clp=monto,
+        # Lo que cobra MP: plan + matrícula. El webhook compara el monto aprobado
+        # de MP con `pago.monto_clp`, así que incluirla acá es lo que la cobra.
+        monto_clp=monto_total,
         estado="iniciado",
         # UUID: el id secuencial de la fila no se filtra a un tercero.
         external_reference=str(uuid.uuid4()),

@@ -134,6 +134,11 @@ export const claves = {
     asistenciaMes: ['asistencia', 'mes'],
     asistenciaSemanal: ['asistencia', 'semanal'],
     planesActivos: ['planes', 'activos'],
+    // ── Matrícula configurable del box (un valor por box, no por plan) ──
+    // `matriculaConfig` es la del panel (admin: activa + monto + fecha + contador);
+    // `miMatricula` la del alumno (¿me toca pagarla en ESTA compra?).
+    matriculaConfig: ['matricula', 'config'],
+    miMatricula: ['matricula', 'mi-estado'],
     miPerfil: ['alumnos', 'me'],
     misBeneficios: (planIds) => ['beneficios', 'mios', planIds],
     panelHistorial: (alumnoId, seccion, pagina, porPagina) =>
@@ -216,7 +221,15 @@ export const claves = {
     // Cuelga de `['beneficios']`, la familia que ya usa `useMisBeneficios`.
     beneficiosAlumno: (alumnoId, planIds) => ['beneficios', 'alumno', alumnoId, planIds],
     // ── Suspensión de plan (supervisión y suspensión por salud, ambas del admin) ──
+    // FAMILIA del listado y del resumen de la pantalla Suspensiones: es el prefijo que
+    // se invalida cuando se crea o se cancela una suspensión por salud (la fila nueva
+    // tiene que aparecer sin recargar la página). OJO: `suspensionesSalud` NO cuelga de
+    // acá (`suspensiones-salud` es otra rama), así que refrescar el listado no toca el
+    // historial del alumno ni al revés.
+    suspensionesAdminFamilia: ['admin', 'suspensiones'],
     // Listado + resumen del admin (pantalla de supervisión de suspensiones).
+    // La clave repite el prefijo de `suspensionesAdminFamilia` a propósito: una query no
+    // puede construir su clave leyendo el objeto que la contiene.
     suspensionesAdmin: (buscar, estado, desde, hasta) =>
         ['admin', 'suspensiones', buscar || '', estado || '', desde || '', hasta || ''],
     suspensionesAdminResumen: ['admin', 'suspensiones', 'resumen'],
@@ -931,6 +944,19 @@ export function usePlanesActivos() {
     });
 }
 
+// ¿La matrícula le aplica a ESTE alumno? Lo decide el backend (matrícula activa +
+// alumno nuevo); el front sólo muestra lo que responde (`aplica`, `monto_a_cobrar`).
+// Por eso NO se recalcula en la pantalla: un "es nuevo" calculado en el navegador
+// sería otra definición de la misma regla.
+export function useMiMatricula() {
+    return useQuery({
+        queryKey: claves.miMatricula,
+        queryFn: async () => (await api.get('/api/v1/matricula/mi-estado')).data || null,
+        staleTime: 30_000,
+    });
+}
+
+
 export function useMiPerfil() {
     return useQuery({
         queryKey: claves.miPerfil,
@@ -1248,10 +1274,19 @@ export function usePreviewSuspensionSalud() {
 
 // Confirmar: ejecuta la suspensión por salud. Invalida la lista del panel, la
 // membresía (cambió fecha_expiracion) y las reservas/suscripciones (quedaron
-// canceladas).
+// canceladas). Además refresca la pantalla Suspensiones (listado + resumen): la
+// suspensión creada desde la ficha o desde el modal "+ Nueva suspensión" tiene que
+// aparecer ahí sin recargar.
+//
+// `MUTACION_CREAR_SUSPENSION_SALUD` es la clave de mutación: el modal que monta este
+// panel (components/admin/NuevaSuspensionModal) la usa con `useMutationState` para
+// enterarse de que la suspensión salió bien y cerrarse solo, sin modificar el panel.
+export const MUTACION_CREAR_SUSPENSION_SALUD = ['suspension-salud', 'crear'];
+
 export function useCrearSuspensionSalud() {
     const qc = useQueryClient();
     return useMutation({
+        mutationKey: MUTACION_CREAR_SUSPENSION_SALUD,
         mutationFn: (payload) =>
             api.post(`/api/v1/admin/alumnos/${payload.usuario_id}/suspension-salud`,
                      { fecha_inicio: payload.fecha_inicio, fecha_fin: payload.fecha_fin,
@@ -1259,6 +1294,7 @@ export function useCrearSuspensionSalud() {
                 .then((r) => r.data),
         onSuccess: (_data, variables) => {
             qc.invalidateQueries({ queryKey: claves.suspensionesSalud(variables.usuario_id) });
+            qc.invalidateQueries({ queryKey: claves.suspensionesAdminFamilia });
             qc.invalidateQueries({ queryKey: ['membresia'] });
             qc.invalidateQueries({ queryKey: ['reservas'] });
             qc.invalidateQueries({ queryKey: ['suscripciones'] });
@@ -1266,7 +1302,8 @@ export function useCrearSuspensionSalud() {
     });
 }
 
-// Cancelar una suspensión por salud (reversión exacta de fecha_expiracion).
+// Cancelar una suspensión por salud (reversión exacta de fecha_expiracion). Refresca
+// también el listado/resumen de Suspensiones: la fila pasa a "Cancelada".
 export function useCancelarSuspensionSalud() {
     const qc = useQueryClient();
     return useMutation({
@@ -1275,6 +1312,7 @@ export function useCancelarSuspensionSalud() {
                 .then((r) => r.data),
         onSuccess: (_data, variables) => {
             qc.invalidateQueries({ queryKey: claves.suspensionesSalud(variables.usuario_id) });
+            qc.invalidateQueries({ queryKey: claves.suspensionesAdminFamilia });
             qc.invalidateQueries({ queryKey: ['membresia'] });
             qc.invalidateQueries({ queryKey: ['suscripciones'] });
         },
@@ -1871,6 +1909,25 @@ export function useGuardarPlan() {
             ? api.put(`/api/v1/planes/${id}`, payload)
             : api.post('/api/v1/planes', payload)).then((r) => r.data),
         onSuccess: () => qc.invalidateQueries({ queryKey: ['planes'] }),
+    });
+}
+
+// Matrícula del box (panel de Planes): activa/inactiva + monto + "activa desde" +
+// cuántas se cobraron. El PUT invalida la familia `['matricula']`, así que la
+// pantalla del alumno se entera del cambio sin recargar.
+export function useMatriculaConfig() {
+    return useQuery({
+        queryKey: claves.matriculaConfig,
+        queryFn: async () => (await api.get('/api/v1/matricula')).data || null,
+        staleTime: 30_000,
+    });
+}
+
+export function useGuardarMatriculaConfig() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) => api.put('/api/v1/matricula', payload).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['matricula'] }),
     });
 }
 

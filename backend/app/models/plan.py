@@ -24,6 +24,12 @@ class Plan(Base):
     precio_clp = Column(Integer, nullable=False)
     duracion_dias = Column(Integer, nullable=False, default=30)
     activo = Column(Boolean, nullable=False, default=True)
+    # ── Comparación de ahorro contra un plan MENSUAL (planes de larga duración) ──
+    # FK a otro plan del MISMO box; `ON DELETE SET NULL` para que borrar el mensual
+    # no rompa el plan largo (el badge simplemente deja de mostrarse). El ahorro NO
+    # se guarda: se recalcula con los precios vigentes de los dos planes.
+    plan_referencia_id = Column(Integer, ForeignKey(
+        "planes.id", ondelete="SET NULL"), nullable=True)
     # ── ¿Es una membresía COMERCIAL? ──
     # `false` = el plan se materializa como suscripción para habilitar el acceso, pero NO cuenta
     # como cliente: lo excluyen MRR, retención, cohortes, "vigentes", churn y el dataset del ML

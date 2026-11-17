@@ -279,6 +279,20 @@ export const DETALLES_KPI = {
         'Si baja, revisar las promociones y descuentos vigentes en Fidelización y si el plan que más se '
         + 'vende es el que conviene.',
     ),
+    'bi:matricula': kpi(
+        'Matrícula',
+        'Ingreso por matrículas',
+        'Cuánto entró por la matrícula que el box cobra UNA vez al alumno nuevo '
+        + '(sin membresía pagada previa).',
+        'Se suma `transacciones_financieras` con categoría "matricula" (tipo ingreso). '
+        + 'Es un ingreso APARTE de la membresía: no infla el ticket de los planes. '
+        + 'El monto se congela al crear la solicitud, así que un cambio de precio '
+        + 'posterior no mueve lo ya vendido.',
+        'Depende de cuántos alumnos NUEVOS entraron: si baja, revisar la captación '
+        + 'más que el monto en sí.',
+        'Si el monto configurado está muy alto para el ticket del box, conviene '
+        + 'bajarlo antes de que frene la primera compra.',
+    ),
     'bi:ltv_estimado': kpi(
         'LTV estimado',
         'Lo que deja un alumno en toda su vida',

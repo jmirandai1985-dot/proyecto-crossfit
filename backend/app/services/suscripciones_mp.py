@@ -84,6 +84,7 @@ from app.models.suscripcion import (
 )
 from app.models.usuario import Usuario
 from app.services import mercadopago_cliente as mp
+from app.services import matricula_service
 from app.services.aprobacion_planes import ORIGEN_MERCADOPAGO, plan_vigente_usable
 from app.services.mercadopago_cliente import (
     estado_desde_mp, monto_clp, sin_none,
@@ -564,6 +565,13 @@ def _encolar_recurrente(db: Session, suscripcion: Suscripcion) -> int:
         certificado_estudiante_url=None,
         precio_clp_snapshot=plan.precio_clp if plan else None,
         precio_final_clp=precio or None,
+        # Matrícula: la MISMA regla que los otros flujos, pero acá el snapshot da
+        # SIEMPRE `None`: esta rama sólo corre cuando el alumno YA tiene una
+        # membresía PAGADA vigente (`plan_vigente_usable` exige `precio_clp > 0`),
+        # o sea que nunca es "alumno nuevo". Se deja explícito para que no se
+        # olvide si esa regla de cola cambia.
+        matricula_clp_snapshot=matricula_service.monto_para_alumno(
+            db, suscripcion.tenant_id, suscripcion.usuario_id),
         origen_pago=ORIGEN_MERCADOPAGO,
     )
     db.add(solicitud)
@@ -619,6 +627,14 @@ def crear_suscripcion_mp(db: Session, *, current_user: dict, plan_id: int) -> di
 
     La fila nace `pendiente`: NO da acceso (`app.core.estados.da_acceso_hoy` exige
     `activo`). El acceso lo abre el webhook con `authorized`.
+
+    La MATRÍCULA configurable NO se cobra en este flujo (decisión del 2026-11-17,
+    aprobada): el `preapproval` de MP cobra `transaction_amount` TODOS los meses y
+    no existe un "monto del primer pago", así que sumarla acá la cobraría en cada
+    renovación. Tampoco hay `SolicitudPlan` en el camino normal donde congelarla
+    (sólo en la rama de cola, que por definición es de un alumno NO nuevo). Hoy
+    este flujo no tiene pantalla en el frontend (`useCrearSuscripcionMp` sin uso):
+    la matrícula se cobra en Checkout Pro y en la transferencia.
 
     El monto es el **precio de lista** del plan. Los descuentos de una compra (F2) y
     el premio de referidos NO se aplican: acá el cobro se repite todos los meses con

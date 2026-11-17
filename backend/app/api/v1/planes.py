@@ -2,8 +2,9 @@
 Router de endpoints para gestión de Planes
 """
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Literal, Optional
 
 from app.db.database import get_db
 from app.models.plan import Plan
@@ -16,22 +17,96 @@ from app.utils.db_commit import commit_o_4xx
 router = APIRouter()
 
 
+# ── Los campos del plan viajan en el BODY (JSON), no en query params ──────────
+# El panel manda `api.post('/planes', payload)` / `api.put('/planes/{id}', payload)`
+# (body JSON de axios). Con los campos declarados SUELTOS, FastAPI los lee como
+# QUERY PARAMS: el POST moría con 400 ("revisa el nombre...") y el PUT devolvía 200
+# sin aplicar NADA (edición silenciosa). Es el mismo bug que se corrigió en
+# `horarios` (tests/test_horarios_body_json.py). Estos modelos lo cierran.
+#
+# `extra="forbid"`: una clave desconocida falla con 422 en vez de ignorarse.
+# En el PUT, `model_fields_set` distingue "no lo mandó" (no cambiar) de
+# "lo mandó en null" (limpiar): `genero: null` = plan UNISEX y
+# `plan_referencia_id: null` = sin comparación de ahorro.
+class PlanCreate(BaseModel):
+    """Cuerpo del POST /planes."""
+
+    nombre: str = Field(min_length=1, max_length=100)
+    precio_clp: int = Field(ge=0)
+    duracion_dias: int = Field(30, ge=1, le=3650)
+    creditos: Optional[int] = Field(None, ge=0)
+    es_ilimitado: bool = False
+    # `null` = plan UNISEX (sin género): es la categoría "Larga duración" del panel
+    # y lo que ve el alumno en "Planes extendidos".
+    genero: Optional[Literal["masculino", "femenino"]] = None
+    es_estudiante: bool = False
+    requiere_certificado_estudiante: bool = False
+    # Comparación de ahorro contra un mensual del mismo box (null = sin comparación).
+    plan_referencia_id: Optional[int] = None
+    activo: Optional[bool] = None
+    # El tenant SIEMPRE sale del token. Se acepta e ignora por compatibilidad con
+    # el panel anterior (mandaba `tenant_id` al crear).
+    tenant_id: Optional[int] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PlanUpdate(BaseModel):
+    """Cuerpo del PUT /planes/{id}: todo opcional (lo que no viene no se toca)."""
+
+    nombre: Optional[str] = Field(None, min_length=1, max_length=100)
+    precio_clp: Optional[int] = Field(None, ge=0)
+    duracion_dias: Optional[int] = Field(None, ge=1, le=3650)
+    creditos: Optional[int] = Field(None, ge=0)
+    es_ilimitado: Optional[bool] = None
+    genero: Optional[Literal["masculino", "femenino"]] = None
+    es_estudiante: Optional[bool] = None
+    requiere_certificado_estudiante: Optional[bool] = None
+    plan_referencia_id: Optional[int] = None
+    activo: Optional[bool] = None
+    tenant_id: Optional[int] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+def _referencia_valida(db: Session, tenant_id: int, plan_id: Optional[int],
+                       referencia_id: Optional[int]) -> Optional[int]:
+    """Valida el plan de comparación: del MISMO box y distinto de sí mismo.
+
+    `None` (o 0) = sin comparación. Un id de otro box se responde 400 (no 404):
+    el admin no tiene que distinguir "no existe" de "es de otro box".
+    """
+    if not referencia_id:
+        return None
+    if plan_id is not None and int(referencia_id) == int(plan_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Un plan no puede compararse consigo mismo.",
+        )
+    referencia = db.query(Plan).filter(
+        Plan.id == referencia_id, Plan.tenant_id == tenant_id).first()
+    if referencia is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El plan de referencia no existe en este box.",
+        )
+    return referencia.id
+
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 def crear_plan(
-    tenant_id: Optional[int] = None,
-    nombre: str = None,
-    precio_clp: int = None,
-    duracion_dias: int = 30,
-    creditos: Optional[int] = None,
-    es_ilimitado: bool = False,
-    genero: Optional[str] = None,
-    requiere_certificado_estudiante: bool = False,
+    data: PlanCreate,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
     """Crea un nuevo plan. Solo admin (tenant del token)."""
-    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT (el del body se ignora).
     tenant_id = current_user["tenant_id"]
+    nombre = (data.nombre or "").strip()
+    if not nombre:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="El nombre del plan no puede quedar vacío.")
     existing = db.query(Plan).filter(
         Plan.tenant_id == tenant_id,
         Plan.nombre == nombre
@@ -46,13 +121,20 @@ def crear_plan(
     db_plan = Plan(
         tenant_id=tenant_id,
         nombre=nombre,
-        precio_clp=precio_clp,
-        creditos=creditos,
-        es_ilimitado=es_ilimitado,
-        genero=genero,
-        requiere_certificado_estudiante=requiere_certificado_estudiante,
-        duracion_dias=duracion_dias,
-        activo=True
+        precio_clp=data.precio_clp,
+        creditos=data.creditos,
+        es_ilimitado=data.es_ilimitado,
+        genero=data.genero,
+        es_estudiante=data.es_estudiante,
+        # `requiere_certificado_estudiante` y `es_estudiante` llegan derivados del
+        # panel (fuente única: "es plan de estudiante"); se acepta cualquiera de
+        # los dos para que un cliente viejo no deje el plan a medias.
+        requiere_certificado_estudiante=bool(
+            data.requiere_certificado_estudiante or data.es_estudiante),
+        duracion_dias=data.duracion_dias,
+        activo=True if data.activo is None else bool(data.activo),
+        plan_referencia_id=_referencia_valida(
+            db, tenant_id, None, data.plan_referencia_id),
     )
     db.add(db_plan)
     commit_o_4xx(
@@ -169,19 +251,16 @@ def obtener_plan(
 @router.put("/{plan_id}")
 def actualizar_plan(
     plan_id: int,
-    nombre: Optional[str] = None,
-    precio_clp: Optional[int] = None,
-    creditos: Optional[int] = None,
-    es_ilimitado: Optional[bool] = None,
-    duracion_dias: Optional[int] = None,
-    activo: Optional[bool] = None,
-    genero: Optional[str] = None,
-    es_estudiante: Optional[bool] = None,
-    requiere_certificado_estudiante: Optional[bool] = None,
+    data: PlanUpdate,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Actualiza un plan existente. Solo admin (tenant del token)."""
+    """Actualiza un plan existente. Solo admin (tenant del token).
+
+    Sólo se tocan los campos que VIENEN en el body (`model_fields_set`), así un
+    `null` explícito limpia (`genero`, `plan_referencia_id`) y un campo ausente no
+    cambia nada.
+    """
     # 🔒 SEGURIDAD: tenant del token (antes no filtraba por tenant).
     tenant_id = current_user["tenant_id"]
     plan = db.query(Plan).filter(
@@ -194,24 +273,38 @@ def actualizar_plan(
             detail=f"Plan {plan_id} no encontrado"
         )
 
-    if nombre is not None:
+    campos = data.model_fields_set
+
+    if "nombre" in campos:
+        nombre = (data.nombre or "").strip()
+        if not nombre:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El nombre del plan no puede quedar vacío.",
+            )
         plan.nombre = nombre
-    if precio_clp is not None:
-        plan.precio_clp = precio_clp
-    if creditos is not None:
-        plan.creditos = creditos
-    if es_ilimitado is not None:
-        plan.es_ilimitado = es_ilimitado
-    if duracion_dias is not None:
-        plan.duracion_dias = duracion_dias
-    if activo is not None:
-        plan.activo = activo
-    if genero is not None:
-        plan.genero = genero
-    if es_estudiante is not None:
-        plan.es_estudiante = es_estudiante
-    if requiere_certificado_estudiante is not None:
-        plan.requiere_certificado_estudiante = requiere_certificado_estudiante
+    if "precio_clp" in campos:
+        plan.precio_clp = data.precio_clp
+    if "creditos" in campos:
+        # `null` se guarda como NULL (mismo contrato que la columna); el panel
+        # manda siempre un número, salvo el caso "ilimitado".
+        plan.creditos = data.creditos
+    if "es_ilimitado" in campos:
+        plan.es_ilimitado = data.es_ilimitado
+    if "duracion_dias" in campos:
+        plan.duracion_dias = data.duracion_dias
+    if "activo" in campos:
+        plan.activo = data.activo
+    if "genero" in campos:
+        # `null` = plan UNISEX (categoría "Larga duración").
+        plan.genero = data.genero
+    if "es_estudiante" in campos:
+        plan.es_estudiante = data.es_estudiante
+    if "requiere_certificado_estudiante" in campos:
+        plan.requiere_certificado_estudiante = data.requiere_certificado_estudiante
+    if "plan_referencia_id" in campos:
+        plan.plan_referencia_id = _referencia_valida(
+            db, tenant_id, plan.id, data.plan_referencia_id)
 
     commit_o_4xx(
         db,

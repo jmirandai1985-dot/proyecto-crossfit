@@ -195,15 +195,23 @@ def populate_daily_kpis(
     ).scalar() or 0
 
     ingresos_membresia = _sum_ingresos(db, tenant_id, objetivo, objetivo, "membresia")
+    # Matrícula: ingreso APARTE de la membresía (cobro único del alumno nuevo).
+    # Sin esto quedaría fuera del total diario: el bucket del data mart sólo tenía
+    # membresía + bazar y una categoría nueva NO se cuela sola (ver el comentario
+    # de `ingresos_total`, más abajo).
+    ingresos_matricula = _sum_ingresos(db, tenant_id, objetivo, objetivo,
+                                       "matricula")
     # Bazar: definición COMPARTIDA con Reportes y con el historial del alumno
     # (`metricas.ventas_bazar` = pedidos cobrados del día). Antes se sumaban transacciones con
     # `categoria='bazar'` y, como el Bazar NO inserta transacciones financieras, el KPI quedaba
     # SIEMPRE en 0 (bug corregido el 2026-10): la venta del Bazar era invisible para el BI.
     ingresos_bazar = metricas.ventas_bazar(db, tenant_id, objetivo, objetivo)
-    # El día suma las DOS fuentes de ingreso del box. El esquema diario no tiene un bucket
-    # "otros" (sólo membresía y bazar), así que una categoría nueva de transacción tiene que
-    # agregarse acá a propósito en vez de colarse sola en el total.
-    ingresos_total = ingresos_membresia + ingresos_bazar
+    # El día suma las TRES fuentes de ingreso del box (membresía + bazar +
+    # matrícula). El esquema diario no tiene un bucket "otros" (sólo membresía y
+    # bazar), así que una categoría nueva de transacción tiene que agregarse acá a
+    # propósito en vez de colarse sola en el total. La matrícula NO entra en
+    # `ingresos_membresia`: tiene su propio KPI (`/kpis/financiero.matricula`).
+    ingresos_total = ingresos_membresia + ingresos_bazar + ingresos_matricula
 
     row = db.query(DailyKpi).filter(
         DailyKpi.tenant_id == tenant_id, DailyKpi.fecha == objetivo
@@ -233,6 +241,9 @@ def populate_daily_kpis(
             "ocupacion_promedio": ocupacion,
             "ingresos_membresia": ingresos_membresia,
             "ingresos_bazar": ingresos_bazar,
+            # No se guarda en `daily_kpis` (no hay columna), pero se devuelve para
+            # poder explicar el total del día.
+            "ingresos_matricula": ingresos_matricula,
             "ingresos_total": ingresos_total,
         },
     }

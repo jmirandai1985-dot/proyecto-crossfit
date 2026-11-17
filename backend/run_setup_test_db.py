@@ -161,6 +161,23 @@ with engine.connect() as conn:
         "ALTER TABLE cobertura_emergencia ADD COLUMN IF NOT EXISTS usuario_id INT REFERENCES usuarios(id) ON DELETE CASCADE"))
     conn.execute(text(
         "ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS voucher_url VARCHAR(500)"))
+    # ── Migración 087/088: ahorro del plan largo + matrícula configurable ──
+    # `create_all()` crea las columnas sólo en un schema NUEVO; una branch TEST ya
+    # creada necesita el ALTER (mismo criterio que las columnas de arriba).
+    conn.execute(text(
+        "ALTER TABLE planes ADD COLUMN IF NOT EXISTS plan_referencia_id INTEGER "
+        "REFERENCES planes(id) ON DELETE SET NULL"))
+    conn.execute(text(
+        "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS matricula_activa "
+        "BOOLEAN NOT NULL DEFAULT false"))
+    conn.execute(text(
+        "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS matricula_monto_clp INTEGER"))
+    conn.execute(text(
+        "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS matricula_activada_en "
+        "TIMESTAMP WITH TIME ZONE"))
+    conn.execute(text(
+        "ALTER TABLE solicitudes_planes ADD COLUMN IF NOT EXISTS "
+        "matricula_clp_snapshot INTEGER"))
     conn.commit()
 print("[OK] Migraciones post-create aplicadas (requiere_coach, es_estudiante, coach_disciplinas, cobertura_emergencia, pedidos.voucher_url)")
 # ── DEFAULTS DE SERVIDOR (paridad con PROD) ────────────────────────────────

@@ -1,7 +1,17 @@
 import React, { useState } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
-import { usePlanes, useGuardarPlan, useEliminarPlan, SIN_DATOS } from '../../hooks/queries';
+import { fmtFechaChile } from '../../utils/fecha';
+// Reglas puras del ahorro de los planes largos (probadas sin navegador en
+// `scripts/test-planes-larga-duracion.mjs`). El ahorro NO se guarda: se recalcula.
+import {
+    ahorroDelPlan, creditosDesdeClasesPorMes, esPlanLargo, mesesDelPlan,
+    planesComparables,
+} from '../../utils/planes';
+import {
+    usePlanes, useGuardarPlan, useEliminarPlan, useMatriculaConfig,
+    useGuardarMatriculaConfig, SIN_DATOS,
+} from '../../hooks/queries';
 
 const TARJETAS = [
     { key: 'masculino', label: 'Masculino', barColor: 'border-l-blue-500', textColor: 'text-blue-400', genero: 'masculino', soloEstudiante: false },
@@ -9,6 +19,20 @@ const TARJETAS = [
     { key: 'estudiante_m', label: 'Estudiante Masculino', barColor: 'border-l-blue-500', textColor: 'text-blue-400', genero: 'masculino', soloEstudiante: true },
     { key: 'estudiante_f', label: 'Estudiante Femenino', barColor: 'border-l-pink-500', textColor: 'text-pink-400', genero: 'femenino', soloEstudiante: true },
 ];
+
+// Tarjeta PROPIA (misma jerarquía visual, al mismo nivel) de los planes UNISEX
+// (`genero = NULL`): trimestral / semestral / anual. Los cuatro bloques de arriba
+// NO se tocan. El criterio completo vive en `esPlanLargo` (utils/planes): exige
+// comercial y con precio, así que el plan "Prueba" del alta y el "Pase de regreso"
+// (los dos gratis) no aparecen acá.
+const TARJETA_LARGA = {
+    key: 'larga',
+    label: 'Larga duración (unisex)',
+    barColor: 'border-l-orange-500',
+    textColor: 'text-orange-400',
+    genero: null,
+    soloEstudiante: false,
+};
 
 // Campos numéricos del modal y su default cuando el valor queda vacío o inválido.
 // Mientras se edita se acepta el texto tal cual (incluido `''`): normalizar en el `onChange`
@@ -31,6 +55,10 @@ const normalizarNumericos = (datos) => {
     return normalizado;
 };
 
+/** `$60.000` — mismo formato que las otras pantallas del panel. */
+const fmtCLP = (monto) => `$${(Number(monto) || 0).toLocaleString('es-CL')}`;
+
+
 const Planes = () => {
     const { tenant_id } = useAuth();
     // Bloque 3 (parte A): la lista sale de la caché compartida y las mutaciones invalidan
@@ -40,42 +68,97 @@ const Planes = () => {
     const planes = data || SIN_DATOS;
     const guardar = useGuardarPlan();
     const eliminar = useEliminarPlan();
-    const [formData, setFormData] = useState({ nombre: '', precio_clp: 0, creditos: 0, duracion_dias: 30, genero: 'masculino', activo: true, es_estudiante: false, requiere_certificado_estudiante: false });
+    const [formData, setFormData] = useState({
+        nombre: '', precio_clp: 0, creditos: 0, duracion_dias: 30,
+        genero: 'masculino', activo: true, es_estudiante: false,
+        requiere_certificado_estudiante: false, es_ilimitado: false,
+    });
+    // "Clases por mes" es una CALCULADORA del formulario: no es una columna. Mientras
+    // el admin no la toque (`clasesPorMesTocado` false) se respeta `creditos` tal cual
+    // (un plan viejo de 100 créditos en 3 meses no se reescribe a 99 sin querer).
+    const [clasesPorMes, setClasesPorMes] = useState('');
+    const [clasesPorMesTocado, setClasesPorMesTocado] = useState(false);
+    const [planReferenciaId, setPlanReferenciaId] = useState('');
     const [editingId, setEditingId] = useState(null);
     const [showForm, setShowForm] = useState(false);
     // Acordeón de categorías: arranca solo la primera abierta; se pueden abrir varias a la vez.
     const [openCategories, setOpenCategories] = useState({ masculino: true });
     const toggleCategory = (key) => setOpenCategories(prev => ({ ...prev, [key]: !prev[key] }));
 
+    // ── Matrícula del box (panel superior) ──────────────────────────────────
+    const { data: configMatricula } = useMatriculaConfig();
+    const guardarMatricula = useGuardarMatriculaConfig();
+    // `null` = "todavía no lo tocó": manda el valor del servidor. Se DERIVA en el
+    // render (sin un efecto que copie estado) y, al guardar, se fija con la
+    // respuesta del PUT (que ya trae la config nueva).
+    const [matriculaActivaEdit, setMatriculaActivaEdit] = useState(null);
+    const [matriculaMontoEdit, setMatriculaMontoEdit] = useState(null);
+    const [mensajeMatricula, setMensajeMatricula] = useState('');
+    const matriculaActiva = matriculaActivaEdit === null
+        ? Boolean(configMatricula?.activa) : matriculaActivaEdit;
+    const matriculaMonto = matriculaMontoEdit === null
+        ? (configMatricula?.monto_clp ?? '') : matriculaMontoEdit;
+
+    const guardarConfigMatricula = async () => {
+        setMensajeMatricula('');
+        try {
+            const guardada = await guardarMatricula.mutateAsync({
+                activa: Boolean(matriculaActiva),
+                monto_clp: aEntero(matriculaMonto, 0),
+            });
+            setMatriculaActivaEdit(Boolean(guardada?.activa));
+            setMatriculaMontoEdit(guardada?.monto_clp ?? '');
+            setMensajeMatricula('Matrícula guardada.');
+        } catch (error) {
+            setMensajeMatricula(
+                error.response?.data?.detail || 'No se pudo guardar la matrícula.');
+        }
+    };
+
     const openNew = (tarjeta) => {
         setEditingId(null);
         setFormData({
             nombre: '', precio_clp: 0, creditos: 0, duracion_dias: 30,
-            genero: tarjeta.genero,
+            // La tarjeta unisex crea el plan con `genero = null` (lo que la hace
+            // aparecer en "Larga duración (unisex)" y en "Planes extendidos").
+            genero: tarjeta.key === 'larga' ? '' : tarjeta.genero,
             activo: true,
             es_estudiante: tarjeta.soloEstudiante,
             // Al dar "Añadir" en una tarjeta de estudiante, el plan nuevo se crea
             // como estudiantil (requiere certificado) de una — consistente con el
             // criterio real de filtrado.
             requiere_certificado_estudiante: tarjeta.soloEstudiante,
+            es_ilimitado: false,
         });
+        setClasesPorMes('');
+        setClasesPorMesTocado(false);
+        setPlanReferenciaId('');
         setShowForm(true);
     };
 
     const openEdit = (p) => {
+        // `requiere_certificado_estudiante` es la fuente REAL de "plan de
+        // estudiante" (los 6 planes viejos tienen `es_estudiante = False` con el
+        // certificado en True). Derivarlo al revés los degradaba al guardar.
+        const esEstudiante = p.requiere_certificado_estudiante === true;
+        const meses = mesesDelPlan(p.duracion_dias);
         setEditingId(p.id);
         setFormData({
-            // `creditos` es la única columna nullable de las tres (NULL = plan sin cupo; la
-            // marca de "ilimitado" vive aparte, en `es_ilimitado`, y no se edita en este modal).
-            // El input muestra '' y, si no se toca, el submit lo normaliza al default (0).
+            // `creditos` es la única columna nullable de las tres (NULL = plan sin cupo;
+            // la marca de "ilimitado" vive aparte, en `es_ilimitado`).
             nombre: p.nombre, precio_clp: p.precio_clp, creditos: p.creditos ?? '',
             duracion_dias: p.duracion_dias,
-            genero: p.genero || 'masculino',
+            // `|| 'masculino'` convertía un plan UNISEX en masculino al guardar.
+            genero: p.genero ?? '',
             activo: p.activo ?? true,
-            es_estudiante: p.es_estudiante ?? false,
-            // Derivado: un plan de estudiante SIEMPRE pide certificado (fuente unica).
-            requiere_certificado_estudiante: p.es_estudiante ?? false,
+            es_estudiante: esEstudiante,
+            requiere_certificado_estudiante: esEstudiante,
+            es_ilimitado: p.es_ilimitado === true,
         });
+        setClasesPorMes(
+            p.es_ilimitado || p.creditos == null ? '' : String(Math.round(p.creditos / meses)));
+        setClasesPorMesTocado(false);
+        setPlanReferenciaId(p.plan_referencia_id ? String(p.plan_referencia_id) : '');
         setShowForm(true);
     };
 
@@ -92,12 +175,31 @@ const Planes = () => {
         // numéricos acá también (campo vacío o inválido -> default de cada uno).
         const formNormalizado = normalizarNumericos(formData);
         setFormData(formNormalizado);
+        const esEstudiante = Boolean(formNormalizado.es_estudiante);
+        // Total de créditos: si el admin usó la calculadora, manda el producto
+        // (clases por mes × meses); si no, el valor tal cual estaba.
+        const totalCalculado = creditosDesdeClasesPorMes(
+            clasesPorMes, formNormalizado.duracion_dias);
+        const creditosFinal = clasesPorMesTocado && totalCalculado !== null
+            ? totalCalculado
+            : aEntero(formNormalizado.creditos, 0);
         try {
-            // `requiere_certificado_estudiante` se DERIVA de `es_estudiante` (fuente única
-            // del filtrado de planes estudiantiles); el tenant sólo viaja al crear.
+            // Payload EXPLÍCITO (el endpoint valida con `extra="forbid"`): lo que no
+            // está en la lista no viaja, y lo que se quiere LIMPIAR viaja en `null`.
             const payload = {
-                ...formNormalizado,
-                requiere_certificado_estudiante: formData.es_estudiante,
+                nombre: formNormalizado.nombre,
+                precio_clp: formNormalizado.precio_clp,
+                duracion_dias: formNormalizado.duracion_dias,
+                creditos: formNormalizado.es_ilimitado ? 0 : creditosFinal,
+                es_ilimitado: Boolean(formNormalizado.es_ilimitado),
+                // `null` = plan UNISEX (categoría "Larga duración").
+                genero: formNormalizado.genero || null,
+                es_estudiante: esEstudiante,
+                requiere_certificado_estudiante: esEstudiante,
+                // La comparación de ahorro sólo tiene sentido en los planes unisex.
+                plan_referencia_id: !formNormalizado.genero && planReferenciaId
+                    ? Number(planReferenciaId) : null,
+                activo: Boolean(formNormalizado.activo),
                 ...(editingId ? {} : { tenant_id }),
             };
             await guardar.mutateAsync({ id: editingId, payload });
@@ -119,11 +221,28 @@ const Planes = () => {
     // Regla de negocio (igual que la vista del alumno): un plan es
     // "estudiantil" si requiere_certificado_estudiante === true (NO
     // es_estudiante, que en los 6 planes con certificado quedó en False).
-    const planesPorTarjeta = (tarjeta) => planes.filter(p =>
-        p.genero === tarjeta.genero
-        && esPlanEstudiante(p) === tarjeta.soloEstudiante
-        && p.activo !== false
-    );
+    const planesPorTarjeta = (tarjeta) => planes.filter(p => (tarjeta.key === 'larga'
+        ? esPlanLargo(p)
+        : p.genero === tarjeta.genero
+            && esPlanEstudiante(p) === tarjeta.soloEstudiante
+            && p.activo !== false));
+
+    // Mensuales activos de las 4 categorías: candidatos a "comparar ahorro contra".
+    const comparables = planesComparables(planes).filter((p) => p.id !== editingId);
+
+    // Vista previa del formulario (misma aritmética que se guarda).
+    const duracionFormulario = aEntero(formData.duracion_dias, 30);
+    const mesesFormulario = mesesDelPlan(duracionFormulario);
+    const totalDesdeClases = creditosDesdeClasesPorMes(clasesPorMes, duracionFormulario);
+    const totalCreditosMostrado = clasesPorMesTocado && totalDesdeClases !== null
+        ? totalDesdeClases
+        : aEntero(formData.creditos, 0);
+
+    // Ahorro de una fila de la tarjeta larga (recalculado con los precios de HOY).
+    const ahorroDeFila = (p) => (p.plan_referencia_id
+        ? ahorroDelPlan(p, planes.find((r) => r.id === p.plan_referencia_id) || null)
+        : null);
+
 
     if (isPending) {
         return (<Layout><div className="flex items-center justify-center h-96"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900"></div></div></Layout>);
@@ -134,11 +253,67 @@ const Planes = () => {
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
                     <div><h1 className="text-3xl font-bold text-zinc-100">Planes</h1><p className="text-zinc-400 mt-1">Administra los planes de suscripción</p></div>
-                    <button onClick={() => openNew({ genero: 'masculino', soloEstudiante: false })} className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium text-sm">+ Nuevo Plan</button>
+                    <button onClick={() => openNew(TARJETAS[0])} className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium text-sm">+ Nuevo Plan</button>
+                </div>
+
+                {/* ── PARTE SUPERIOR: matrícula configurable (un valor por box) ── */}
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5"
+                    data-testid="panel-matricula">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                            <h2 className="text-base font-bold text-zinc-100">Matrícula</h2>
+                            <p className="text-sm text-zinc-400 mt-1">
+                                Cobro único para el <strong className="text-zinc-300">alumno nuevo</strong>
+                                {' '}(sin membresía pagada previa). Se suma al plan al momento de pagar.
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setMatriculaActivaEdit(!matriculaActiva)}
+                            data-testid="toggle-matricula"
+                            className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${matriculaActiva
+                                ? 'bg-emerald-600 text-white hover:bg-emerald-500'
+                                : 'border border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}>
+                            {matriculaActiva ? 'Activa' : 'Inactiva'}
+                        </button>
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-end gap-4">
+                        <div>
+                            <label htmlFor="matricula-monto"
+                                className="block text-xs text-zinc-500 mb-1">Monto ($)</label>
+                            <input id="matricula-monto" type="number" min="0"
+                                value={matriculaMonto}
+                                onChange={(e) => setMatriculaMonto(e.target.value)}
+                                data-testid="monto-matricula"
+                                className="w-40 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100" />
+                        </div>
+                        <p className="text-sm text-zinc-400">
+                            {configMatricula?.activada_en
+                                ? `Activa desde el ${fmtFechaChile(configMatricula.activada_en)}`
+                                : 'Todavía no se activó.'}
+                        </p>
+                        <p className="text-sm text-zinc-400" data-testid="contador-matricula">
+                            <strong className="text-zinc-200">
+                                {configMatricula?.alumnos_cobrados ?? 0}
+                            </strong>
+                            {' '}alumnos nuevos cobrados hasta hoy
+                        </p>
+                        <button type="button" onClick={guardarConfigMatricula}
+                            disabled={guardarMatricula.isPending}
+                            data-testid="guardar-matricula"
+                            className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium text-sm disabled:opacity-50">
+                            {guardarMatricula.isPending ? 'Guardando...' : 'Guardar matrícula'}
+                        </button>
+                    </div>
+                    {mensajeMatricula && (
+                        <p className="mt-3 text-sm text-zinc-300" data-testid="mensaje-matricula">
+                            {mensajeMatricula}
+                        </p>
+                    )}
                 </div>
 
                 <div className="space-y-3">
-                    {TARJETAS.map(tarjeta => {
+                    {[...TARJETAS, TARJETA_LARGA].map(tarjeta => {
                         const planesTarjeta = planesPorTarjeta(tarjeta);
                         const abierta = !!openCategories[tarjeta.key];
                         return (
@@ -165,7 +340,11 @@ const Planes = () => {
                                             <div className="px-5 py-6 text-center text-zinc-500 text-sm">No hay planes en esta categoría</div>
                                         ) : (
                                             <div className="divide-y divide-zinc-800">
-                                                {planesTarjeta.map(p => (
+                                                {planesTarjeta.map(p => {
+                                                    // Ahorro de los planes largos: se recalcula
+                                                    // con los precios vigentes (no se guarda).
+                                                    const ahorro = ahorroDeFila(p);
+                                                    return (
                                                     <div key={p.id} className="flex items-center justify-between px-4 py-3 hover:bg-zinc-800/30 transition-colors">
                                                         <div className="flex items-center gap-3 min-w-0">
                                                             <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${p.activo !== false ? 'bg-green-500' : 'bg-zinc-500'}`} title={p.activo !== false ? 'Activo' : 'Inactivo'} />
@@ -175,10 +354,26 @@ const Planes = () => {
                                                                     {esPlanEstudiante(p) && (
                                                                         <span className="bg-amber-500 text-white uppercase text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded">Estudiante</span>
                                                                     )}
+                                                                    {ahorro && (
+                                                                        <span
+                                                                            data-testid={`badge-ahorro-${p.id}`}
+                                                                            className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full">
+                                                                            Ahorra {fmtCLP(ahorro.ahorro)} ({ahorro.pct}%)
+                                                                        </span>
+                                                                    )}
                                                                 </div>
                                                                 <div className="text-sm text-zinc-400">
-                                                                    ${(p.precio_clp || 0).toLocaleString()} · {p.creditos || 0} créditos · {p.duracion_dias || 0} días
+                                                                    {fmtCLP(p.precio_clp)} · {p.es_ilimitado ? 'ilimitado' : `${p.creditos || 0} créditos`} · {p.duracion_dias || 0} días
                                                                 </div>
+                                                                {ahorro && (
+                                                                    <div
+                                                                        className="text-xs text-emerald-400/80"
+                                                                        data-testid={`ahorro-detalle-${p.id}`}>
+                                                                        vs. {ahorro.meses} {ahorro.meses === 1 ? 'mes' : 'meses'} de
+                                                                        {' '}'{planes.find((r) => r.id === p.plan_referencia_id)?.nombre}'
+                                                                        {' '}({fmtCLP(ahorro.contra)})
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         </div>
                                                         <div className="flex items-center gap-3 shrink-0 ml-4">
@@ -186,7 +381,8 @@ const Planes = () => {
                                                             <button onClick={() => handleDelete(p.id)} className="text-red-500 hover:text-red-400 hover:underline text-sm">Eliminar</button>
                                                         </div>
                                                     </div>
-                                                ))}
+                                                    );
+                                                })}
                                             </div>
                                         )}
                                     </div>
@@ -205,14 +401,80 @@ const Planes = () => {
                                     <input type="text" value={formData.nombre} onChange={e => setFormData({ ...formData, nombre: e.target.value })} required className="w-full border rounded px-3 py-2" /></div>
                                 <div><label className="block text-sm font-medium text-zinc-300 mb-1">Precio ($)</label>
                                     <input type="number" value={formData.precio_clp} onChange={e => setFormData({ ...formData, precio_clp: e.target.value })} onBlur={() => normalizarCampo('precio_clp')} className="w-full border rounded px-3 py-2" /></div>
-                                <div><label className="block text-sm font-medium text-zinc-300 mb-1">Créditos</label>
-                                    <input type="number" value={formData.creditos} onChange={e => setFormData({ ...formData, creditos: e.target.value })} onBlur={() => normalizarCampo('creditos')} className="w-full border rounded px-3 py-2" /></div>
+                                {/* Ilimitado / Limitado: antes `es_ilimitado` NO se podía
+                                    editar desde este modal (el PUT ya lo aceptaba). */}
+                                <div>
+                                    <label className="block text-sm font-medium text-zinc-300 mb-1">Clases</label>
+                                    <div className="flex gap-2">
+                                        <button type="button"
+                                            data-testid="plan-limitado"
+                                            onClick={() => setFormData({ ...formData, es_ilimitado: false })}
+                                            className={`flex-1 px-3 py-2 rounded text-sm font-medium border transition-colors ${formData.es_ilimitado
+                                                ? 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'
+                                                : 'border-orange-500 bg-orange-500/15 text-orange-300'}`}>
+                                            Limitado
+                                        </button>
+                                        <button type="button"
+                                            data-testid="plan-ilimitado"
+                                            onClick={() => setFormData({ ...formData, es_ilimitado: true })}
+                                            className={`flex-1 px-3 py-2 rounded text-sm font-medium border transition-colors ${formData.es_ilimitado
+                                                ? 'border-orange-500 bg-orange-500/15 text-orange-300'
+                                                : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}>
+                                            Ilimitado
+                                        </button>
+                                    </div>
+                                </div>
+                                {!formData.es_ilimitado && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-zinc-300 mb-1">
+                                            Clases por mes
+                                        </label>
+                                        <input type="number" min="0" value={clasesPorMes}
+                                            data-testid="plan-clases-por-mes"
+                                            onChange={(e) => {
+                                                setClasesPorMes(e.target.value);
+                                                setClasesPorMesTocado(true);
+                                            }}
+                                            className="w-full border rounded px-3 py-2" />
+                                        <p className="text-xs text-zinc-500 mt-1"
+                                            data-testid="plan-total-creditos">
+                                            = {totalCreditosMostrado} créditos totales para los
+                                            {' '}{duracionFormulario} días del plan
+                                            {' '}({mesesFormulario} {mesesFormulario === 1 ? 'mes' : 'meses'})
+                                        </p>
+                                    </div>
+                                )}
                                 <div><label className="block text-sm font-medium text-zinc-300 mb-1">Duración (días)</label>
                                     <input type="number" value={formData.duracion_dias} onChange={e => setFormData({ ...formData, duracion_dias: e.target.value })} onBlur={() => normalizarCampo('duracion_dias')} className="w-full border rounded px-3 py-2" /></div>
                                 <div><label className="block text-sm font-medium text-zinc-300 mb-1">Género</label>
                                     <select value={formData.genero} onChange={e => setFormData({ ...formData, genero: e.target.value })} className="w-full border rounded px-3 py-2">
                                         <option value="masculino">Masculino</option><option value="femenino">Femenino</option>
+                                        <option value="">Unisex (sin género)</option>
                                     </select></div>
+                                {/* Comparar el ahorro contra un mensual: sólo tiene sentido
+                                    en los planes UNISEX (los largos). */}
+                                {!formData.genero && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-zinc-300 mb-1">
+                                            Comparar ahorro contra
+                                        </label>
+                                        <select value={planReferenciaId}
+                                            onChange={e => setPlanReferenciaId(e.target.value)}
+                                            data-testid="plan-referencia"
+                                            className="w-full border rounded px-3 py-2">
+                                            <option value="">Sin comparación (no mostrar ahorro)</option>
+                                            {comparables.map((c) => (
+                                                <option key={c.id} value={c.id}>
+                                                    {c.nombre} — {fmtCLP(c.precio_clp)}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <p className="text-xs text-zinc-500 mt-1">
+                                            Mensuales activos del box. El ahorro se recalcula con
+                                            los precios vigentes de los dos planes.
+                                        </p>
+                                    </div>
+                                )}
                                 {formData.es_estudiante && (
                                     <>
                                         <div className="flex items-center gap-2 mt-2">

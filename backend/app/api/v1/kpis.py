@@ -964,6 +964,19 @@ def get_financiero(
         WHERE tenant_id = :tid AND tipo = 'ingreso' AND categoria = 'membresia'
     """), {"tid": tenant_id}).first()
 
+    # ── Matrícula: MISMA forma que `ticket_promedio`, filtrada a su categoría ──
+    # Es un ingreso APARTE de la membresía (`transacciones_financieras` con
+    # categoria='matricula', una fila por alumno nuevo). El ticket es el monto
+    # fijo vigente del box, salvo que haya cambiado entre medio (por eso promedio
+    # y no el valor de configuración de hoy).
+    matricula_tx = db.execute(sql_text("""
+        SELECT COUNT(*),
+               COALESCE(ROUND(AVG(monto)), 0),
+               COALESCE(SUM(monto), 0)
+        FROM transacciones_financieras
+        WHERE tenant_id = :tid AND tipo = 'ingreso' AND categoria = 'matricula'
+    """), {"tid": tenant_id}).first()
+
     # Vida del alumno: fecha_baja si está dado de baja; si no, hoy (censura a la
     # derecha, documentada en `limitaciones`).
     vida = db.execute(sql_text("""
@@ -998,6 +1011,17 @@ def get_financiero(
                 }
                 for r in planes
             ],
+        },
+        # Bloque propio de la matrícula (misma forma que `ticket_promedio`).
+        # `por_plan` queda vacío a propósito: la matrícula no pertenece a un plan.
+        "matricula": {
+            "global": float(matricula_tx[1] or 0),
+            "n_transacciones": int(matricula_tx[0] or 0),
+            "ingreso_total": float(matricula_tx[2] or 0),
+            "criterio": (
+                "avg(monto) de transacciones_financieras (tipo=ingreso, "
+                "categoria=matricula): el cobro único del alumno nuevo"),
+            "por_plan": [],
         },
         "vida": {
             "vida_promedio_dias": vida_dias,

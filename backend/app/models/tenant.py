@@ -23,6 +23,16 @@ class Tenant(Base):
     # Nunca usar `id` (serial adivinable) ni `subdomain` (texto corto) acá.
     public_id = Column(String(36), nullable=False, unique=True)
     activo = Column(Boolean, nullable=False, default=True)
+    # ── Matrícula configurable (UN valor por box, no por plan) ──────────────────
+    # Se cobra UNA sola vez, al alumno NUEVO (sin membresía paga previa), y el monto
+    # se CONGELA en la solicitud (`solicitudes_planes.matricula_clp_snapshot`): si el
+    # admin la apaga o la cambia después, las compras en curso no se mueven.
+    # `matricula_activada_en` es la fecha que muestra el panel ("Activa desde el X"):
+    # se escribe al encenderla y NO se borra al apagarla (historial del último cambio).
+    matricula_activa = Column(Boolean, nullable=False, default=False,
+                              server_default="false")
+    matricula_monto_clp = Column(Integer, nullable=True)
+    matricula_activada_en = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())
 

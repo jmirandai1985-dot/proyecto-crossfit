@@ -6,11 +6,14 @@ import { useAuth } from '../../context/AuthContext';
 // documentos salen de la caché compartida (`hooks/queries.js`), no de un `useEffect` que
 // repetía las mismas peticiones en cada montaje.
 import {
-    useConfiguracionBancaria, useCrearPagoMembresia, useMiPerfil,
+    useConfiguracionBancaria, useCrearPagoMembresia, useMiMatricula, useMiPerfil,
     useMisBeneficios, usePagoDisponible, usePlanesActivos, useSolicitarPlan,
     useSubirArchivoPrivado,
 } from '../../hooks/queries';
 import { fmtFechaChile } from '../../utils/fecha';
+// Los planes UNISEX (larga duración) tienen su propia sección: la regla de qué es
+// un plan largo vive en `utils/planes.js` (la comparte el panel del admin).
+import { esPlanLargo } from '../../utils/planes';
 
 const SolicitarPlan = () => {
     const { usuario_id, tenant_id } = useAuth();
@@ -29,6 +32,15 @@ const SolicitarPlan = () => {
     const sinSexo = Boolean(perfil) && !sexoAlumno;
 
     const planes = React.useMemo(() => planesQ.data || [], [planesQ.data]);
+
+    // ─── Matrícula del box (cobro único del alumno nuevo) ───────────────
+    // El backend decide si APLICA (matrícula activa + alumno sin membresía paga
+    // previa). La pantalla sólo muestra el número que va a cobrar MP/la
+    // transferencia; no recalcula la regla.
+    const matriculaQ = useMiMatricula();
+    const matriculaAplica = Boolean(matriculaQ.data?.aplica);
+    const montoMatricula = matriculaAplica
+        ? (Number(matriculaQ.data?.monto_a_cobrar) || 0) : 0;
 
     // ─── F2 + F3b: el descuento que se va a COBRAR en esta compra ──
     // `precios` viene del BACKEND (`/beneficios/mios?plan_ids=...`): la pantalla muestra el
@@ -105,10 +117,17 @@ const SolicitarPlan = () => {
         ? categoriaElegida
         : (sexoAlumno === 'M' ? 'masculino' : sexoAlumno === 'F' ? 'femenino' : null);
 
+    // Los planes de LARGA DURACIÓN (unisex) van en su PROPIA sección, al mismo nivel
+    // visual que las otras dos: si quedaran en `planesFiltrados` se mezclarían con los
+    // mensuales de la categoría elegida.
+    const planesExtendidos = React.useMemo(
+        () => planes.filter(esPlanLargo), [planes]);
+
     const planesFiltrados = React.useMemo(() => (
-        categoriaSeleccionada
+        (categoriaSeleccionada
             ? planes.filter((p) => !p.genero || p.genero === categoriaSeleccionada)
             : planes
+        ).filter((p) => !esPlanLargo(p))
     ), [categoriaSeleccionada, planes]);
 
     // Separar planes regulares y de estudiante
@@ -124,6 +143,13 @@ const SolicitarPlan = () => {
      * anuncia el monto de la misma fuente que el resumen.
      */
     const precioAPagar = (plan) => precioConDescuento(plan)?.precio_final_clp ?? plan?.precio_clp ?? null;
+
+    /**
+     * Lo que se cobra en ESTA compra: el plan (con descuento si hay) + la matrícula
+     * cuando el backend dijo que aplica. Es el mismo total que arma el backend en la
+     * preferencia de Mercado Pago (`precio_final_clp + matricula_clp_snapshot`).
+     */
+    const totalAPagar = (plan) => (Number(precioAPagar(plan)) || 0) + montoMatricula;
 
     /** dd-mm-aaaa de la vigencia del descuento (lo que ve el alumno en el aviso). */
     const vigenciaDescuento = () => {
@@ -396,7 +422,8 @@ const SolicitarPlan = () => {
                         {/* ── El descuento vigente, antes de elegir (F2) ── */}
                         {avisoDescuento}
 
-                        {planesRegulares.length === 0 && planesEstudiante.length === 0 && (
+                        {planesRegulares.length === 0 && planesEstudiante.length === 0
+                            && planesExtendidos.length === 0 && (
                             <div className="col-span-full text-center py-12">
                                 <p className="text-gray-400 text-lg mb-2">📋 No hay planes disponibles</p>
                                 <p className="text-gray-400 text-sm">Prueba seleccionando otra categoría arriba</p>
@@ -423,6 +450,24 @@ const SolicitarPlan = () => {
                                 </h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                                     {planesEstudiante.map(renderPlanCard)}
+                                </div>
+                            </div>
+                        )}
+                        {/* ─── PLANES EXTENDIDOS (larga duración) ───
+                            Sección PROPIA, al mismo nivel que las otras dos: NO depende
+                            de la categoría elegida (un plan unisex sirve para todos) y
+                            no se mezcla con los mensuales de la categoría. */}
+                        {planesExtendidos.length > 0 && (
+                            <div className="mt-6" data-testid="planes-extendidos">
+                                <h3 className="text-sm font-bold text-emerald-600 uppercase tracking-wider mb-3">
+                                    PLANES EXTENDIDOS
+                                </h3>
+                                <p className="text-xs text-gray-500 mb-3">
+                                    Trimestral, semestral o anual: el mismo box, con un precio
+                                    por mes más bajo.
+                                </p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                                    {planesExtendidos.map(renderPlanCard)}
                                 </div>
                             </div>
                         )}
@@ -459,6 +504,27 @@ const SolicitarPlan = () => {
                                     Descuento aplicado: −{descuento.descuento_pct} % · {motivoDescuento()}
                                     {' '}· paga el precio final
                                 </p>
+                            )}
+                            {/* Matrícula: SÓLO si el backend dice que aplica (activa +
+                                alumno nuevo). El total es lo que cobra Mercado Pago y
+                                lo que el alumno transfiere. */}
+                            {matriculaAplica && (
+                                <div className="mt-3 border-t border-emerald-200 pt-3 space-y-1 text-sm"
+                                    data-testid="resumen-matricula">
+                                    <div className="flex items-center justify-between text-gray-700">
+                                        <span>Matrícula (alumno nuevo)</span>
+                                        <span className="font-semibold">
+                                            {formatearPrecio(montoMatricula)}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center justify-between text-gray-800">
+                                        <span className="font-bold">Total a pagar</span>
+                                        <span className="font-bold text-emerald-700"
+                                            data-testid="resumen-total">
+                                            {formatearPrecio(totalAPagar(planSeleccionado))}
+                                        </span>
+                                    </div>
+                                </div>
                             )}
                         </div>
 
@@ -547,7 +613,7 @@ const SolicitarPlan = () => {
                                     {yendoAPagar
                                         ? 'Redirigiendo a Mercado Pago...'
                                         : (precioAPagar(planSeleccionado)
-                                            ? `💳 Pagar ${formatearPrecio(precioAPagar(planSeleccionado))} con Mercado Pago`
+                                            ? `💳 Pagar ${formatearPrecio(totalAPagar(planSeleccionado))} con Mercado Pago`
                                             : '💳 Pagar con Mercado Pago')}
                                 </button>
                                 {planSeleccionado.requiere_certificado_estudiante && !archivoCertificado && (

@@ -10,7 +10,7 @@
     comprar_emergencia, fix_fechas, supervision,
     finanzas, configuracion, alumnos, asistencia, ranking, kpis,
     kpis_populate, ml, segmentacion, historial_alumno, fidelizacion_plantillas,
-    beneficios, marketing, referidos, pagos, mp_webhook
+    beneficios, marketing, referidos, pagos, mp_webhook, matricula
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, status
@@ -365,6 +365,9 @@ app.include_router(finanzas.router,
                    prefix="/api/v1/finanzas", tags=["Finanzas"])
 app.include_router(configuracion.router,
                    prefix="/api/v1/configuracion", tags=["Configuración"])
+# Matrícula configurable del box (panel de Planes + resumen de pago del alumno).
+app.include_router(matricula.router,
+                   prefix="/api/v1/matricula", tags=["Matrícula"])
 # Historial del alumno: MISMO prefijo y ANTES que `alumnos.router`, para que
 # `/api/v1/alumnos/me/historial` (literal) se resuelva antes que cualquier ruta con
 # `{alumno_id}` y "me" nunca se intente parsear como int.
