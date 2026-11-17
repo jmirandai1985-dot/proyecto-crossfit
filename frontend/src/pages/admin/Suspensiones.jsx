@@ -1,6 +1,10 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
+// La suspensión recién creada tiene que aparecer en el listado SIN recargar la página:
+// se invalida la FAMILIA del listado + resumen de suspensiones del admin.
+import { useQueryClient } from '@tanstack/react-query';
 import Layout from '../../components/Layout';
-import { useResumenSuspensiones, useSuspensionesAdmin } from '../../hooks/queries';
+import NuevaSuspensionModal from '../../components/admin/NuevaSuspensionModal';
+import { claves, useResumenSuspensiones, useSuspensionesAdmin } from '../../hooks/queries';
 import { fmtFechaChile } from '../../utils/fecha';
 
 const ESTADOS = [
@@ -24,24 +28,62 @@ const tonoEstado = (estado) => {
 const etiquetaEstado = (estado) => ESTADOS.find((e) => e.key === estado)?.label || estado;
 
 /**
- * Suspensiones de plan (panel admin, SÓLO LECTURA).
+ * Suspensiones de plan (panel admin): supervisión + alta de la suspensión por salud.
  *
- * POR QUÉ EXISTE: la suspensión es self-service del alumno (sin aprobación), así
- * que el admin no acciona nada acá — sólo supervisa quién está suspendido, cuántos
- * días y cuántas reservas se cancelaron de paso. Reusa el patrón visual de las
- * otras tablas del admin (Pedidos/Clases): header, KPIs, filtros y tabla.
+ * POR QUÉ EXISTE: la suspensión self-service la pide el alumno (sin aprobación), así que
+ * el admin no acciona nada en ese caso — sólo supervisa quién está suspendido, cuántos
+ * días y cuántas reservas se cancelaron de paso. La suspensión POR SALUD sí la crea el
+ * admin, y hasta ahora eso sólo se podía desde la ficha del alumno (Alumnos → ficha →
+ * pestaña "Suspensión"). El botón "+ Nueva suspensión" abre un modal de 2 pasos
+ * (elegir alumno → fechas) que monta el MISMO `SuspensionSaludPanel` de la ficha: no
+ * hay formulario ni reglas duplicadas.
+ *
+ * Reusa el patrón visual de las otras tablas del admin (Pedidos/Clases): header, KPIs,
+ * filtros y tabla. La tabla scrollea horizontal en celular (`overflow-x-auto`) y el
+ * modal entra a pantalla completa (`max-h-[92dvh] overflow-y-auto`), así que no hace
+ * falta una pantalla móvil aparte.
  */
 const Suspensiones = () => {
     const [buscar, setBuscar] = useState('');
     const [estado, setEstado] = useState('');
     const [desde, setDesde] = useState('');
     const [hasta, setHasta] = useState('');
+    // Modal "+ Nueva suspensión" (2 pasos: alumno -> panel de suspensión por salud).
+    const [modalNueva, setModalNueva] = useState(false);
+    // Confirmación de la suspensión recién creada: el modal se cierra solo y el aviso
+    // del panel (`SuspensionSaludPanel`) se va con él, así que queda acá.
+    const [avisoCreada, setAvisoCreada] = useState('');
+
+    const qc = useQueryClient();
 
     const listadoQ = useSuspensionesAdmin({ buscar, estado, desde, hasta });
     const resumenQ = useResumenSuspensiones();
 
     const items = listadoQ.data || [];
     const kpis = resumenQ.data || {};
+
+    // Refresca el listado (con CUALQUIER filtro activo) y el resumen de KPIs de una vez:
+    // la clave familia es el prefijo de las dos consultas.
+    const refrescarSuspensiones = useCallback(() => {
+        qc.invalidateQueries({ queryKey: claves.suspensionesAdminFamilia });
+    }, [qc]);
+
+    // La suspensión se creó bien desde el panel: cerrar el modal y mostrar la fila nueva.
+    const alCrearSuspension = useCallback((alumno) => {
+        refrescarSuspensiones();
+        setModalNueva(false);
+        setAvisoCreada(
+            `Suspensión por salud creada para ${alumno?.nombre || 'el alumno'}.`
+            + ' El listado ya la muestra.',
+        );
+    }, [refrescarSuspensiones]);
+
+    // Cerrar sin crear también refresca: desde el historial del panel se puede CANCELAR
+    // una suspensión por salud, y esa fila cambia de estado.
+    const cerrarModalNueva = useCallback(() => {
+        refrescarSuspensiones();
+        setModalNueva(false);
+    }, [refrescarSuspensiones]);
 
     const kpiCards = [
         { label: 'Activas hoy', valor: kpis.activas_hoy ?? 0, icon: '🟢' },
@@ -59,11 +101,36 @@ const Suspensiones = () => {
                     <div>
                         <h1 className="text-2xl font-extrabold text-zinc-100">Suspensiones de plan</h1>
                         <p className="text-zinc-400 text-sm mt-1">
-                            Supervisión de las suspensiones self-service: quién pausó su plan,
-                            cuántos días y cuántas reservas se cancelaron.
+                            Supervisión de las suspensiones self-service y alta de la suspensión
+                            por salud (licencia médica) del alumno.
                         </p>
                     </div>
+                    {/* Mismo botón naranja del resto del panel (Clases, Coaches, Disciplinas). */}
+                    <button
+                        type="button"
+                        onClick={() => setModalNueva(true)}
+                        data-testid="btn-nueva-suspension"
+                        className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium text-sm self-start"
+                    >
+                        + Nueva suspensión
+                    </button>
                 </div>
+
+                {avisoCreada && (
+                    <div
+                        className="flex items-start justify-between gap-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-3 mb-6 text-sm text-emerald-300"
+                        data-testid="aviso-suspension-creada"
+                    >
+                        <p>{avisoCreada}</p>
+                        <button
+                            type="button"
+                            onClick={() => setAvisoCreada('')}
+                            className="flex-none text-xs font-bold text-emerald-200 hover:text-white"
+                        >
+                            Ocultar
+                        </button>
+                    </div>
+                )}
 
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                     {kpiCards.map((k) => (
@@ -157,6 +224,14 @@ const Suspensiones = () => {
                             </table>
                         </div>
                     </div>
+                )}
+
+                {/* Paso 1 (buscar alumno) + paso 2 (el mismo panel de la ficha). */}
+                {modalNueva && (
+                    <NuevaSuspensionModal
+                        onCerrar={cerrarModalNueva}
+                        onCreada={alCrearSuspension}
+                    />
                 )}
             </div>
         </Layout>
