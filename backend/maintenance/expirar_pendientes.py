@@ -1,19 +1,24 @@
 """Expira pagos online que nunca se cobraron — Cron Job de Render (horario).
 
-`app/services/pagos.expirar_pendientes` cierra los cobros abandonados (membresía
-y Bazar, 30 min cada uno), pero vive en la APP (SQLAlchemy) y no puede correr en
-la imagen de cron (`Dockerfile.cron` es mínima). Este módulo replica la MISMA
-regla en SQL y habla con la base por `psql` (igual que `mantenimiento_cloud`).
+`app/services/pagos.expirar_pendientes` cierra los cobros abandonados (membresía:
+5 min para el intento `iniciado` sin ningún aviso de MP y 30 min para un pago
+REAL `pendiente`/`en_proceso`; Bazar: 30 min), pero vive en la APP (SQLAlchemy) y
+no puede correr en la imagen de cron (`Dockerfile.cron` es mínima). Este módulo
+replica la MISMA regla en SQL y habla con la base por `psql` (igual que
+`mantenimiento_cloud`).
 
 ⚠️ El cron corre cada HORA (`render.yaml`: `schedule: "0 * * * *"`), así que con
-un umbral de 30 min el cierre efectivo ocurre dentro de la hora siguiente a
-vencer (hasta ~60 min). El camino rápido para el alumno que SÍ vuelve a la app es
-el botón "Cancelar" (`POST /pagos/{id}/cancelar`), que cierra al toque.
+el umbral de 5 min para el intento el cierre efectivo ocurre dentro de la hora
+siguiente a vencer (hasta ~60 min). El guard que ve el alumno (`iniciado_vigente`,
+en la app) es en TIEMPO REAL y no depende del cron. El camino rápido para el
+alumno que SÍ vuelve a la app es el botón "Cancelar"
+(`POST /pagos/{id}/cancelar`), que cierra al toque.
 
 Qué hace (UNA transacción, idempotente):
-  * Membresía (30 min): pago abierto viejo → `expirado` + solicitud `pending` → `expirada`.
+  * Membresía con aviso real (30 min): pago abierto viejo → `expirado` +
+    solicitud `pending` → `expirada`.
     ⚠️ NO se notifica al alumno al expirar (mejora futura: aviso en su campana).
-  * Membresía `iniciado` (30 min): el alumno nunca hizo nada en MP; se cierra
+  * Membresía `iniciado` (5 min): el alumno nunca hizo nada en MP; se cierra
     igual (housekeeping) y la solicitud oculta pasa a `expirada`. El admin nunca
     la vio; NO es lo que mantiene limpia su cola.
   * Bazar (30 min): pago abierto viejo → `expirado` + pedido `pendiente` → `rechazado`
@@ -34,45 +39,61 @@ import os
 import subprocess
 import sys
 
-# Regla de expiración (misma que `MINUTOS_BAZAR`/`MINUTOS_MEMBRESIA` y
-# `COMENTARIO_EXPIRADA` en app/services/pagos.py). Va en MINUTOS: la membresía ya
-# no espera horas — una intención de pago abandonada no puede bloquear al alumno.
+# Regla de expiración (misma que `MINUTOS_BAZAR`/`MINUTOS_MEMBRESIA`/
+# `MINUTOS_GUARD_MEMBRESIA` y los `COMENTARIO_EXPIRADA*` en
+# app/services/pagos.py). Va en MINUTOS. **Dos umbrales de membresía**:
+#   • `MINUTOS_GUARD_MEMBRESIA` (5): intento `iniciado` sin ningún aviso de MP.
+#   • `MINUTOS_MEMBRESIA` (30): pago REAL `pendiente`/`en_proceso` (ya hubo aviso).
+# El Bazar conserva 30 min porque reserva stock.
+MINUTOS_GUARD_MEMBRESIA = 5
 MINUTOS_MEMBRESIA = 30
 MINUTOS_BAZAR = 30
 COMENTARIO_EXPIRADA = f"Expirada: pago online no completado en {MINUTOS_MEMBRESIA} min"
+COMENTARIO_EXPIRADA_INTENTO = (
+    "Expirada: intento de pago no completado en "
+    f"{MINUTOS_GUARD_MEMBRESIA} min"
+)
 
 SQL_EXPIRAR = f"""
 WITH vencidos AS (
-    SELECT id, concepto, referencia_id
+    SELECT id, concepto, referencia_id, estado
     FROM pagos
-    WHERE estado IN ('iniciado', 'pendiente', 'en_proceso')
-      AND (
-          (concepto = 'membresia' AND created_at <= now() - interval '{MINUTOS_MEMBRESIA} minutes')
-          OR
-          (concepto = 'bazar' AND created_at <= now() - interval '{MINUTOS_BAZAR} minutes')
-      )
-)
-UPDATE pagos p
-SET estado = 'expirado'
-FROM vencidos v
-WHERE p.id = v.id;
-
-UPDATE solicitudes_planes s
-SET estado = 'expirada',
-    comentario_admin = '{COMENTARIO_EXPIRADA}'
-FROM pagos p
-WHERE s.id = p.referencia_id
-  AND p.concepto = 'membresia'
-  AND p.estado = 'expirado'
-  AND s.estado IN ('iniciado', 'pending');
-
-WITH rechazados AS (
+    WHERE (
+        (estado = 'iniciado' AND concepto = 'membresia'
+         AND created_at <= now() - interval '{MINUTOS_GUARD_MEMBRESIA} minutes')
+        OR (estado IN ('pendiente', 'en_proceso')
+            AND (
+                (concepto = 'membresia' AND created_at <= now() - interval '{MINUTOS_MEMBRESIA} minutes')
+                OR (concepto = 'bazar' AND created_at <= now() - interval '{MINUTOS_BAZAR} minutes')
+            ))
+    )
+),
+cerrados AS (
+    UPDATE pagos p
+    SET estado = 'expirado'
+    FROM vencidos v
+    WHERE p.id = v.id
+    RETURNING p.id, v.concepto, v.referencia_id, v.estado AS estado_anterior
+),
+solicitudes_cerradas AS (
+    UPDATE solicitudes_planes s
+    SET estado = 'expirada',
+        comentario_admin = CASE
+            WHEN c.estado_anterior = 'iniciado' THEN '{COMENTARIO_EXPIRADA_INTENTO}'
+            ELSE '{COMENTARIO_EXPIRADA}'
+        END
+    FROM cerrados c
+    WHERE c.concepto = 'membresia'
+      AND s.id = c.referencia_id
+      AND s.estado IN ('iniciado', 'pending')
+    RETURNING s.id
+),
+rechazados AS (
     UPDATE pedidos pe
     SET estado = 'rechazado'
-    FROM pagos p
-    WHERE pe.id = p.referencia_id
-      AND p.concepto = 'bazar'
-      AND p.estado = 'expirado'
+    FROM cerrados c
+    WHERE c.concepto = 'bazar'
+      AND pe.id = c.referencia_id
       AND pe.estado = 'pendiente'
     RETURNING pe.producto_id, pe.cantidad
 ),
@@ -90,14 +111,19 @@ WHERE pr.id = s.producto_id;
 SQL_CONTEO = f"""
 SELECT
   (SELECT count(*) FROM pagos
-   WHERE estado IN ('iniciado', 'pendiente', 'en_proceso')
-     AND ((concepto = 'membresia' AND created_at <= now() - interval '{MINUTOS_MEMBRESIA} minutes')
-       OR (concepto = 'bazar' AND created_at <= now() - interval '{MINUTOS_BAZAR} minutes'))) AS pagos,
+   WHERE (estado = 'iniciado' AND concepto = 'membresia'
+          AND created_at <= now() - interval '{MINUTOS_GUARD_MEMBRESIA} minutes')
+      OR (estado IN ('pendiente', 'en_proceso')
+          AND ((concepto = 'membresia' AND created_at <= now() - interval '{MINUTOS_MEMBRESIA} minutes')
+            OR (concepto = 'bazar' AND created_at <= now() - interval '{MINUTOS_BAZAR} minutes')))) AS pagos,
   (SELECT count(*) FROM solicitudes_planes s
    JOIN pagos p ON p.referencia_id = s.id AND p.concepto = 'membresia'
-   WHERE p.estado IN ('iniciado', 'pendiente', 'en_proceso')
-     AND p.created_at <= now() - interval '{MINUTOS_MEMBRESIA} minutes'
-     AND s.estado IN ('iniciado', 'pending')) AS solicitudes,
+   WHERE (p.estado = 'iniciado'
+          AND p.created_at <= now() - interval '{MINUTOS_GUARD_MEMBRESIA} minutes'
+          AND s.estado = 'iniciado')
+      OR (p.estado IN ('pendiente', 'en_proceso')
+          AND p.created_at <= now() - interval '{MINUTOS_MEMBRESIA} minutes'
+          AND s.estado = 'pending')) AS solicitudes,
   (SELECT count(*) FROM pedidos pe
    JOIN pagos p ON p.referencia_id = pe.id AND p.concepto = 'bazar'
    WHERE p.estado IN ('pendiente', 'en_proceso')

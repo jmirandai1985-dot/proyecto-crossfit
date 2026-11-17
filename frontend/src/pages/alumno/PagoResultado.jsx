@@ -15,7 +15,8 @@ import { useCancelarPago, usePago } from '../../hooks/queries';
  * "Cancelar": el caso del alumno que vuelve sin haber metido la tarjeta, donde
  * Mercado Pago no generó ningún pago que rechazar (`POST /pagos/{id}/cancelar`
  * cierra la solicitud oculta y libera el guard de intentos en curso). El que NO
- * vuelve lo cierra la expiración automática a los 30 min.
+ * vuelve lo cierra la expiración automática: 5 min si el pago nunca tuvo aviso
+ * de MP (`iniciado`) y 30 min si ya estaba `pendiente`/`en_proceso`.
  *
  * La URL es `/alumno/pago/resultado/:pagoId`: Mercado Pago agrega sus propios
  * query params (`collection_id`, `status`, ...) y no se leen a propósito —

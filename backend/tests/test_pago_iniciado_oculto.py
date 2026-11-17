@@ -6,7 +6,7 @@ de intentos en curso y el cierre por rechazo, con una DB falsa.
 Qué congelan:
 
   * un clic en "Pagar con tarjeta" deja el pago en `iniciado`: NO reserva el
-    guard para siempre (la ventana es de 30 min) y NO se confunde con un pago
+    guard para siempre (la ventana es de 5 min) y NO se confunde con un pago
     `pendiente` ni con el Bazar;
   * el PRIMER webhook abre la solicitud oculta (`iniciado` -> `pending`) o la
     cierra (`rejected`) si MP rechaza/cancela/reembolsa;
@@ -74,14 +74,14 @@ class _DBPromocion:
 
 
 # ── Ventana del guard ────────────────────────────────────────────────────────
-def test_un_iniciado_de_29_minutos_sigue_reservando_el_guard():
+def test_un_iniciado_de_4_minutos_sigue_reservando_el_guard():
     assert servicio_pagos.iniciado_vigente(
-        _pago(minutos=29), ahora=AHORA) is True
+        _pago(minutos=4), ahora=AHORA) is True
 
 
-def test_un_iniciado_de_31_minutos_ya_no_reserva_el_guard():
+def test_un_iniciado_de_6_minutos_ya_no_reserva_el_guard():
     assert servicio_pagos.iniciado_vigente(
-        _pago(minutos=31), ahora=AHORA) is False
+        _pago(minutos=6), ahora=AHORA) is False
 
 
 @pytest.mark.parametrize("pago", [
@@ -193,14 +193,14 @@ def test_el_guard_sigue_bloqueando_una_solicitud_pending():
 
 
 def test_el_guard_bloquea_un_segundo_checkout_con_un_iniciado_fresco():
-    db = _DBGuard(pagos=[_pago(minutos=5)])
+    db = _DBGuard(pagos=[_pago(minutos=4)])
 
     assert servicio_pagos.bloqueo_solicitud_en_curso(
         db, tenant_id=1, alumno_id=2, ahora=AHORA) == "pago_en_curso"
 
 
 def test_el_guard_se_libera_cuando_el_iniciado_ya_vencio():
-    db = _DBGuard(pagos=[_pago(minutos=31)])
+    db = _DBGuard(pagos=[_pago(minutos=6)])
 
     assert servicio_pagos.bloqueo_solicitud_en_curso(
         db, tenant_id=1, alumno_id=2, ahora=AHORA) is None

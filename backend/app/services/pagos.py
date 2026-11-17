@@ -55,8 +55,8 @@ CONCEPTO_BAZAR = "bazar"
 # 1. **El alumno nunca hizo nada en Mercado Pago** (cerró la pestaña o volvió con
 #    el botón atrás del teléfono antes de meter un dato). No hay webhook: el pago
 #    queda `iniciado` y la solicitud oculta, y el admin NO ve nada. No hace falta
-#    cron para este caso; el guard de intentos en curso se libera solo a los 30
-#    min (`_payment_intent_vigente`) y el siguiente intento limpia la fila vieja.
+#    cron para este caso; el guard de intentos en curso se libera solo a los
+#    `MINUTOS_GUARD_MEMBRESIA` (5) y el siguiente intento limpia la fila vieja.
 #
 # 2. **Sí hubo un aviso real de MP y el alumno abandonó a mitad de camino** (dejó
 #    el formulario a medio llenar, pagó en efectivo, etc.). Ahí la solicitud ya es
@@ -64,16 +64,32 @@ CONCEPTO_BAZAR = "bazar"
 #   • el botón "Cancelar" de la pantalla de retorno (`POST /pagos/{id}/cancelar`)
 #     para el alumno que SÍ vuelve a la app;
 #   • esta expiración automática para el que nunca vuelve.
-# Los dos conceptos usan el MISMO criterio (30 min), porque los dos reservan algo
-# que otro alumno no puede usar: el Bazar descuenta stock y la membresía bloquea
-# el guard "ya tienes una solicitud pendiente".
+#
+# **DOS umbrales de membresía, a propósito** (no se igualan):
+#   • `MINUTOS_GUARD_MEMBRESIA` (5): cuánto bloquea un intento `iniciado` sin
+#     ningún aviso de MP y cuándo se limpia esa fila invisible. Es lo que ve el
+#     alumno al volver a tocar "Pagar".
+#   • `MINUTOS_MEMBRESIA` (30): cuánto se espera un pago REAL que MP ya reportó
+#     como `pendiente`/`en_proceso` (transferencia, efectivo, revisión) antes de
+#     expirarlo. Un aviso real merece margen: si el cron lo expira antes de la
+#     aprobación, el plan no se activa solo.
+# El Bazar conserva su ventana (`MINUTOS_BAZAR`, 30) porque reserva stock.
 # ⚠️ El cron de producción (`render.yaml`, job `box-crossfit-expirar-pendientes`)
-# corre cada HORA: con 30 min de umbral, el cierre efectivo ocurre dentro de la
-# hora siguiente a vencer (hasta ~60 min). El botón Cancelar es el camino rápido.
+# corre cada HORA: con 5 min de umbral para el intento, el cierre efectivo ocurre
+# dentro de la hora siguiente a vencer (hasta ~60 min); el guard en tiempo real no
+# depende del cron. El botón Cancelar es el camino rápido.
 MINUTOS_BAZAR = 30
 MINUTOS_MEMBRESIA = 30
-# Comentario que ve el admin cuando la expiración automática cierra la solicitud.
+MINUTOS_GUARD_MEMBRESIA = 5
+# Comentario que ve el admin cuando la expiración automática cierra la solicitud
+# de un pago REAL (ya había un aviso de MP).
 COMENTARIO_EXPIRADA = f"Expirada: pago online no completado en {MINUTOS_MEMBRESIA} min"
+# Comentario para la intención `iniciado` que nunca tuvo aviso de MP (no la ve el
+# admin; es trazabilidad interna).
+COMENTARIO_EXPIRADA_INTENTO = (
+    "Expirada: intento de pago no completado en "
+    f"{MINUTOS_GUARD_MEMBRESIA} min"
+)
 # Comentario cuando es el PROPIO alumno el que cancela desde la app.
 COMENTARIO_CANCELADO_ALUMNO = "Cancelado por el alumno antes de completar el pago"
 # Estados desde los que un pago todavía se puede cancelar desde la app: si el
@@ -88,7 +104,7 @@ ESTADOS_WEBHOOK_QUE_CIERRAN = ("rechazado", "cancelado", "reembolsado")
 # Mensaje del guard cuando ya hay un checkout online abierto sin webhook.
 MENSAJE_PAGO_EN_CURSO = (
     "Ya tienes un pago en curso. Termínalo o espera "
-    f"{MINUTOS_MEMBRESIA} minutos antes de intentar otra vez."
+    f"{MINUTOS_GUARD_MEMBRESIA} minutos antes de intentar otra vez."
 )
 
 
@@ -109,17 +125,17 @@ class ErrorPago(Exception):
 # ── Guard de "solicitud en curso" (membresía) ────────────────────────────────
 # Dos cosas distintas bloquean abrir OTRO checkout/solicitud para el mismo
 # alumno: una solicitud `pending` (transferencia enviada u online ya avisada por
-# MP) o un pago `iniciado` con menos de 30 min (checkout abierto sin ningún
-# aviso todavía). El umbral es el MISMO de la expiración: el guard se libera por
-# tiempo, sin depender de un cron.
+# MP) o un pago `iniciado` con menos de `MINUTOS_GUARD_MEMBRESIA` (checkout
+# abierto sin ningún aviso todavía). El guard se libera por tiempo, sin depender
+# de un cron; los 5 min son sólo para el intento `iniciado`, no para un pago real.
 def iniciado_vigente(pago, *, ahora=None,
-                     minutos: int = MINUTOS_MEMBRESIA) -> bool:
+                     minutos: int = MINUTOS_GUARD_MEMBRESIA) -> bool:
     """¿Este pago `iniciado` todavía reserva el guard de intentos en curso?
 
     Puro (sin DB): un pago de membresía en `iniciado` con `created_at` dentro de
-    la ventana de `minutos`. Un `created_at` NULL no reserva nada (se considera
-    viejo): es preferible dejar pasar un intento a bloquear al alumno para
-    siempre por una fila sin fecha.
+    la ventana de `minutos` (por defecto `MINUTOS_GUARD_MEMBRESIA`, 5). Un
+    `created_at` NULL no reserva nada (se considera viejo): es preferible dejar
+    pasar un intento a bloquear al alumno para siempre por una fila sin fecha.
     """
     if pago is None or pago.concepto != CONCEPTO_MEMBRESIA:
         return False
@@ -131,7 +147,7 @@ def iniciado_vigente(pago, *, ahora=None,
 
 def _payment_intent_vigente(db: Session, *, tenant_id: int, alumno_id: int,
                             ahora=None,
-                            minutos: int = MINUTOS_MEMBRESIA):
+                            minutos: int = MINUTOS_GUARD_MEMBRESIA):
     """Pago `iniciado` de membresía que todavía cuenta como intento en curso."""
     candidatos = db.query(Pago).filter(
         Pago.tenant_id == tenant_id,
@@ -170,7 +186,7 @@ def bloqueo_solicitud_en_curso(db: Session, *, tenant_id: int,
 
 def _cerrar_iniciados_vencidos(db: Session, *, tenant_id: int, alumno_id: int,
                                ahora=None,
-                               minutos: int = MINUTOS_MEMBRESIA) -> int:
+                               minutos: int = MINUTOS_GUARD_MEMBRESIA) -> int:
     """Cierra los checkouts `iniciado` que ya pasaron el umbral (housekeeping).
 
     No hace falta para que el admin deje de verlos (nunca los vio): es para que
@@ -198,7 +214,7 @@ def _cerrar_iniciados_vencidos(db: Session, *, tenant_id: int, alumno_id: int,
         update(SolicitudPlan)
         .where(SolicitudPlan.pago_id.in_(viejos))
         .where(SolicitudPlan.estado == "iniciado")
-        .values(estado="expirada", comentario_admin=COMENTARIO_EXPIRADA)
+        .values(estado="expirada", comentario_admin=COMENTARIO_EXPIRADA_INTENTO)
     )
     db.commit()
     return len(viejos)
@@ -309,7 +325,7 @@ def crear_pago_membresia(db: Session, *, current_user: dict, plan_id: int,
     if not plan:
         raise ErrorPago("Plan no encontrado", 404)
 
-    # Housekeeping: los checkouts que ya pasaron los 30 min no bloquean ni se
+    # Housekeeping: los checkouts que ya pasaron los 5 min no bloquean ni se
     # acumulan (no hay cron dedicado para la intención invisible).
     _cerrar_iniciados_vencidos(db, tenant_id=tenant_id, alumno_id=alumno_id)
 
@@ -464,7 +480,8 @@ def _limpiar_cobro_fallido(db: Session, pago: Pago) -> None:
     solicitud `iniciado`/`pending` (y no podría ni mandar el voucher) o con el
     stock del Bazar reservado por un cobro imposible.
 
-    Best-effort: si falla, el job de expiración (30 min) lo cierra igual.
+    Best-effort: si falla, el job de expiración lo cierra igual (5 min si era
+    `iniciado`; 30 min si ya había un aviso real de MP).
     """
     try:
         if pago.concepto == CONCEPTO_BAZAR:
@@ -993,7 +1010,7 @@ def cancelar_pago(db: Session, pago: Pago, *,
     datos de la tarjeta. Mercado Pago no generó ningún pago, así que no hay
     webhook que rechace nada y hay que cerrarlo desde acá: la solicitud está
     oculta (el admin no la ve), pero el guard de "pago en curso" le impide
-    generar otra durante 30 minutos.
+    generar otra durante 5 minutos.
 
     Reglas:
 
@@ -1058,38 +1075,46 @@ def cancelar_pago(db: Session, pago: Pago, *,
 
 
 def pago_vencido(pago, *, ahora, minutos_bazar: int = MINUTOS_BAZAR,
-                 minutos_membresia: int = MINUTOS_MEMBRESIA) -> bool:
+                 minutos_membresia: int = MINUTOS_MEMBRESIA,
+                 minutos_intento: int = MINUTOS_GUARD_MEMBRESIA) -> bool:
     """True si un pago abierto superó el umbral de expiración de su concepto.
 
     Puro (sin DB): decide por `created_at` contra `ahora`. `None` (fila sin
     fecha) y los conceptos sin expiración definida (emergencia, futuro) nunca
     vencen. `<=` hace que el pago venza JUSTO en el límite (no un minuto después).
-    Los dos conceptos comparten criterio (minutos): ver `MINUTOS_MEMBRESIA`.
-    """
-    from datetime import timedelta
 
+    **Dos umbrales de membresía** (no se igualan):
+      * `iniciado`: `minutos_intento` (5). No hay ningún aviso de MP.
+      * `pendiente`/`en_proceso`: `minutos_membresia` (30). Hay un aviso real y
+        se le da margen para completarlo; si se expira antes de la aprobación,
+        el plan no se activa solo.
+      * Bazar: `minutos_bazar` (30), porque reserva stock.
+    """
     if pago.created_at is None:
         return False
     if pago.concepto == CONCEPTO_BAZAR:
         return pago.created_at <= ahora - timedelta(minutes=minutos_bazar)
     if pago.concepto == CONCEPTO_MEMBRESIA:
-        return pago.created_at <= ahora - timedelta(minutes=minutos_membresia)
+        minutos = (minutos_intento if pago.estado == "iniciado"
+                   else minutos_membresia)
+        return pago.created_at <= ahora - timedelta(minutes=minutos)
     return False
 
 
 def expirar_pendientes(db: Session, *, minutos_bazar: int = MINUTOS_BAZAR,
-                       minutos_membresia: int = MINUTOS_MEMBRESIA) -> dict:
+                       minutos_membresia: int = MINUTOS_MEMBRESIA,
+                       minutos_intento: int = MINUTOS_GUARD_MEMBRESIA) -> dict:
     """Cierra los pagos que nunca se cobraron y libera lo que reservaban.
 
     * **Bazar (30 min)**: el stock vuelve por `rechazar_pedido` (el mismo camino
       del rechazo manual). Un pedido `pendiente` con la plata sin llegar es un
       producto bloqueado que otro alumno no puede comprar.
-    * **Membresía (30 min)**: la solicitud pasa a `expirada` con
+    * **Membresía con aviso real (30 min)**: la solicitud pasa a `expirada` con
       `comentario_admin=COMENTARIO_EXPIRADA` para que salga de la cola de
       pendientes del admin (no se crea basura que nadie va a aprobar). ⚠️ NO se
       notifica al alumno al expirar (mejora futura: avisar en su campana para
       que pueda volver a intentar el pago).
-    * **Membresía `iniciado` (30 min)**: el alumno nunca hizo nada en MP; la
+    * **Membresía `iniciado` (5 min)**: el alumno nunca hizo nada en MP; la
       solicitud nunca fue visible. Se cierra igual como `expirada` para no
       acumular filas; NO es lo que mantiene limpia la cola del admin (esa fila
       jamás entró).
@@ -1111,9 +1136,11 @@ def expirar_pendientes(db: Session, *, minutos_bazar: int = MINUTOS_BAZAR,
                   "solicitudes_expiradas": 0}
     for pago in abiertos:
         if not pago_vencido(pago, ahora=ahora, minutos_bazar=minutos_bazar,
-                            minutos_membresia=minutos_membresia):
+                            minutos_membresia=minutos_membresia,
+                            minutos_intento=minutos_intento):
             continue
 
+        estado_anterior = pago.estado
         # CAS: si el webhook lo aprobó mientras recorríamos la lista, no se toca.
         cerrado = db.execute(
             update(Pago)
@@ -1142,12 +1169,15 @@ def expirar_pendientes(db: Session, *, minutos_bazar: int = MINUTOS_BAZAR,
             else:
                 db.commit()
         else:
+            comentario = (COMENTARIO_EXPIRADA_INTENTO
+                          if estado_anterior == "iniciado"
+                          else COMENTARIO_EXPIRADA)
             cambiadas = db.execute(
                 update(SolicitudPlan)
                 .where(SolicitudPlan.id == pago.referencia_id)
                 .where(SolicitudPlan.estado.in_(("iniciado", "pending")))
                 .values(estado="expirada",
-                        comentario_admin=COMENTARIO_EXPIRADA)
+                        comentario_admin=comentario)
             )
             if cambiadas.rowcount:
                 contadores["solicitudes_expiradas"] += 1

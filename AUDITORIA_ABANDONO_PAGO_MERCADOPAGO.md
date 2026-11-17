@@ -8,6 +8,13 @@
 y servidor `localhost:8000`) contra la rama TEST, y llamadas REALES a la API de
 Mercado Pago sandbox (creación/lectura de preferencias y búsqueda de pagos).
 
+> **Actualización posterior (mismo día):** el guard de membresía se acortó a
+> **5 min** (`MINUTOS_GUARD_MEMBRESIA`, también para limpiar la intención
+> `iniciado`). Los pagos REALES `pendiente`/`en_proceso` conservan **30 min**
+> (`MINUTOS_MEMBRESIA`) y el Bazar sigue en **30 min** (`MINUTOS_BAZAR`). El
+> resto de este informe describe la auditoría y la implementación originales con
+> un único umbral de 30 min.
+
 > Workaround de transporte: el SDK `mercadopago==3.6.0` se quedaba colgado en
 > `preference().create()` (timeout de 60 s × 3 reintentos), mientras que el MISMO
 > payload por REST directo respondía `201` en ~2,5 s. Para la auditoría se

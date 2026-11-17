@@ -7,10 +7,13 @@ nuestro). Si el único camino para aplicar un pago fuera el webhook, un alumno q
 pagó podría quedarse sin plan y nadie se enteraría. Este job hace dos cosas:
 
 1. **Expira** los pagos que nunca se cobraron (`services/pagos.expirar_pendientes`):
-   a los **30 min** un pedido del Bazar se rechaza y su stock vuelve, y a los
-   **30 min** una solicitud de membresía sale de la cola de pendientes. Sin esto,
-   un pedido abandonado deja stock bloqueado para siempre. El umbral vive en
-   `services/pagos.py` (`MINUTOS_BAZAR` / `MINUTOS_MEMBRESIA`): acá NO se repite.
+   a los **30 min** un pedido del Bazar se rechaza y su stock vuelve; la
+   membresía tiene DOS umbrales: **5 min** para el intento `iniciado` (el alumno
+   nunca hizo nada en MP) y **30 min** para un pago REAL
+   `pendiente`/`en_proceso` (ya hubo aviso, merece margen). Sin esto, un pedido
+   abandonado deja stock bloqueado para siempre. El umbral vive en
+   `services/pagos.py` (`MINUTOS_BAZAR` / `MINUTOS_MEMBRESIA` /
+   `MINUTOS_GUARD_MEMBRESIA`): acá NO se repite.
 2. **Reconcilia** los pagos `iniciado`/`pendiente`/`en_proceso` con más de 15 min:
    le pregunta a MP por `external_reference` y, si hay un pago real, lo aplica
    con la MISMA función del webhook (`services/pagos.aplicar_pago`). El evento
@@ -58,21 +61,16 @@ def expirar(db, aplicar: bool) -> dict:
         Pago.estado.in_(("iniciado", "pendiente", "en_proceso"))).all()
     candidatos = {"bazar": 0, "membresia": 0}
     for pago in abiertos:
-        if pago.created_at is None:
+        # El umbral sale del SERVICIO (`pago_vencido`): 30 min Bazar, 5 min el
+        # intento `iniciado`, 30 min un pago real `pendiente`/`en_proceso`. Ojo:
+        # en `main` se expira ANTES de reconciliar, así que este conteo es
+        # informativo — el rescate real de un webhook perdido es el reintento de
+        # Mercado Pago (cada 15 min), que aplica el pago igual y avisa a los
+        # admins si la solicitud ya estaba expirada (ver `_aplicar_beneficio`).
+        if not servicio_pagos.pago_vencido(pago, ahora=ahora):
             continue
-        # El umbral sale del SERVICIO (una sola definición). Ojo: en `main` se
-        # expira ANTES de reconciliar, así que este conteo es informativo — el
-        # rescate real de un webhook perdido es el reintento de Mercado Pago
-        # (cada 15 min), que aplica el pago igual y avisa a los admins si la
-        # solicitud ya estaba expirada (ver `_aplicar_beneficio`).
-        if (pago.concepto == "bazar"
-                and pago.created_at <= ahora - timedelta(
-                    minutes=servicio_pagos.MINUTOS_BAZAR)):
-            candidatos["bazar"] += 1
-        elif (pago.concepto == "membresia"
-                and pago.created_at <= ahora - timedelta(
-                    minutes=servicio_pagos.MINUTOS_MEMBRESIA)):
-            candidatos["membresia"] += 1
+        if pago.concepto in candidatos:
+            candidatos[pago.concepto] += 1
 
     if not aplicar:
         return {"candidatos": candidatos, "resultado": None}

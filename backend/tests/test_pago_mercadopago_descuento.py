@@ -612,7 +612,7 @@ def test_el_clic_no_entra_en_la_cola_y_bloquea_otro_intento(
         cliente, db, admin_headers, escenario, mercadopago_falso):
     """Reproduce el abandono REAL: el backend crea pago+solicitud `iniciado` para
     pedir el `init_point`, pero el admin NO ve nada y el alumno no puede abrir
-    cinco checkouts en paralelo. A los 30 min el intento se libera solo."""
+    cinco checkouts en paralelo. A los 5 min el intento se libera solo."""
     c = _crear_usuario(cliente, admin_headers, escenario, "Abandono MP")
     plan = _crear_plan(db, escenario)
     _quitar_modo_prueba(db, c["id"])
@@ -643,8 +643,8 @@ def test_el_clic_no_entra_en_la_cola_y_bloquea_otro_intento(
     assert transferencia.status_code == 400, transferencia.text
     assert "pago en curso" in transferencia.json()["detail"]
 
-    # Pasados los 30 min el guard se libera y el intento viejo se cierra.
-    db.execute(text("UPDATE pagos SET created_at = now() - interval '31 minutes' "
+    # Pasados los 5 min el guard se libera y el intento viejo se cierra.
+    db.execute(text("UPDATE pagos SET created_at = now() - interval '6 minutes' "
                     "WHERE id = :p"), {"p": pago.id})
     db.commit()
     tercero = _pagar_online(cliente, c, plan)
@@ -652,7 +652,7 @@ def test_el_clic_no_entra_en_la_cola_y_bloquea_otro_intento(
     assert _pago_de(db, pago.id).estado == "expirado"
     assert _solicitud_de(db, solicitud.id).estado == "expirada"
     print(f"[abandono] pago {pago.id} y solicitud {solicitud.id} no aparecieron "
-          "en la cola y se cerraron a los 30 min")
+          "en la cola y se cerraron a los 5 min")
 
 
 # ═════════════════════════════════════════════════════════════════════════════

@@ -143,7 +143,7 @@ def test_j_la_pantalla_de_retorno_permite_cancelar_un_pago_abierto():
 
     Mercado Pago no genera ningún pago cuando el alumno abandona el checkout, así
     que no hay webhook: la solicitud queda `iniciado` (oculta para el admin) y el
-    guard de "pago en curso" le impide comprar otra vez por 30 min. Mientras el
+    guard de "pago en curso" le impide comprar otra vez por 5 min. Mientras el
     pago siga abierto, la pantalla de retorno ofrece "Cancelar".
     """
     r = _fuente(RESULTADO)
