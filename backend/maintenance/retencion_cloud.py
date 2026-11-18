@@ -112,13 +112,15 @@ TABLA_BLOQUEOS = "retencion_bloqueos"
 # actualizan en los dos lugares, y `tests/test_retencion_unit.py` (que sí importa
 # `app.core.config`) falla si dejan de coincidir.
 TEST_BRANCH_IDS = (
-    "ep-crimson-tooth-akhx7q2s",
+    "ep-spring-thunder-argjp1mm",
 )
 PROD_BRANCH_IDS = (
+    "ep-bitter-field-armkhpzr",
     "ep-winter-star-akwis51j",
     "ep-bitter-cloud-arat6wil",
 )
 ENDPOINTS_RETIRADOS = (
+    "ep-crimson-tooth-akhx7q2s",
     "ep-lingering-fog-arywdnbg",
     "ep-damp-base-b6mpe739",
     "ep-winter-boat-b6zpvtxu",
