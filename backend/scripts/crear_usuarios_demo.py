@@ -63,7 +63,7 @@ sin recrear reservas ni tocar la contraseña; suma N a `creditos_totales` y a
 ni con `--extender-plan`.
 
 Uso (desde `backend/`):
-    # TEST (rama oficial ep-crimson-tooth-akhx7q2s, `TEST_BRANCH_IDS`)
+    # TEST (rama oficial ep-spring-thunder-argjp1mm, `TEST_BRANCH_IDS`)
     $env:ENVIRONMENT="test";       py -3.12 scripts\\crear_usuarios_demo.py --destino test --dry-run
     $env:ENVIRONMENT="test";       py -3.12 scripts\\crear_usuarios_demo.py --destino test
     $env:ENVIRONMENT="test";       py -3.12 scripts\\crear_usuarios_demo.py --destino test --borrar
@@ -157,7 +157,9 @@ PLAN_EXCLUIDO = "Prueba"                  # reservado para el flujo de alumno nu
 LABEL_ASISTENCIA = "WOD"                  # `asistencias.clase` (así está el histórico)
 
 DIAS_MANTENIMIENTO = (1, 15)              # el job escribe esos días
-HOST_PROD = "winter-star"                 # ep-winter-star-akwis51j (rama production, desde 2026-10-24)
+HOST_PROD = "bitter-field"                # ep-bitter-field-armkhpzr (rama production, desde 2026-11-18)
+HOST_PROD_MIGRADO = "winter-star"         # ep-winter-star-akwis51j (PROD 2026-10-24 → 2026-11-18:
+                                          # la cuenta Neon agotó la cuota; sigue con datos reales)
 HOST_PROD_ANTERIOR = "bitter-cloud"       # ep-bitter-cloud-arat6wil (PROD 2026-10-18 → 2026-10-24;
                                           # sigue vivo con datos reales: NUNCA es destino válido)
 HOST_PROD_VIEJO = "withered-silence"      # PROD ANTES del 2026-09-24 (retirado)
@@ -177,12 +179,16 @@ def validar_url_destino(url: str, destino: str, prod_id: str,
     Misma regla que `seed_anual_prod.py`:
       * prod: tiene que ser EXACTAMENTE el endpoint de PROD y no contener un id de TEST.
       * test: denylist primero (PROD nunca es TEST) y después allowlist de TEST.
-      * El PROD anterior (`bitter-cloud`) y el PROD viejo (`withered-silence`) se
+      * Los PROD retirados (`winter-star`, `bitter-cloud`, `withered-silence`) se
         rechazan en los DOS destinos con su propio mensaje: siguen con datos reales.
     """
     u = url or ""
     if not u:
         return "DATABASE_URL vacía"
+    if HOST_PROD_MIGRADO in u:
+        return (f"la URL apunta a {HOST_PROD_MIGRADO}, que era el PROD hasta el "
+                f"2026-11-18 (cuenta Neon agotada; sigue con datos reales): "
+                f"corrige el .env antes de correr")
     if HOST_PROD_VIEJO in u:
         return (f"la URL apunta a {HOST_PROD_VIEJO}, que era el PROD viejo (endpoint "
                 f"retirado el 2026-09-24): corrige el .env antes de correr")

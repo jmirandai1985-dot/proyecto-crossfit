@@ -15,15 +15,17 @@ GUARDS (todos deben pasar; corren ANTES de leer/escribir cualquier fila)
 1. `--destino prod|test` es OBLIGATORIO (no hay default). De él sale `ENVIRONMENT`
    (`production` / `test`) y por lo tanto qué `.env` lee `app.core.config`.
 2. La URL tiene que coincidir EXACTAMENTE con el destino:
-     * prod: el endpoint de PROD (`PROD_BRANCH_ID` = `ep-winter-star-akwis51j`,
-       host `winter-star`). Cualquier OTRO host aborta.
-     * test: un endpoint de TEST (`TEST_BRANCH_IDS` = `ep-crimson-tooth-akhx7q2s`,
-       host `crimson-tooth`) y NUNCA el de PROD (denylist).
+     * prod: el endpoint de PROD (`PROD_BRANCH_ID` = `ep-bitter-field-armkhpzr`,
+       host `bitter-field`). Cualquier OTRO host aborta.
+     * test: un endpoint de TEST (`TEST_BRANCH_IDS` = `ep-spring-thunder-argjp1mm`,
+       host `spring-thunder`) y NUNCA el de PROD (denylist).
    Los ids se leen de `app.core.config` (única fuente de verdad) y además se valida
-   que el de PROD siga siendo `winter-star`: si Neon vuelve a recrear el endpoint,
+   que el de PROD siga siendo `bitter-field`: si Neon vuelve a recrear el endpoint,
    el script aborta en vez de escribir en una base que ya no es la que espera.
-   El PROD anterior (`bitter-cloud`, hasta 2026-10-24) sigue con datos reales, así
-   que se rechaza en los DOS destinos con su propio mensaje.
+   Los endpoints retirados (`winter-star` —PROD hasta 2026-11-18—, `bitter-cloud`
+   —hasta 2026-10-24—, `crimson-tooth` —TEST hasta 2026-11-18— y `withered-silence`)
+   siguen con datos reales o su cuenta Neon ya no existe: se rechazan en los DOS
+   destinos con su propio mensaje.
    ⚠️ `withered-silence` era el endpoint de PROD **viejo** (migración del 2026-09-24).
    El guard del seed anterior (`"withered-silence" in DATABASE_URL`) ya NO puede pasar:
    por eso este script no lo usa ni como host ni como confirmación.
@@ -154,8 +156,12 @@ MARCA_TS = datetime(2026, 10, 2, 4, 17, 3, 123456, tzinfo=timezone.utc)
 DIAS_MANTENIMIENTO = (1, 15)      # el job escribe esos días
 MES_PROHIBIDO = "2026-09"         # el run del 1/10 vencería todas las de septiembre
 # ── Hosts de Neon (denylist/allowlist; los ids completos salen de app.core.config) ──
-HOST_PROD = "winter-star"         # ep-winter-star-akwis51j (rama production, desde 2026-10-24)
-HOST_TEST = "crimson-tooth"       # ep-crimson-tooth-akhx7q2s (rama de desarrollo, desde 2026-10-24)
+HOST_PROD = "bitter-field"         # ep-bitter-field-armkhpzr (rama production, desde 2026-11-18)
+HOST_TEST = "spring-thunder"       # ep-spring-thunder-argjp1mm (rama test, desde 2026-11-18)
+HOST_TEST_RETIRADO = "crimson-tooth"    # ep-crimson-tooth-akhx7q2s (TEST 2026-10-28 → 2026-11-18:
+                                        # la cuenta Neon agotó la cuota; RETIRADA)
+HOST_PROD_MIGRADO = "winter-star"  # ep-winter-star-akwis51j (PROD 2026-10-24 → 2026-11-18:
+                                   # la cuenta Neon agotó la cuota; sigue con datos reales)
 HOST_PROD_ANTERIOR = "bitter-cloud"     # ep-bitter-cloud-arat6wil (PROD 2026-10-18 → 2026-10-24;
                                         # sigue vivo con datos reales: NUNCA es destino válido)
 HOST_PROD_VIEJO = "withered-silence"   # PROD ANTES del 2026-09-24 (endpoint ya retirado)
@@ -1311,12 +1317,20 @@ def validar_url_destino(url: str, destino: str, prod_id: str,
     * prod: la URL tiene que ser EXACTAMENTE el endpoint de PROD.
     * test: tiene que ser un endpoint de TEST conocido y NUNCA el de PROD (denylist
       primero, para que un copy/paste cruzado no habilite escribir en producción).
-    * `withered-silence` (PROD viejo, retirado el 2026-09-24) se rechaza en los DOS
-      destinos con su propio mensaje.
+    * Los endpoints retirados (`winter-star`, `bitter-cloud`, `withered-silence` y
+      `crimson-tooth`) se rechazan en los DOS destinos con su propio mensaje: siguen
+      con datos reales o su cuenta Neon ya no existe.
     """
     u = url or ""
     if not u:
         return "DATABASE_URL vacía"
+    if HOST_PROD_MIGRADO in u:
+        return (f"la URL apunta a {HOST_PROD_MIGRADO}, que era el PROD hasta el "
+                f"2026-11-18 (cuenta Neon agotada; sigue con datos reales): "
+                f"corrige el .env antes de correr el seed")
+    if HOST_TEST_RETIRADO in u:
+        return (f"la URL apunta a {HOST_TEST_RETIRADO}, que era la rama TEST hasta el "
+                f"2026-11-18 (cuenta Neon agotada): corregi el .env antes de correr el seed")
     if HOST_PROD_VIEJO in u:
         return (f"la URL apunta a {HOST_PROD_VIEJO}, que era el PROD viejo (endpoint "
                 f"retirado el 2026-09-24): corrige el .env antes de correr el seed")
