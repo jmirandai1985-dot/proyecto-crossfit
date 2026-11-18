@@ -14,6 +14,10 @@ import { fmtFechaChile } from '../../utils/fecha';
 // Los planes UNISEX (larga duración) tienen su propia sección: la regla de qué es
 // un plan largo vive en `utils/planes.js` (la comparte el panel del admin).
 import { esPlanLargo } from '../../utils/planes';
+import {
+    BarChart3, CalendarDays, CheckCircle2, GraduationCap, Infinity as InfinityIcon,
+    Medal,
+} from 'lucide-react';
 
 const SolicitarPlan = () => {
     const { usuario_id, tenant_id } = useAuth();
@@ -112,10 +116,17 @@ const SolicitarPlan = () => {
     // Categoría visible: la propone el sexo del perfil y el alumno la puede cambiar. Se
     // DERIVA de las consultas (antes se sincronizaba con un `setCategoriaSeleccionada`
     // dentro del fetch); si el alumno elige "Todos", su elección manda.
+    //
+    // `'todas'` es el sentinel de "Todos": NO se puede usar `null`, porque `null` ya
+    // significa "todavía no elegí nada" y el render caería al sexo del alumno. Con
+    // `'todas'` el filtro por género se apaga de verdad.
     const [categoriaElegida, setCategoriaElegida] = useState(null);
-    const categoriaSeleccionada = categoriaElegida !== null
-        ? categoriaElegida
-        : (sexoAlumno === 'M' ? 'masculino' : sexoAlumno === 'F' ? 'femenino' : null);
+    const mostrarTodos = categoriaElegida === 'todas';
+    const categoriaSeleccionada = mostrarTodos
+        ? null
+        : categoriaElegida !== null
+            ? categoriaElegida
+            : (sexoAlumno === 'M' ? 'masculino' : sexoAlumno === 'F' ? 'femenino' : null);
 
     // Los planes de LARGA DURACIÓN (unisex) van en su PROPIA sección, al mismo nivel
     // visual que las otras dos: si quedaran en `planesFiltrados` se mezclarían con los
@@ -124,11 +135,11 @@ const SolicitarPlan = () => {
         () => planes.filter(esPlanLargo), [planes]);
 
     const planesFiltrados = React.useMemo(() => (
-        (categoriaSeleccionada
-            ? planes.filter((p) => !p.genero || p.genero === categoriaSeleccionada)
-            : planes
+        (mostrarTodos || !categoriaSeleccionada
+            ? planes
+            : planes.filter((p) => !p.genero || p.genero === categoriaSeleccionada)
         ).filter((p) => !esPlanLargo(p))
-    ), [categoriaSeleccionada, planes]);
+    ), [mostrarTodos, categoriaSeleccionada, planes]);
 
     // Separar planes regulares y de estudiante
     const planesRegulares = planesFiltrados.filter(p => !p.requiere_certificado_estudiante);
@@ -266,7 +277,7 @@ const SolicitarPlan = () => {
             className="bg-white rounded-xl border-2 border-gray-200 p-6 shadow-sm hover:border-emerald-400 hover:shadow-md transition-all text-left group"
         >
             <div className="flex items-center gap-2 mb-3">
-                <span className="text-2xl">🏅</span>
+                <Medal className="h-6 w-6 shrink-0 text-amber-500" aria-hidden="true" />
                 <h3 className="text-lg font-bold text-gray-800 group-hover:text-emerald-600 transition-colors">
                     {plan.nombre}
                 </h3>
@@ -290,20 +301,31 @@ const SolicitarPlan = () => {
             )}
             <div className="space-y-2 text-sm text-gray-600">
                 <div className="flex items-center gap-2">
-                    <span className="text-emerald-500">✅</span>
-                    <span>
-                        {plan.es_ilimitado
-                            ? '♾️ Clases ilimitadas'
-                            : `📊 ${plan.creditos || plan.clases_por_mes || '—'} créditos`}
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" aria-hidden="true" />
+                    <span className="inline-flex items-center gap-1.5">
+                        {plan.es_ilimitado ? (
+                            <>
+                                <InfinityIcon className="h-4 w-4 text-emerald-500" aria-hidden="true" />
+                                Clases ilimitadas
+                            </>
+                        ) : (
+                            <>
+                                <BarChart3 className="h-4 w-4 text-emerald-500" aria-hidden="true" />
+                                {`${plan.creditos || plan.clases_por_mes || '—'} créditos`}
+                            </>
+                        )}
                     </span>
                 </div>
                 <div className="flex items-center gap-2">
-                    <span className="text-emerald-500">✅</span>
-                    <span>📆 Duración: {plan.duracion_dias || 30} días</span>
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" aria-hidden="true" />
+                    <span className="inline-flex items-center gap-1.5">
+                        <CalendarDays className="h-4 w-4 text-emerald-500" aria-hidden="true" />
+                        Duración: {plan.duracion_dias || 30} días
+                    </span>
                 </div>
                 {plan.requiere_certificado_estudiante && (
                     <div className="flex items-center gap-2 mt-2">
-                        <span className="text-amber-500">🎓</span>
+                        <GraduationCap className="h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
                         <span className="text-amber-700 font-semibold">Plan Estudiante</span>
                     </div>
                 )}
@@ -411,8 +433,8 @@ const SolicitarPlan = () => {
                                     : 'text-gray-600 hover:bg-blue-50 hover:text-blue-600'}`}>
                                 ♂️ Masculinos
                             </button>
-                            <button onClick={() => setCategoriaElegida(null)}
-                                className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${categoriaSeleccionada === null
+                            <button onClick={() => setCategoriaElegida('todas')}
+                                className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${mostrarTodos
                                     ? 'bg-gray-500 text-white shadow-md'
                                     : 'text-gray-600 hover:bg-gray-200'}`}>
                                 Todos
