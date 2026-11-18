@@ -1,7 +1,7 @@
 """Endpoints de ML: reentrenamiento automático de los modelos (churn/forecast).
 
 PROTEGIDO con el MISMO mecanismo que `app/api/v1/kpis_populate.py`: header
-`X-N8N-API-Key` (= settings.automation_api_key: CRON_API_KEY o N8N_API_KEY). Lo llama **n8n** automáticamente
+`X-N8N-API-Key` (= settings.automation_api_key: CRON_API_KEY canonica, N8N_API_KEY legacy). Lo llaman los Cron
 (una vez al mes) — NO un admin logueado, por eso no usa `get_current_admin`.
 
 Los modelos se guardan en la tabla `ml_modelos` (BD, no disco) para que
@@ -37,7 +37,7 @@ _SEVERIDAD = {409: 1, 503: 2, 500: 3}
 def _verificar_api_key_n8n(
     x_n8n_api_key: str = Header(default="", alias="X-N8N-API-Key"),
 ) -> bool:
-    """Valida la key contra settings.automation_api_key (CRON_API_KEY o N8N_API_KEY; 401 si no coincide).
+    """Valida la key contra settings.automation_api_key (CRON_API_KEY canonica, N8N_API_KEY legacy; 401 si no coincide).
 
     Mismo mecanismo (copiado a proposito) que
     `kpis_populate._verificar_api_key_n8n`.

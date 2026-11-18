@@ -116,7 +116,7 @@ equivalencia está en 2.2.
 
 - [ ] Export real de los 18 workflows (bloqueado por 2.3).
 - [ ] Apagar/eliminar la instancia de PROD (acción del usuario en su hosting).
-- [ ] Confirmar que `N8N_API_KEY` ya no hace falta en Render (el backend acepta
-      `CRON_API_KEY` para los endpoints de cron).
+- [ ] Confirmar que `N8N_API_KEY` ya no hace falta en Render: el nombre canónico es
+      `CRON_API_KEY` (el backend lo prefiere) y `N8N_API_KEY` queda sólo como alias legacy.
 - [ ] (Opcional) Cron Job para reentrenar la segmentación K-Means, hoy manual.
 

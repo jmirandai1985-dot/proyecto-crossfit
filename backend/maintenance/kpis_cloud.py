@@ -108,8 +108,9 @@ TITULOS_EXIT = {
 }
 
 VARS_OBLIGATORIAS = ("KPIS_API_URL",)
-# La key de automatización: `CRON_API_KEY` (Cron Job de Render) si está definida, si no
-# `N8N_API_KEY` (n8n). Mismo criterio que `settings.automation_api_key` del backend.
+# La key de automatización: `CRON_API_KEY` (nombre canónico, Cron Jobs de Render) si está
+# definida, si no el alias legacy `N8N_API_KEY` (n8n). Mismo criterio que
+# `settings.automation_api_key` del backend.
 VARS_API_KEY = ("CRON_API_KEY", "N8N_API_KEY")
 TZ_CLT = "America/Santiago"
 
@@ -205,12 +206,13 @@ def leer_config() -> dict:
     faltan = [v for v in VARS_OBLIGATORIAS if not _texto(v)]
     if faltan:
         raise ConfigError(f"faltan variables de entorno: {', '.join(faltan)}")
-    # La key de automatización: CRON_API_KEY si está, si no N8N_API_KEY (mismo criterio que
-    # settings.automation_api_key del backend). Sin ninguna de las dos no se llama a nada.
+    # La key de automatización: CRON_API_KEY (canónica) si está, si no N8N_API_KEY
+    # (legacy; mismo criterio que settings.automation_api_key del backend). Sin ninguna
+    # de las dos no se llama a nada.
     api_key = _texto("CRON_API_KEY") or _texto("N8N_API_KEY")
     if not api_key:
         raise ConfigError(
-            "falta la API key: define CRON_API_KEY (recomendado) o N8N_API_KEY")
+            "falta la API key: define CRON_API_KEY (canónica) o N8N_API_KEY (legacy)")
     return {
         "api_url": validar_url_api(_texto("KPIS_API_URL")),
         "api_key": api_key,

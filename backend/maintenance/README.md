@@ -1785,8 +1785,8 @@ Exit codes: **0** OK (sin correo) · **2** config (falta o es inválida una vari
 | Variable | Valor | Por qué |
 |---|---|---|
 | `KPIS_API_URL` | `https://box-crossfit.onrender.com` (**sin** barra final) | Base de la API. Se rechaza `http://` contra un host remoto (exit 2): la clave viaja en un header y no puede ir sin TLS. |
-| `N8N_API_KEY` | **la misma** que valida el backend | El job manda `X-N8N-API-Key`. Es el valor de la env var `N8N_API_KEY` del **Web Service** en Render (y de `backend/.env` de PROD). Si se rota, se rota en los dos lados. |
-| `CRON_API_KEY` | opcional (recomendado) | API key ALTERNATIVA para los MISMOS endpoints: si esta definida, el backend la usa EN VEZ de `N8N_API_KEY` (mismo header `X-N8N-API-Key`). Sirve para dar de baja n8n sin tocar el backend. Si la definis, tiene que tener el MISMO valor en el **Web Service** y en el env group del Cron Job. Si no esta, vale `N8N_API_KEY`. |
+| `CRON_API_KEY` | **la misma** que valida el backend | Nombre canónico (2026-11-18). El job manda `X-N8N-API-Key`. Es el valor de la env var `CRON_API_KEY` del **Web Service** en Render (y de `backend/.env` de PROD). Si se rota, se rota en los dos lados. |
+| `N8N_API_KEY` | legacy (opcional) | Nombre viejo, de cuando el proyecto usaba n8n. Sólo se usa si no está `CRON_API_KEY`. Permite que actualizar Render y desplegar el backend no tengan que ser simultáneos; una vez migrado, se borra. |
 | `DRY_RUN` | `0` | ⚠️ **La imagen trae `DRY_RUN=1` por defecto**: con `1` el job imprime el plan y NO llama a nada. Para que actúe tiene que estar en `0`. |
 | `DIA_ML` | `15` (opcional) | Día del mes del reentrenamiento, además del último (rango 2-28: nunca el 1, y siempre existe en todos los meses). |
 | `REINTENTOS` | `2` (opcional) | Reintentos por llamada (rango 0-5). |

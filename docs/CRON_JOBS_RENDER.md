@@ -52,7 +52,7 @@ el dashboard con sus secretos (el repo no lleva valores). Si un nombre no existe
 | `alertas` | `GMAIL_SMTP_USER`, `GMAIL_SMTP_APP_PASSWORD`, `ALERT_EMAIL` | jobs 2, 3, 4 y 5 |
 | `neon-api` | `NEON_API_KEY`, `NEON_PROJECT_ID` | jobs 2 (lectura de CU-horas) y 4 (crear/borrar la rama del drill) |
 | `mantenimiento-prod` | `MAINT_DB_URL` (rol `maint_rw`), `ENVIRONMENT=production`, límites (`MAX_*`, `DIAS_*`, `NEON_*`), `DRY_RUN` | job 2 |
-| `kpis-prod` | `KPIS_API_URL`, `N8N_API_KEY` / `CRON_API_KEY` | job 5 |
+| `kpis-prod` | `KPIS_API_URL`, `CRON_API_KEY` (`N8N_API_KEY` queda como alias legacy) | job 5 |
 | `retencion-test` | `RETENCION_DB_URL` (rol `retencion_rw` de TEST), `ENVIRONMENT=test`, `ANONIMIZACION_PEPPER` | jobs 6-8 (§8) |
 | `retencion-prod` | `RETENCION_DB_URL` (rol `retencion_rw` de PROD), `ENVIRONMENT=production`, `ANONIMIZACION_PEPPER` | jobs 9-11 (§9) |
 

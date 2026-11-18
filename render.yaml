@@ -210,7 +210,7 @@ services:
       #    el plan, NO llama a ningún endpoint y el run queda VERDE (fail-open).
       - key: DRY_RUN
         value: "0"
-      - fromGroup: kpis-prod                 # KPIS_API_URL, N8N_API_KEY / CRON_API_KEY
+      - fromGroup: kpis-prod                 # KPIS_API_URL, CRON_API_KEY (N8N_API_KEY = legacy)
       - fromGroup: alertas
 
   # 5b) Expiración de pagos online no cobrados — migración 067 (Cron horario).
