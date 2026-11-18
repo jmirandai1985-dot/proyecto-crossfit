@@ -41,6 +41,14 @@ export async function login(page, { email, password }) {
 }
 
 // Token JWT del usuario logueado (para verificar contra los endpoints reales).
+//
+// Hallazgo #15: la sesión viaja en la cookie httpOnly `access_token` (la vía
+// principal) y el front NO guarda el JWT en localStorage. Playwright sí puede
+// leer la cookie del contexto, así que se prioriza eso; el localStorage queda
+// como fallback para versiones viejas del front.
 export async function tokenDe(page) {
+  const cookies = await page.context().cookies();
+  const cookie = cookies.find((c) => c.name === 'access_token');
+  if (cookie?.value) return cookie.value;
   return page.evaluate(() => localStorage.getItem('access_token'));
 }

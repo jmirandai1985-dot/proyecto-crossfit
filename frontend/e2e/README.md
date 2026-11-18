@@ -87,6 +87,88 @@ Reporte HTML: `npx playwright show-report`. Artefactos en `test-results/` y
   aterriza en su dashboard según rol, más navegación básica de cada panel.
 - `tests/reservar-asistir.spec.js`: el alumno reserva una clase disponible por la
   UI, confirma que aparece en "Mis reservas" y se le marca la asistencia.
+- `tests/planes-ui.spec.js`: regresiones de la UI de planes:
+  - el admin puede **tipear** el monto de la matrícula y el input lo refleja
+    (monta la pantalla real; un test de texto fuente no detectaba el onChange
+    roto);
+  - el filtro "Todos" del alumno muestra planes de ambos géneros.
+- `tests/pago-membresia.spec.js`: flujo de pago de membresía con Mercado Pago
+  **sandbox real** (Checkout Pro), sin mockear MP:
+  - **a)** abandona antes de llegar a MP: el intento queda `iniciado`, no
+    aparece en la cola del admin y el alumno puede cancelarlo.
+  - **d)** segundo intento inmediato: el guard de 5 min lo bloquea con el
+    mensaje esperado; a los 5 min reales se libera solo y el intento viejo queda
+    `expirado` (se puede saltear la espera con `E2E_ESPERAR_GUARD_5MIN=0`, pero
+    entonces sólo se verifica la liberación por Cancelar).
+  - **b)** pago APROBADO con la tarjeta de prueba de MP (titular `APRO`):
+    activación + transacción visible para el admin.
+  - **c)** pago RECHAZADO (titular `OTHE`): solicitud `rejected` y reintento
+    inmediato sin chocar con el guard.
+
+### Pago de membresía: entorno y limitaciones
+
+El spec usa `carga_k6_alumno0020@load.test` por defecto
+(`E2E_PAGO_ALUMNO_EMAIL` lo cambia). Antes de cada test corre
+`backend/scripts/limpiar_e2e_pago.py`, que en la rama TEST:
+
+* cierra pagos `iniciado`/`pendiente` del alumno,
+* saca de la cola sus solicitudes `iniciado`/`pending`,
+* marca `vencido` su plan pago vigente (si no, la compra quedaría `en_cola`).
+
+No es un mock: es limpieza de datos de TEST, con el mismo guard
+(`ENVIRONMENT=test` + `is_test_db_url`) que los scripts de test.
+
+Tarjetas de prueba MLC (documentación de Mercado Pago): Mastercard
+`5416 7526 0258 2580`, CVV `123`, vencimiento `11/30`; el **nombre del titular**
+elige el resultado (`APRO`, `OTHE`, `CONT`, ...). RUT de prueba: `11111111-1`.
+
+Limitaciones verificadas en este entorno (se declaran como `skip` con motivo,
+no se simulan):
+
+1. **Credenciales MP de TEST (resueltas)**: `.env.test` usa el
+   `test_access_token` (`TEST-…`) y la public key `TEST-…` de la MISMA app
+   (`GET /applications/8755987062124145` con el token de la app devuelve
+   `test_access_token`; el checkout usa su public key de prueba). Además,
+   `MERCADOPAGO_TEST_BUYER_EMAIL` apunta al correo del test user collector:
+   con el correo de otro test buyer el checkout devuelve 500. Verificación
+   directa contra MP: card_token `live_mode=false`; pago APRO
+   `approved/accredited` y OTHE `rejected/cc_rejected_other_reason` por
+   `POST /v1/payments`.
+   **Limitación restante**: en este entorno el checkout sandbox real llega a
+   “Revisa tu pago” pero el botón **Pagar queda deshabilitado** (también en
+   navegador headed) y no crea el pago; b/c se saltean con ese motivo. No se
+   mockea el cobro. Es la misma limitación de
+   `AUDITORIA_ABANDONO_PAGO_MERCADOPAGO.md`.
+2. **Webhook inalcanzable**: `MERCADOPAGO_NOTIFICATION_URL` apunta a
+   `http://localhost:8001/...`, que Mercado Pago no puede alcanzar desde
+   Internet. Aun con un cobro aprobado/rechazado en el sandbox, la app no
+   recibiría el aviso y el estado local no cambiaría. Se necesita un túnel
+   público o el deploy de TEST para verificar la activación end-to-end.
+3. **Botón físico de atrás**: no se puede simular en escritorio; el escenario
+   **a)** aborta la navegación a MP y vuelve a la app, que es el efecto
+   equivalente del lado de la aplicación (sin webhook ni pago).
+4. **Reloj del guard**: no hay forma de inyectar el reloj del backend de TEST,
+   así que **d)** espera los 5 minutos reales (timeout del test: 660 s). Con
+   `E2E_ESPERAR_GUARD_5MIN=0` se saltea la espera y se verifica la liberación
+   por Cancelar.
+
+### Corrida de referencia (2026-11-17)
+
+| Test | Resultado | Tiempo |
+|---|---|---|
+| a) abandona antes de MP | **passed** | 2.0 min |
+| d) guard de 5 min (espera real) | **passed** | 9.1 min |
+| b) pago APROBADO | **skipped** (checkout sandbox: “Pagar” deshabilitado) | 7.4 min ambos |
+| c) pago RECHAZADO | **skipped** (checkout sandbox: “Pagar” deshabilitado) | 7.4 min ambos |
+
+El skip de b/c **no es de credenciales**: el par de TEST quedó alineado
+(`test_access_token` + public key `TEST-…`, card_token `live_mode=false`) y por
+REST el mismo tipo de pago devuelve APRO `approved` y OTHE `rejected`. Lo que
+no se puede completar en este entorno es el submit del checkout sandbox (el
+botón “Pagar” queda deshabilitado en “Revisa tu pago”). No se simula el pago.
+
+
+
 
 ### Nota sobre "marcar asistencia"
 
