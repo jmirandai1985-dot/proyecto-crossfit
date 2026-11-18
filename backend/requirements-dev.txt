@@ -1,0 +1,16 @@
+# ============================================================
+# DEPENDENCIAS DE DESARROLLO / TEST (NO van a producción)
+# ============================================================
+# Instalar con:
+#   py -3.12 -m pip install --user -r requirements-dev.txt
+#
+# Mutation testing de los módulos de pago
+# ---------------------------------------
+# `mutmut` 3.x exige soporte de `fork`; su documentación indica que en Windows
+# sólo corre dentro de WSL. Este host es Windows nativo, así que se usa el
+# runner `scripts/mutacion_pagos.py` (AST + pytest), que necesita:
+#   * coverage: mide qué test ejecuta cada línea.
+#   * pytest-cov + --cov-context=test: deja ese mapa en el archivo .coverage.
+# Ver REPORTE_MUTATION_PAGOS_2026-11-17.md para el detalle y los comandos.
+coverage==7.6.12
+pytest-cov==6.0.0
