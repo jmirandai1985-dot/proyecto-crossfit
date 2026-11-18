@@ -119,19 +119,25 @@ class Settings(BaseSettings):
     # fail-safe fuera de producción); esto apaga el resto de la cadena.
     SCHEDULER_ENABLED: bool = True
 
-    # n8n / Cron Job de Render: API key para los endpoints de automatizacion que la usan
+    # Cron Jobs de Render: API key para los endpoints de automatizacion que la usan
     # (`kpis_populate.py`, `ml.py`, `notificaciones_enviadas.py`). Se envia en el header
-    # `X-N8N-API-Key` y se compara con secrets.compare_digest. OJO: desde 2026-10-02 ya NO
-    # existe `POST /api/v1/asistencia/n8n/evaluar-mes` (lo reemplazo el job `cierre_mes` del
-    # scheduler interno), asi que esta key no autentica ningun webhook de asistencia.
-    N8N_API_KEY: str = ""
-
-    # Cron Job de Render (KPIs/ML/segmentacion): API key ALTERNATIVA para los MISMOS
-    # endpoints de automatizacion. Si esta definida, `automation_api_key` la usa en vez de
-    # `N8N_API_KEY` (asi se puede dar de baja n8n sin tocar el backend); si no, vale
-    # `N8N_API_KEY`. El header sigue siendo `X-N8N-API-Key` (compatibilidad) y la
-    # comparacion sigue siendo `secrets.compare_digest`.
+    # `X-N8N-API-Key` (nombre del header, se mantiene por compatibilidad con los Cron
+    # Jobs ya desplegados) y se compara con secrets.compare_digest. OJO: desde 2026-10-02
+    # ya NO existe `POST /api/v1/asistencia/n8n/evaluar-mes` (lo reemplazo el job
+    # `cierre_mes` del scheduler interno), asi que esta key no autentica ningun webhook
+    # de asistencia.
+    #
+    # NOMBRE CANONICO (2026-11-18): `CRON_API_KEY`. El proyecto ya no usa n8n (se migro a
+    # Cron Jobs de Render), asi que el nombre viejo quedo solo como alias legacy abajo.
+    # Switch sin downtime: definir `CRON_API_KEY` (mismo valor) en Render y redesplegar;
+    # recien despues se puede borrar `N8N_API_KEY`.
     CRON_API_KEY: str = ""
+
+    # LEGACY / DEPRECADO (2026-11-18): nombre que tenia la key cuando el proyecto usaba
+    # n8n. `automation_api_key` lo sigue leyendo como fallback para que actualizar Render
+    # y desplegar el backend NO tengan que ser simultaneos. Si solo esta definido este,
+    # el arranque loguea un WARNING (ver guarda al final del modulo).
+    N8N_API_KEY: str = ""
 
     # Reactivación (correo "sin plan"): secret para firmar tokens HMAC del opt-out.
     # Generar con: openssl rand -hex 32
@@ -177,8 +183,9 @@ class Settings(BaseSettings):
     def automation_api_key(self) -> str:
         """La key que valida los endpoints de automatizacion (KPIs/ML/segmentacion).
 
-        `CRON_API_KEY` si esta definida (Cron Job de Render), si no `N8N_API_KEY` (n8n).
-        Una sola definicion para los dos verificadores del backend
+        `CRON_API_KEY` si esta definida (nombre canonico: la usan los Cron Jobs de
+        Render), si no el alias legacy `N8N_API_KEY` (nombre de cuando el proyecto
+        usaba n8n). Una sola definicion para los dos verificadores del backend
         (`kpis_populate._verificar_api_key_n8n` y `ml._verificar_api_key_n8n`).
         """
         return self.CRON_API_KEY or self.N8N_API_KEY
@@ -215,6 +222,66 @@ if _ENVIRONMENT not in ("production", "test"):
 # Instancia global de configuración
 # Se carga automáticamente desde .env al importar este módulo
 settings = Settings()
+
+
+# ── Guarda de arranque: la BD cargada tiene que ser la del ENVIRONMENT ────────
+# POR QUÉ EXISTE (incidente 2026-11-18): un `.env.test` que quedó apuntando a la
+# base de PRODUCCIÓN hizo que mutation testing + E2E consumieran la cuota entera de
+# la cuenta de Neon y bloquearan PROD ("Your account or project has exceeded the
+# quota"). `_ENVIRONMENT` ya elegía QUÉ archivo cargar, pero nadie verificaba que el
+# HOST cargado correspondiera a ese entorno. Esto se valida en el arranque: si no
+# coincide, se aborta con un mensaje claro en vez de escribir (o testear) sobre la
+# base equivocada.
+#
+# Reglas (fail-closed; se evalúan sobre DATABASE_URL y DIRECT_URL):
+#   * ENVIRONMENT != production y el host es de PROD  → aborta.
+#   * ENVIRONMENT == production y el host es de TEST  → aborta.
+# Un host DESCONOCIDO no aborta (Postgres de docker, localhost, una rama nueva que
+# todavía no está en la topología): sólo se comparan los endpoints conocidos de
+# `TEST_BRANCH_IDS` / `PROD_BRANCH_IDS`. La llamada está al final del módulo, porque
+# esas tuplas se definen más abajo.
+def _host_de_url(url: str) -> str:
+    """Hostname en minúsculas de una URL de conexión ('' si no se puede parsear)."""
+    try:
+        return (urlsplit(url or "").hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def _endpoint_conocido(host: str, endpoints) -> bool:
+    """True si el host contiene alguno de los ids de endpoint (pooler incluido)."""
+    return any(endpoint in host for endpoint in endpoints)
+
+
+def _verificar_entorno_db(entorno: str = None) -> None:
+    """Aborta el arranque si la BD cargada no corresponde al ENVIRONMENT activo."""
+    entorno = (_ENVIRONMENT if entorno is None else entorno) or ""
+    es_prod = entorno == "production"
+    for nombre in ("DATABASE_URL", "DIRECT_URL"):
+        host = _host_de_url(getattr(settings, nombre, "") or "")
+        if not host:
+            continue
+        if not es_prod and _endpoint_conocido(host, PROD_BRANCH_IDS):
+            raise RuntimeError(
+                f"[config] {nombre} apunta a la base de PRODUCCION ({host}) con "
+                f"ENVIRONMENT={entorno or 'sin definir'} (se esperaba TEST). "
+                "Abortando para no escribir ni consumir cuota de la base real: "
+                "corregi backend/.env.test, o exporta ENVIRONMENT=production si "
+                "de verdad queres operar sobre PROD.")
+        if es_prod and _endpoint_conocido(host, TEST_BRANCH_IDS):
+            raise RuntimeError(
+                f"[config] {nombre} apunta a la base de TEST ({host}) con "
+                "ENVIRONMENT=production. Abortando: un proceso de PRODUCCION no "
+                "puede escribir en TEST.")
+
+
+def _avisar_api_key_legacy() -> None:
+    """WARNING si la automatización depende sólo del nombre viejo `N8N_API_KEY`."""
+    if settings.N8N_API_KEY and not settings.CRON_API_KEY:
+        logging.getLogger("app.core.config").warning(
+            "[config] N8N_API_KEY esta deprecada: define CRON_API_KEY (mismo valor) "
+            "en este entorno y en Render, y despues borra N8N_API_KEY.")
+
 
 # ── Normalización de la clave JWT ────────────────────────────────────────────
 # Prioridad 1: JWT_SECRET_KEY (definida en .env)
@@ -315,19 +382,22 @@ def validar_cors_origins(origins: List[str], entorno: str = None) -> List[str]:
 # IDs de endpoints de Neon. Los endpoints son efímeros: al recrear una rama cambia
 # el id (ep-xxxxx-xxxxx).
 #
-# TOPOLOGÍA ACTUAL (2026-10-24): TEST y PROD viven en el proyecto Neon NUEVO
-# (AWS US West 2 / Oregon, misma región que Render), en las ramas "test" y
-# "production". Se migró desde el proyecto "urban-training-box" clonando schema y
-# datos (Fases 1-3 de MIGRACION_PROD_NEON.md): cuentan 0 diferencias contra el
-# PROD viejo, así que este es el único lugar donde vive la topología.
-#   - TEST = rama test del proyecto nuevo       → TEST_BRANCH_IDS
-#   - PROD = rama production del proyecto nuevo → PROD_BRANCH_ID (denylist)
+# TOPOLOGÍA ACTUAL (2026-11-18): cuenta de Neon NUEVA. La cuenta anterior agotó la
+# cuota free (un `.env.test` mal apuntado hizo que mutation testing + E2E corrieran
+# contra PROD) y Neon bloqueó PROD entero con "Your account or project has exceeded
+# the quota". El proyecto nuevo se llama "urban-training-box" y vive en AWS US West
+# 2 (Oregon), la misma región que Render.
+#   - PROD = rama "production" del proyecto nuevo → ep-bitter-field-armkhpzr
+#   - TEST = rama "test" del MISMO proyecto       → ep-spring-thunder-argjp1mm
+#     (creada 2026-11-18 con la API de Neon, rama `br-silent-pine-aram54y2`,
+#     copia de production DESPUÉS del restore; la declara backend/.env.test).
 #
 # ⚠️ ÚNICO lugar a actualizar cuando cambie de rama. Lo consumen:
 #   - app/main.py  → GET /debug/db-url (conftest.py aborta los tests si da 404)
 #   - run_setup_test_db.py, scripts/aplicar_overrides_test.py, ml/train_*.py
 #     (abortan si la BD no es TEST, para no escribir sobre datos reales)
 #   - scripts/sync_test_from_prod.py y scripts/restaurar_backup.py (origen/destino)
+#   - app/core/config.py → guarda de arranque `_verificar_entorno_db()`
 #
 # HISTORIAL: los endpoints viejos NO se dejan en la whitelist. Todos ellos siguen
 # vivos y con DATOS REALES (o credencial inválida), así que clasificarlos como TEST
@@ -335,24 +405,28 @@ def validar_cors_origins(origins: List[str], entorno: str = None) -> List[str]:
 # de producción. Van a `ENDPOINTS_RETIRADOS` (denylist) para que el guard falle
 # CERRADO si alguien corre un script con un `.env` viejo.
 TEST_BRANCH_IDS = (
-    # TEST OFICIAL (decisión del dueño, 2026-10-28): rama test del proyecto nuevo.
-    # Es la ÚNICA rama TEST activa y la que declara `backend/.env.test`; todo
-    # proceso que corra en :8000 o contra TEST tiene que caer acá.
-    # Es un espejo exacto de PROD (Fase 3), por lo que TODAVÍA no tiene los
-    # overrides de desarrollo: se restauran con `scripts/aplicar_overrides_test.py`.
-    "ep-crimson-tooth-akhx7q2s",
+    # TEST OFICIAL desde 2026-11-18: rama "test" del proyecto Neon nuevo
+    # ("urban-training-box", endpoint ep-spring-thunder-argjp1mm). Es la que declara
+    # backend/.env.test; todo proceso que corra en :8000 o contra TEST cae acá.
+    # HISTORIAL: ep-crimson-tooth-akhx7q2s (TEST 2026-10-28 → 2026-11-18) está
+    # RETIRADA en ENDPOINTS_RETIRADOS y no se vuelve a agregar.
+    "ep-spring-thunder-argjp1mm",
 )
 
 # Endpoint de PROD. Se usa como DENYLIST: una URL que apunte a PROD NUNCA se
 # clasifica como TEST, ni aunque contenga un id de TEST (copy/paste cruzado) ni si
 # alguien agrega el id de PROD a la whitelist.
-PROD_BRANCH_ID = "ep-winter-star-akwis51j"
+PROD_BRANCH_ID = "ep-bitter-field-armkhpzr"
 
 # Todos los endpoints de PROD que alguna vez tuvieron datos reales. El actual va
 # primero porque `scripts/sync_test_from_prod.py` valida el ORIGEN contra
-# `PROD_BRANCH_ID`; esta tupla es sólo la denylist ampliada de `is_test_db_url`.
+# `PROD_BRANCH_ID`; esta tupla es sólo la denylist ampliada de `is_test_db_url`
+# (y la usa la guarda de arranque para rechazar PROD cuando ENVIRONMENT != production).
 PROD_BRANCH_IDS = (
-    "ep-winter-star-akwis51j",   # PROD actual (proyecto nuevo, 2026-10-24)
+    "ep-bitter-field-armkhpzr",  # PROD actual (proyecto "urban-training-box" nuevo,
+                                 # 2026-11-18, Oregon)
+    "ep-winter-star-akwis51j",   # PROD anterior (2026-10-24 → 2026-11-18): su cuenta
+                                 # agotó la cuota free y quedó bloqueada
     "ep-bitter-cloud-arat6wil",  # PROD anterior (proyecto "urban-training-box",
                                  # 2026-10-18 → 2026-10-24): sigue vivo con datos reales
 )
@@ -367,6 +441,9 @@ PROD_BRANCH_IDS = (
 # `summer-river` tenía la credencial REVOCADA al 2026-10-28 (verificado: su
 # `.env`/contenedor local ya no la usa y ningún proceso activo la referencia).
 ENDPOINTS_RETIRADOS = (
+    "ep-crimson-tooth-akhx7q2s",      # TEST 2026-10-28 → 2026-11-18 (espejo de PROD):
+                                      # su cuenta agotó la cuota y quedó inaccesible;
+                                      # RETIRADA — no volver a ponerla en TEST_BRANCH_IDS
     "ep-lingering-fog-arywdnbg",      # TEST 2026-10-18 → 2026-10-24 (espejo de PROD); RETIRADA
     "ep-damp-base-b6mpe739",          # TEST anterior: credencial inválida desde 2026-10-18
     "ep-winter-boat-b6zpvtxu",        # TEST anterior: rama recreada (2026-10-13); su credencial
@@ -391,3 +468,11 @@ def is_test_db_url(url: str) -> bool:
     if any(branch in u for branch in ENDPOINTS_RETIRADOS):
         return False
     return any(branch in u for branch in TEST_BRANCH_IDS)
+
+
+# ── Guardas que corren al importar (arranque de la app / scripts) ────────────
+# Se llaman acá, al final, porque necesitan las tuplas de endpoints de arriba.
+# Fail-fast: si la BD cargada no es la del ENVIRONMENT, la app NO levanta.
+_verificar_entorno_db()
+_avisar_api_key_legacy()
+
