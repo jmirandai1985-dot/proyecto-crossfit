@@ -116,8 +116,8 @@ ok(/activeTab === 'asistencia' && \([\s\S]{0,400}<AsistenciaClases franjas permi
 eq((DASH.match(/<AsistenciaClases/g) || []).length, 1,
     'la pestaña Asistencia se monta UNA vez en el dashboard del coach');
 const ADMIN = leer('../src/pages/admin/Asistencia.jsx');
-ok(/<AsistenciaClases variant="dark" permitirFiltroDisciplina \/>/.test(ADMIN),
-    'el admin monta el componente con el filtro por disciplina');
+ok(/<AsistenciaClases variant="dark" permitirFiltroDisciplina permitirSinReserva \/>/.test(ADMIN),
+    'el admin monta el componente con el filtro por disciplina y el walk-in');
 eq(/franjas/.test(ADMIN), false, 'el admin NO pide franjas: su pantalla no cambia');
 
 // ── 5. Dedup del +10: la copia local se fue (Bloque 6) ──────────────────────

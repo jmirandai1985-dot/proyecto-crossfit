@@ -1639,10 +1639,10 @@ export function useAlumnosElegiblesClase(claseId) {
     });
 }
 
-// Walk-in SIN CARGO (`tokens_gastados = 0`): el camino del alumno que no tiene plan
-// vigente con créditos. El camino CON créditos NO pasa por acá —usa `useCrearReserva` +
-// `useMarcarAsistenciaReserva`, donde el crédito se descuenta y queda auditado—, así que
-// esta mutación nunca mueve dinero.
+// Walk-in SIN CARGO (`tokens_gastados = 0`): el camino del alumno con plan vigente pero SIN
+// créditos (el único que deja el backend; sin plan responde 409). El camino CON créditos NO
+// pasa por acá —usa `useCrearReserva` + `useMarcarAsistenciaReserva`, donde el crédito se
+// descuenta y queda auditado—, así que esta mutación nunca mueve dinero.
 export function usePresenteSinReserva() {
     const qc = useQueryClient();
     return useMutation({

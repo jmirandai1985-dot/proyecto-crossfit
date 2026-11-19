@@ -20,11 +20,17 @@ import AsistenciaClases from '../../components/AsistenciaClases';
  *
  * `permitirFiltroDisciplina` suma el selector "Disciplina" sobre las clases del día. El
  * coach sigue montando el componente sin la prop: su pantalla no cambia.
+ *
+ * `permitirSinReserva` suma el botón "+ Agregar alumno sin reserva" dentro del detalle de
+ * la clase (el walk-in). Lo usa el coach desde su pestaña Asistencia; el admin lo monta
+ * igual porque el backend ya lo autoriza (`GET /clases/{id}/elegibles` y
+ * `POST /clases/{id}/sin-reserva` aceptan rol admin: `get_current_coach` incluye
+ * coach/administrador y el candado de alcance no aplica al admin).
  */
 const AdminAsistencia = () => {
     return (
         <Layout>
-            <AsistenciaClases variant="dark" permitirFiltroDisciplina />
+            <AsistenciaClases variant="dark" permitirFiltroDisciplina permitirSinReserva />
         </Layout>
     );
 };

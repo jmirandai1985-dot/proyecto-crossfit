@@ -376,15 +376,27 @@ def alumnos_clase(
     ).order_by(Reserva.created_at.asc()).all()
 
     alumno_ids = {r.alumno_id for r in reservas}
+    # Punto 2: quién marcó cada asistencia (`reservas.asistencia_marcada_por`) + el coach
+    # asignado a la clase. Los dos nombres salen de la MISMA consulta que ya traía los de
+    # los alumnos (una sola query, sin N+1).
+    marcada_por_ids = {r.asistencia_marcada_por for r in reservas
+                       if r.asistencia_marcada_por is not None}
+    ids_a_nombrar = set(alumno_ids) | marcada_por_ids
+    if clase.coach_id is not None:
+        ids_a_nombrar.add(clase.coach_id)
     nombres = {}
-    if alumno_ids:
-        for u in db.query(Usuario).filter(Usuario.id.in_(alumno_ids)).all():
+    if ids_a_nombrar:
+        for u in db.query(Usuario).filter(Usuario.id.in_(ids_a_nombrar)).all():
             nombres[u.id] = u.nombre
 
     return {
         "clase_id": clase_id,
         "fecha": str(clase.fecha),
         "hora_inicio": str(clase.hora_inicio),
+        # Coach ASIGNADO de la clase: el panel compara contra `asistencia_marcada_por`
+        # para avisar, sin alerta, que la marcó otra persona (otro coach o el admin).
+        "coach_id": clase.coach_id,
+        "coach_nombre": nombres.get(clase.coach_id) if clase.coach_id else None,
         "marcada": any(r.asistencia_marcada_at is not None for r in reservas),
         "reservas": [
             {
@@ -392,6 +404,13 @@ def alumnos_clase(
                 "alumno_id": r.alumno_id,
                 "nombre": nombres.get(r.alumno_id, f"Alumno #{r.alumno_id}"),
                 "asistio": bool(r.asistio),
+                # Trazabilidad de la marca (migración de auditoría de asistencia): el id
+                # ya se guardaba y ahora también viaja con el nombre resuelto.
+                "asistencia_marcada_por": r.asistencia_marcada_por,
+                "asistencia_marcada_por_nombre": (
+                    nombres.get(r.asistencia_marcada_por, f"Usuario #{r.asistencia_marcada_por}")
+                    if r.asistencia_marcada_por is not None else None
+                ),
             }
             for r in reservas
         ],
@@ -624,9 +643,14 @@ def registrar_presente_sin_reserva(
         reescribe ni con este atajo.
       * el alumno no puede tener ya una reserva VIVA en esa clase (400, el mismo texto
         que `POST /reservas`): su presencia se marca sobre esa reserva, no se duplica.
-      * el alumno NO puede tener plan vigente con créditos (409): en ese caso el camino
+      * el alumno TIENE que tener un plan vigente (409): sin plan no hay walk-in —el
+        camino es contratar un plan, no entrenar gratis—. Es la Opción A: bloquear, nunca
+        dejar una deuda pendiente.
+      * el alumno NO puede tener plan vigente CON créditos (409): en ese caso el camino
         correcto es la reserva normal, que SÍ descuenta el crédito. Sin este candado,
         un clic de más le regalaría la clase al box.
+      * (el único caso que queda para el walk-in es el plan vigente SIN créditos: la
+        presencia queda sin cargo y así lo muestra su historial).
       * el aforo se toma con el MISMO `UPDATE ... WHERE asistentes < cupo_maximo` de
         `POST /reservas` (atómico: sin overbooking ni carrera) y cuenta para
         `asistentes_confirmados`, igual que una reserva.
@@ -677,6 +701,14 @@ def registrar_presente_sin_reserva(
             detail="El alumno ya tiene una reserva activa para esta clase")
 
     plan = _planes_que_dan_acceso(db, tenant_id, [alumno.id]).get(alumno.id)
+    # Opción A (nunca generar deuda pendiente): SIN plan vigente no hay walk-in. Antes este
+    # caso entraba como "sin cargo" y el alumno entrenaba gratis; ahora se bloquea y se le
+    # dice qué hacer. Va ANTES de escribir nada (aforo incluido).
+    if plan is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{alumno.nombre} no tiene un plan activo. Debe contratar un plan "
+                   f"para poder asistir a clases.")
     if _puede_reservar(plan):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

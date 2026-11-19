@@ -278,3 +278,69 @@ export const validarFamilia = (tipoFormulario, datos) => {
     }
     return '';
 };
+
+// ── Formulario histórico de metcon: campos y PAYLOAD ───────────────────────
+// POR QUÉ VIVE ACÁ: el `ModalPublicarWod` y la tarjeta "Publicar WOD" de la pestaña Clases
+// del coach publican con el MISMO endpoint (`POST /wods/batch-create`) y tienen que mandar
+// la MISMA forma de WOD. El payload se arma en UNA sola función —y no en cada pantalla—
+// para que no se desincronicen; el módulo es JS puro (sin React ni Vite) para que el test
+// unitario de Node pueda comparar la forma exacta sin navegador.
+
+/** Tipos de metcon del formulario (los mismos valores históricos de `wods.tipo_metcon`). */
+export const TIPOS_WOD = ['For Time', 'AMRAP', 'EMOM', 'Otro'];
+/** Un bloque puede ser un metcon o un RM final (peso en kg). */
+export const TIPOS_BLOQUE = ['For Time', 'AMRAP', 'EMOM', 'RM', 'Otro'];
+
+/** Estado inicial del formulario (o los datos de un WOD ya publicado, para editarlo). */
+export const formularioMetconVacio = (wod = null) => ({
+    calentamiento: wod?.calentamiento || '',
+    musculacion: wod?.fuerza_habilidad || '',
+    wod_nombre: wod?.titulo || '',
+    wod_tipo: wod?.tipo_metcon || TIPOS_WOD[0],
+    wod_descripcion: wod?.wod_principal || '',
+});
+
+/** Bloques EDITABLES a partir de los bloques guardados de un WOD (para editarlo). */
+export const bloquesDesdeWod = (wod = null) => (wod?.bloques || []).map((bloque) => ({
+    titulo: bloque.titulo || '',
+    tipo_metcon: bloque.tipo_metcon || TIPOS_BLOQUE[0],
+    descripcion: bloque.descripcion || '',
+}));
+
+/** Fila vacía del botón "+ Agregar bloque". */
+export const bloqueVacio = () => ({
+    titulo: '', tipo_metcon: TIPOS_BLOQUE[0], descripcion: '',
+});
+
+/**
+ * Normaliza la lista de bloques antes de mandarla al backend: descarta las filas totalmente
+ * vacías y renumera `orden` 1..N. "Otro" viaja como texto libre, igual que
+ * `wods.tipo_metcon`.
+ */
+export const normalizarBloques = (lista) => (lista || [])
+    .map((bloque, indice) => ({
+        orden: indice + 1,
+        titulo: (bloque?.titulo || '').trim() || null,
+        tipo_metcon: bloque?.tipo_metcon || null,
+        descripcion: (bloque?.descripcion || '').trim() || null,
+    }))
+    .filter((bloque) => bloque.titulo || bloque.descripcion);
+
+/**
+ * El WOD metcon que viaja en el payload (`POST /wods` · `POST /wods/batch-create`).
+ * MISMA forma para el modal y para la tarjeta inline de la pestaña Clases: `titulo`,
+ * `calentamiento`, `fuerza_habilidad`, `wod_principal`, `tipo_metcon` y `bloques`.
+ */
+export const contenidoMetconDesdeFormulario = (form, bloques = []) => ({
+    titulo: (form?.wod_nombre || '').trim() || null,
+    calentamiento: (form?.calentamiento || '').trim() || null,
+    fuerza_habilidad: (form?.musculacion || '').trim() || null,
+    wod_principal: (form?.wod_descripcion || '').trim(),
+    tipo_metcon: form?.wod_tipo || 'Otro',
+    bloques: normalizarBloques(bloques),
+});
+
+/** Mensaje de error del formulario de metcon, o '' si está listo para publicar. */
+export const validarFormularioMetcon = (form) => (
+    (form?.wod_descripcion || '').trim() ? '' : 'La descripción del WOD es obligatoria.'
+);

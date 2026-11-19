@@ -27,6 +27,7 @@ RAIZ = Path(__file__).resolve().parents[2]
 UTILS = "frontend/src/utils/formulariosWod.js"
 ADMIN = "frontend/src/pages/admin/Disciplinas.jsx"
 MODAL = "frontend/src/components/ModalPublicarWod.jsx"
+CAMPOS_WOD = "frontend/src/components/CamposWod.jsx"
 DETALLE = "frontend/src/components/WodDetalleModal.jsx"
 MOBILE_DISCIPLINAS = "frontend/src/pages/admin/DisciplinasMobile.jsx"
 FORMULARIOS = (
@@ -113,10 +114,16 @@ def test_c_el_modal_elige_el_formulario_por_familia():
     assert "validarFamilia(tipoFormulario, datosFamilia)" in modal
     assert "familiasDesdeWod(wodEdicion)" in modal
     assert "clase?.disciplina_tipo_formulario || disciplinaDeLista?.tipo_formulario" in modal
-    # El formulario histórico sigue intacto: sus testids y su payload.
-    assert 'data-testid="wod-calentamiento"' in modal
-    assert 'data-testid="wod-descripcion"' in modal
-    assert 'data-testid="wod-bloques"' in modal
+    # El formulario histórico sigue intacto: sus CAMPOS viven en el subcomponente compartido
+    # `CamposWod` (el modal lo monta y la pestaña Clases lo reusa) y su payload se arma en
+    # `contenidoMetconDesdeFormulario`, también único.
+    assert "import CamposWod from './CamposWod'" in modal
+    assert "<CamposWod" in modal
+    assert "contenidoMetconDesdeFormulario(form, bloques)" in modal
+    campos = _fuente(CAMPOS_WOD)
+    for testid in ("wod-calentamiento", "wod-musculacion", "wod-nombre", "wod-tipos",
+                   "wod-descripcion", "wod-bloques", "agregar-bloque"):
+        assert f"tid('{testid}')" in campos, f"CamposWod no define {testid}"
 
 
 def test_d_los_formularios_existen_y_no_agregan_emojis():

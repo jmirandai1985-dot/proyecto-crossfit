@@ -69,15 +69,17 @@ def test_a_los_hooks_existen_y_usan_su_clave():
     assert "export const SIN_DATOS = [];" in q
 def test_b_el_dashboard_del_coach_consume_los_hooks():
     f = _fuente(DASHBOARD)
-    for prohibido in PROHIBIDO + ["useEffect(", "useCallback("]:
+    for prohibido in PROHIBIDO + ["useCallback("]:
         assert prohibido not in f, f"DashboardCoach todavía usa {prohibido}"
+    # `useEffect` SÍ se usa (el latido de 30 s y el borde del reloj de las clases: vuelven a
+    # preguntar por el `estado`, no piden datos). Lo que no puede volver es un fetch a mano.
+    assert "useEffect(" in f and "api.get(" not in f
     # Una consulta por dato, con las claves que comparte con Gestión de Clases.
     # (2026-10-14: se actualizan las líneas del Resumen de Asistencia del panel —la
     # `claseAsistenciaExpandida` y sus derivados se fueron con el Resumen viejo en `0a1225e`,
     # y el detalle de asistencia por clase ahora cuelga de la PRÓXIMA clase del día.)
     for linea in ("const clasesQ = useClasesCoach(usuario_id, weekRange.start, weekRange.end);",
                   "const wodsQ = useTodosLosWods();",
-                  "const riesgoQ = useAlumnosCoachEnRiesgo(usuario_id);",
                   "const coachDiscQ = useCoachDisciplinas();",
                   "const alumnosQ = useAlumnosDeCoach(usuario_id);",
                   # Parte 2.1: el enriquecimiento (RMs + nivel) recibe la PÁGINA visible, no
@@ -160,10 +162,12 @@ def test_d_las_mutaciones_y_las_claves_se_comparten_entre_las_pantallas():
         assert "useReservasPorClase(" in pantalla
         assert "useCoachDisciplinas(" in pantalla
         assert "useTodosLosWods(" in pantalla
-    # El contacto por correo del panel (la única mutación que queda en el Dashboard: marcar
-    # asistencia se fue con el Resumen viejo, ahora se hace en la pestaña Asistencia).
-    for uso in ("await contactarAlumno.mutateAsync({",):
-        assert uso in dash, f"el Dashboard no usa {uso}"
+    # El contacto por correo se fue con la pestaña "Riesgo" (retirada del panel del coach):
+    # la función sigue viva en la pantalla Fidelización del admin —los hooks NO se borraron
+    # de `queries.js`— pero el Dashboard ya no la monta.
+    assert "await contactarAlumno.mutateAsync({" not in dash
+    for hook in ("useContactarAlumnoCoach", "useAlumnosCoachEnRiesgo"):
+        assert f"export function {hook}(" in q, f"falta el hook {hook} (lo usa el panel admin)"
     # Lo PORTADO desde Gestión de Clases usa las mismas mutaciones que usaba allá.
     for uso in ("await guardarWod.mutateAsync({",
                 "await crearBatch.mutateAsync({",

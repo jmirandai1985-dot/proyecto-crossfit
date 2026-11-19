@@ -8,9 +8,12 @@ contrato que se fija acá:
   1. `GET /clases/{id}/elegibles` lista a los alumnos ACTIVOS del box con el MISMO
      predicado que aplica `POST /reservas` (`puede_reservar` = plan que da acceso hoy +
      créditos) y marca a quien ya está en la clase (`ya_presente`);
-  2. el alumno SIN plan vigente entra como PRESENTE SIN CARGO: 201, `tokens_gastados = 0`,
-     `asistio = True`, `asistencia_via = 'sin_cargo'`, el aforo sube 1 y queda la fila de
-     auditoría;
+  2. el alumno SIN plan activo NO entra (409, "debe contratar un plan") y NADA escrito: ni
+     reserva, ni aforo, ni auditoría. Opción A: bloquear, nunca dejar una deuda pendiente ni
+     regalar la clase;
+  2b. el alumno con plan vigente SIN créditos SÍ entra como PRESENTE SIN CARGO: 201,
+     `tokens_gastados = 0`, `asistio = True`, `asistencia_via = 'sin_cargo'`, el aforo sube 1
+     y queda la fila de auditoría (es el único caso que le queda al walk-in);
   3. el alumno CON plan y créditos NO entra por acá: 409 y NADA escrito (ése es el camino
      de la reserva normal, que es la que descuenta el crédito);
   4. repetir el alta → 400 (la presencia no se duplica);
@@ -145,6 +148,34 @@ def alumno_con_plan(clase):
     return a
 
 
+@pytest.fixture(scope="module")
+def alumno_sin_creditos(clase):
+    """Alumno con plan VIGENTE pero SIN créditos: el ÚNICO walk-in que queda (sin cargo).
+
+    Es el caso espejo del de arriba: tiene suscripción viva (no cae en el 409 de "no tiene
+    plan activo") pero ninguna le deja reservar (no cae en el 409 de "tiene créditos").
+    """
+    a = _one(
+        "SELECT u.id, u.tenant_id, u.correo, u.rol::text AS rol "
+        "FROM usuarios u "
+        "WHERE u.tenant_id = :t AND u.rol::text = 'alumno' AND u.activo = true "
+        "AND u.estado = 'activo' "
+        "AND EXISTS (SELECT 1 FROM suscripciones s WHERE s.usuario_id = u.id "
+        "   AND s.estado::text NOT IN ('pendiente', 'rechazado') "
+        "   AND (s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date >= :h) "
+        "AND NOT EXISTS (SELECT 1 FROM suscripciones s2 WHERE s2.usuario_id = u.id "
+        "   AND s2.estado::text NOT IN ('pendiente', 'rechazado') "
+        "   AND (s2.fecha_expiracion AT TIME ZONE 'America/Santiago')::date >= :h "
+        "   AND (s2.creditos_disponibles IS NULL OR s2.creditos_disponibles > 0)) "
+        "AND NOT EXISTS (SELECT 1 FROM reservas r WHERE r.clase_id = :c "
+        "   AND r.alumno_id = u.id AND lower(r.estado::text) NOT LIKE 'cancel%') "
+        "ORDER BY u.id LIMIT 1",
+        t=TENANT_ID, h=HOY, c=clase.id)
+    if a is None:
+        pytest.skip("TEST no tiene un alumno con plan vigente SIN créditos")
+    return a
+
+
 def test_elegibles_trae_el_predicado_de_reservas(clase, staff, alumno_sin_plan):
     """(1) La lista del modal: quién puede reservar, quién no y quién ya está."""
     r = requests.get(f"{BASE}/asistencia/clases/{clase.id}/elegibles",
@@ -164,13 +195,31 @@ def test_elegibles_trae_el_predicado_de_reservas(clase, staff, alumno_sin_plan):
         if a["puede_reservar"]:
             assert a["plan_vigente"], f"{a['nombre']}: puede reservar sin plan vigente"
 
-
-def test_sin_plan_entra_presente_y_sin_cargo(clase, staff, alumno_sin_plan, aforo):
-    """(2) Walk-in del alumno sin plan: presente, 0 créditos, aforo +1 y auditoría."""
+def test_sin_plan_da_409_y_no_escribe_nada(clase, staff, alumno_sin_plan):
+    """(2) El alumno SIN plan activo no entrena gratis: 409 y nada escrito."""
     antes = _one("SELECT asistentes_confirmados FROM clases WHERE id = :c", c=clase.id)
 
     r = requests.post(f"{BASE}/asistencia/clases/{clase.id}/sin-reserva",
                       json={"alumno_id": alumno_sin_plan.id},
+                      headers=_headers(staff), timeout=20)
+    assert r.status_code == 409, r.text
+    assert "no tiene un plan activo" in r.json()["detail"]
+    assert "Debe contratar un plan" in r.json()["detail"]
+
+    # Ni reserva, ni aforo, ni auditoría: la acción se bloquea ANTES de escribir.
+    assert _one("SELECT 1 FROM reservas WHERE clase_id = :c AND alumno_id = :a",
+                c=clase.id, a=alumno_sin_plan.id) is None
+    despues = _one("SELECT asistentes_confirmados FROM clases WHERE id = :c", c=clase.id)
+    assert despues.asistentes_confirmados == antes.asistentes_confirmados
+
+
+def test_plan_sin_creditos_entra_presente_y_sin_cargo(clase, staff, alumno_sin_creditos,
+                                                      aforo):
+    """(2b) El único walk-in que queda: plan vigente SIN créditos → presente y 0 créditos."""
+    antes = _one("SELECT asistentes_confirmados FROM clases WHERE id = :c", c=clase.id)
+
+    r = requests.post(f"{BASE}/asistencia/clases/{clase.id}/sin-reserva",
+                      json={"alumno_id": alumno_sin_creditos.id},
                       headers=_headers(staff), timeout=20)
     assert r.status_code == 201, r.text
     datos = r.json()
@@ -195,16 +244,18 @@ def test_sin_plan_entra_presente_y_sin_cargo(clase, staff, alumno_sin_plan, afor
     lista = requests.get(f"{BASE}/asistencia/clases/{clase.id}/alumnos",
                          headers=_headers(staff), timeout=20)
     assert lista.status_code == 200, lista.text
-    assert alumno_sin_plan.id in {a["alumno_id"] for a in lista.json()["reservas"]}
+    assert alumno_sin_creditos.id in {a["alumno_id"] for a in lista.json()["reservas"]}
 
 
-def test_repetir_el_alta_da_400(clase, staff, alumno_sin_plan):
+def test_repetir_el_alta_da_400(clase, staff, alumno_sin_creditos):
     """(4) La presencia no se duplica."""
     r = requests.post(f"{BASE}/asistencia/clases/{clase.id}/sin-reserva",
-                      json={"alumno_id": alumno_sin_plan.id},
+                      json={"alumno_id": alumno_sin_creditos.id},
                       headers=_headers(staff), timeout=20)
     assert r.status_code == 400, r.text
     assert "reserva activa" in r.json()["detail"]
+
+
 
 
 def test_con_plan_y_creditos_no_entra_por_aca(clase, staff, alumno_con_plan):

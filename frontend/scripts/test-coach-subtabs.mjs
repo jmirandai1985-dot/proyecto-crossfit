@@ -48,6 +48,14 @@ for (const sub of COACH_SUBTABS) {
     eq(sub.path, `/coach/dashboard?tab=${sub.key}`, `'${sub.key}' navega a su propio query`);
 }
 
+console.log('== 2b. "Mis clases" es su propia sub-pestaña, justo después de Clases ==');
+// 2026-11: dejó de ser un paso DENTRO de la tarjeta Clases (ver test-clases-sin-gestion).
+const idxClases = COACH_SUBTABS.findIndex((s) => s.key === 'clases');
+const idxMis = COACH_SUBTABS.findIndex((s) => s.key === 'mis-clases');
+ok(idxMis >= 0, "COACH_SUBTABS declara la pestaña 'mis-clases'");
+eq(idxMis, idxClases + 1, '"Mis clases" va inmediatamente después de "Clases"');
+eq(COACH_SUBTABS[idxMis]?.label, 'Mis clases', 'y su label es "Mis clases"');
+
 console.log('== 3. Una sola lista de sub-pestañas, con <Link> ==');
 const bloques = LAYOUT.split('COACH_SUBTABS.map').length - 1;
 eq(bloques, 1, 'el sidebar tiene UNA sola lista de sub-pestañas (sin copias divergentes)');

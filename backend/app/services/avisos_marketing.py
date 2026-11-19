@@ -167,6 +167,10 @@ def serializar(aviso: AvisoMarketing, producto: Producto | None = None,
         "vigente_hasta": aviso.vigente_hasta,
         "fijado_arriba": bool(aviso.fijado_arriba),
         "producto_id": aviso.producto_id,
+        # Quién creó el aviso (admin o coach): el panel del coach sólo muestra los
+        # avisos rápidos PROPIOS, así que este id tiene que viajar en la respuesta.
+        # La columna ya existía en el modelo (`avisos_marketing.creado_por`).
+        "creado_por": aviso.creado_por,
         # Vínculo con una promoción de Referidos publicada (migración 056).
         "promocion_id": aviso.promocion_id,
         # Tarjeta de la ESCALERA de tramos (migración 064): se publica una sola

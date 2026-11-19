@@ -66,8 +66,8 @@ const CON_ASISTENCIA = fuentes(new URL('../src/', import.meta.url))
     .filter((u) => /\.(jsx|js)$/.test(u.pathname))
     .map((u) => readFileSync(u, 'utf8'))
     .filter((txt) => txt.includes('<AsistenciaClases'));
-eq(CON_ASISTENCIA.filter((txt) => txt.includes('permitirSinReserva')).length, 1,
-    'sólo UNA pantalla (el coach) pide el walk-in');
+eq(CON_ASISTENCIA.filter((txt) => txt.includes('permitirSinReserva')).length, 2,
+    'DOS pantallas piden el walk-in: el coach y el admin (Punto 3: el backend ya autoriza a los dos)');
 
 console.log('== 5. Backend: endpoints y candados ==');
 ok(API.includes('@router.post("/clases/{clase_id}/sin-reserva"'),

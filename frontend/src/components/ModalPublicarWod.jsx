@@ -11,14 +11,18 @@ import { FRANJAS, franjaDe } from '../utils/franjasAsistencia';
 // Familias de formulario: el admin elige una por disciplina y acá se decide qué
 // componente renderizar. `wod_metcon` sigue siendo el formulario histórico.
 import {
-    TIPO_FORMULARIO_DEFAULT, familiasDesdeWod, familiaDeEtiqueta,
-    mapearFamiliaAWod, normalizarTipoFormulario, validarFamilia,
+    TIPO_FORMULARIO_DEFAULT, bloquesDesdeWod, contenidoMetconDesdeFormulario,
+    familiasDesdeWod, familiaDeEtiqueta, formularioMetconVacio, mapearFamiliaAWod,
+    normalizarBloques, normalizarTipoFormulario, validarFamilia, validarFormularioMetcon,
 } from '../utils/formulariosWod';
 import FormularioFuerza from './wod/FormularioFuerza';
 import FormularioSecuencia from './wod/FormularioSecuencia';
 import FormularioRoundsTecnica from './wod/FormularioRoundsTecnica';
 import FormularioIntervalos from './wod/FormularioIntervalos';
 import FormularioLibre from './wod/FormularioLibre';
+// Los campos del WOD (metcon) son los MISMOS que monta la tarjeta "Publicar WOD" de la
+// pestaña Clases: viven en un subcomponente compartido para que no se desincronicen.
+import CamposWod from './CamposWod';
 
 // Días de la semana (0 = domingo, el índice de `Date.getUTCDay()`).
 const DIAS_CORTOS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -28,20 +32,6 @@ const fechaDiaDe = (iso) => {
     const d = new Date(`${iso}T12:00:00Z`);
     return Number.isNaN(d.getTime()) ? 0 : d.getUTCDay();
 };
-
-/**
- * Bloques 3: normaliza la lista de bloques antes de mandarla al backend.
- * Descarta filas totalmente vacías y renumera `orden` 1..N. "Otro" viaja como
- * texto libre igual que `wods.tipo_metcon`.
- */
-const normalizarBloques = (lista) => (lista || [])
-    .map((b, i) => ({
-        orden: i + 1,
-        titulo: (b.titulo || '').trim() || null,
-        tipo_metcon: b.tipo_metcon || null,
-        descripcion: (b.descripcion || '').trim() || null,
-    }))
-    .filter((b) => b.titulo || b.descripcion);
 
 /**
  * Modal "Publicar WOD" del panel del coach (mockup `#modal-wod`).
@@ -104,23 +94,12 @@ const ModalPublicarWod = ({
     //     ['HH:MM', …] = sólo esos horarios (se traducen a `clase_ids`).
     const [diasTocados, setDiasTocados] = useState(null);
     const [horasTocadas, setHorasTocadas] = useState(null);
-    const [form, setForm] = useState({
-        calentamiento: wodEdicion?.calentamiento || '',
-        musculacion: wodEdicion?.fuerza_habilidad || '',
-        wod_nombre: wodEdicion?.titulo || '',
-        wod_tipo: wodEdicion?.tipo_metcon || 'For Time',
-        wod_descripcion: wodEdicion?.wod_principal || '',
-        aviso: '',
-    });
+    const [form, setForm] = useState(() => ({ ...formularioMetconVacio(wodEdicion), aviso: '' }));
     // ── BLOQUE 3: "WOD con bloques" (varios metcons + RM en la misma clase) ──
     // Lista vacía = WOD simple (comportamiento histórico). En modo edición se
     // precargan los bloques del WOD; si el coach no los toca NO se reenvían (así
     // el PUT no borra/recrea las filas y los resultados por bloque sobreviven).
-    const [bloques, setBloques] = useState(() => (wodEdicion?.bloques || []).map((b) => ({
-        titulo: b.titulo || '',
-        tipo_metcon: b.tipo_metcon || 'For Time',
-        descripcion: b.descripcion || '',
-    })));
+    const [bloques, setBloques] = useState(() => bloquesDesdeWod(wodEdicion));
     const [error, setError] = useState('');
     const [previa, setPrevia] = useState(null);        // { dias, errores, nombre }
     const [enviando, setEnviando] = useState(false);
@@ -131,9 +110,6 @@ const ModalPublicarWod = ({
     const programar = useProgramarSemana();
     const avisoRapido = usePublicarAvisoRapido();
 
-    const TIPOS = ['For Time', 'AMRAP', 'EMOM', 'Otro'];
-    // Un bloque puede ser un metcon o un RM final (peso en kg).
-    const TIPOS_BLOQUE = ['For Time', 'AMRAP', 'EMOM', 'RM', 'Otro'];
     // Sin clase (carga masiva del Excel) la semana es la de HOY: el archivo trae sus fechas.
     const fechaClase = clase?.fecha ? String(clase.fecha).split('T')[0] : hoyChileStr();
     const hora = (clase?.hora_inicio || '').slice(0, 5);
@@ -248,30 +224,17 @@ const ModalPublicarWod = ({
     const bloquesCambiaron = JSON.stringify(bloquesNormalizados)
         !== JSON.stringify(bloquesOriginales);
 
-    const agregarBloque = () => setBloques((prev) => [
-        ...prev, { titulo: '', tipo_metcon: 'For Time', descripcion: '' },
-    ]);
-    const editarBloque = (indice, campo, valor) => setBloques((prev) => prev.map(
-        (b, i) => (i === indice ? { ...b, [campo]: valor } : b),
-    ));
-    const quitarBloque = (indice) => setBloques(
-        (prev) => prev.filter((_, i) => i !== indice));
-
-    // Payload del WOD: el formulario histórico de metcon o el mapeo de la
-    // familia elegida (bloques + resumen en `wod_principal`, sin columnas nuevas).
-    const construirContenidoWod = () => (esMetcon ? {
-        titulo: form.wod_nombre.trim() || null,
-        calentamiento: form.calentamiento.trim() || null,
-        fuerza_habilidad: form.musculacion.trim() || null,
-        wod_principal: form.wod_descripcion.trim(),
-        tipo_metcon: form.wod_tipo || 'Otro',
-        bloques: bloquesNormalizados,
-    } : mapearFamiliaAWod(tipoFormulario, datosFamilia));
+    // Payload del WOD: el formulario histórico de metcon (la MISMA función que usa la
+    // tarjeta inline de la pestaña Clases) o el mapeo de la familia elegida (bloques +
+    // resumen en `wod_principal`, sin columnas nuevas).
+    const construirContenidoWod = () => (esMetcon
+        ? contenidoMetconDesdeFormulario(form, bloques)
+        : mapearFamiliaAWod(tipoFormulario, datosFamilia));
 
     const publicarManual = async () => {
         setError('');
         const errorContenido = esMetcon
-            ? (form.wod_descripcion.trim() ? '' : 'La descripción del WOD es obligatoria.')
+            ? validarFormularioMetcon(form)
             : validarFamilia(tipoFormulario, datosFamilia);
         if (errorContenido) {
             setError(errorContenido);
@@ -538,116 +501,14 @@ const ModalPublicarWod = ({
 
                             {esMetcon ? (
                             <>
-                            {/* Sección "contenido": los campos del WOD en sí, agrupados para que la
-                                jerarquía sea clara (arriba el contenido, abajo el alcance). */}
-                            <p className="pt-1 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-                                Contenido del WOD
-                            </p>
-
-                            <label className={ETIQUETA}>
-                                1 · Calentamiento
-                                <textarea rows={2} value={form.calentamiento}
-                                    onChange={setCampo('calentamiento')} maxLength={500}
-                                    placeholder="Ej. 400m trote + movilidad de cadera y hombro"
-                                    data-testid="wod-calentamiento" className={CAMPO} />
-                            </label>
-
-                            <label className={ETIQUETA}>
-                                2 · Musculación
-                                <textarea rows={2} value={form.musculacion}
-                                    onChange={setCampo('musculacion')} maxLength={500}
-                                    placeholder="Ej. 5x5 Back Squat 70%"
-                                    data-testid="wod-musculacion" className={CAMPO} />
-                            </label>
-
-                            <label className={ETIQUETA}>
-                                3 · WOD · Nombre
-                                <input type="text" value={form.wod_nombre} onChange={setCampo('wod_nombre')}
-                                    maxLength={200} placeholder="Ej. Fran, Cindy…"
-                                    data-testid="wod-nombre" className={CAMPO} />
-                            </label>
-
-                            <div>
-                                <span className={ETIQUETA}>Tipo</span>
-                                <div className="mt-1.5 flex flex-wrap gap-2" data-testid="wod-tipos">
-                                    {TIPOS.map((t) => (
-                                        <button key={t} type="button"
-                                            onClick={() => setForm((p) => ({ ...p, wod_tipo: t }))}
-                                            className={tagBtn(form.wod_tipo === t)}>{t}</button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <label className={ETIQUETA}>
-                                Descripción
-                                <textarea rows={3} value={form.wod_descripcion}
-                                    onChange={setCampo('wod_descripcion')} maxLength={500}
-                                    placeholder="Ej. 21-15-9 Thrusters / Pull-ups"
-                                    data-testid="wod-descripcion" className={CAMPO} />
-                            </label>
-
-                            {/* ── BLOQUE 3: bloques del WOD (opcional) ──
-                                Un WOD real puede tener 2 metcons + un RM final. Sin
-                                bloques se comporta EXACTAMENTE como antes (WOD simple). */}
-                            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3" data-testid="wod-bloques">
-                                <div className="flex items-start justify-between gap-2">
-                                    <div>
-                                        <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Bloques del WOD</p>
-                                        <p className="mt-0.5 text-[10.5px] text-zinc-500">
-                                            Opcional: metcons encadenados y/o un RM final. Sin bloques = un único resultado.
-                                        </p>
-                                    </div>
-                                    <button type="button" onClick={agregarBloque}
-                                        data-testid="agregar-bloque"
-                                        className="shrink-0 rounded-lg border border-emerald-600/60 bg-emerald-600/15 px-2.5 py-1.5 text-[11px] font-bold text-emerald-200 hover:bg-emerald-600/25">
-                                        + Agregar bloque
-                                    </button>
-                                </div>
-                                {bloques.length === 0 ? (
-                                    <p className="mt-2 text-[11px] italic text-zinc-600">
-                                        Este WOD no tiene bloques.
-                                    </p>
-                                ) : (
-                                    <div className="mt-2 space-y-2">
-                                        {bloques.map((bloque, indice) => (
-                                            <div key={indice} className="rounded-lg border border-zinc-800 bg-zinc-900 p-2.5"
-                                                data-testid={`bloque-${indice}`}>
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <span className="text-[10.5px] font-black uppercase tracking-wide text-zinc-400">
-                                                        Bloque {indice + 1}
-                                                    </span>
-                                                    <button type="button" onClick={() => quitarBloque(indice)}
-                                                        data-testid={`quitar-bloque-${indice}`}
-                                                        className="rounded px-2 py-0.5 text-[11px] font-semibold text-red-300 hover:bg-red-500/10">
-                                                        Quitar
-                                                    </button>
-                                                </div>
-                                                <input type="text" value={bloque.titulo}
-                                                    onChange={(e) => editarBloque(indice, 'titulo', e.target.value)}
-                                                    maxLength={200} placeholder="Título (ej. Metcon 1, RM Final)"
-                                                    data-testid={`bloque-titulo-${indice}`}
-                                                    className={`${CAMPO} mt-1.5`} />
-                                                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                                                    {TIPOS_BLOQUE.map((t) => (
-                                                        <button key={t} type="button"
-                                                            onClick={() => editarBloque(indice, 'tipo_metcon', t)}
-                                                            data-testid={`bloque-tipo-${indice}-${t}`}
-                                                            className={tagBtn(bloque.tipo_metcon === t)}>
-                                                            {t}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                                <textarea rows={2} value={bloque.descripcion}
-                                                    onChange={(e) => editarBloque(indice, 'descripcion', e.target.value)}
-                                                    maxLength={2000}
-                                                    placeholder="Detalle del bloque (ej. 21-15-9 Thrusters / Pull-ups)"
-                                                    data-testid={`bloque-descripcion-${indice}`}
-                                                    className={`${CAMPO} mt-1.5`} />
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
+                            {/* Los campos del WOD: subcomponente COMPARTIDO con la tarjeta
+                                "Publicar WOD" de la pestaña Clases (mismos campos y payload). */}
+                            <CamposWod
+                                form={form}
+                                setForm={setForm}
+                                bloques={bloques}
+                                setBloques={setBloques}
+                            />
                             </>
                             ) : (
                             <>

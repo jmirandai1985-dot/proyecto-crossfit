@@ -13,6 +13,10 @@
 export const COACH_SUBTABS = [
     { key: 'resumen', label: 'Resumen', path: '/coach/dashboard?tab=resumen' },
     { key: 'clases', label: 'Clases', path: '/coach/dashboard?tab=clases' },
+    // "Mis clases" es su PROPIA sub-pestaña (2026-11): antes era el paso 2 dentro de la
+    // tarjeta Clases, pero en el flujo real el coach quiere lo que ya tomó sin pasar por
+    // tomar/publicar. Mismo nivel que Clases, justo después, con su propio query.
+    { key: 'mis-clases', label: 'Mis clases', path: '/coach/dashboard?tab=mis-clases' },
     { key: 'alumnos', label: 'Alumnos & RMs', path: '/coach/dashboard?tab=alumnos' },
     { key: 'asistencia', label: 'Asistencia', path: '/coach/dashboard?tab=asistencia' },
     // Historial (sólo lectura): el mes entero del mismo día que se marca en 'asistencia'. Va
@@ -20,7 +24,9 @@ export const COACH_SUBTABS = [
     // quedó (quién vino, quién no y el detalle de cada bloque).
     { key: 'historial', label: 'Historial', path: '/coach/dashboard?tab=historial' },
     { key: 'progreso', label: 'Progreso', path: '/coach/dashboard?tab=progreso' },
-    { key: 'riesgo', label: 'Riesgo', path: '/coach/dashboard?tab=riesgo' },
+    // La sub-pestaña 'riesgo' se retiró del panel del coach (2026-11): la función de
+    // fidelización sigue en la pantalla Fidelización del admin —no se tocó su backend
+    // (`fidelizacion.py`)— y el coach ya no la ve acá.
 ];
 
 // Menú completo por rol.

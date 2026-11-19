@@ -40,9 +40,12 @@ ok(MODAL.includes('if (planPublicacion.claseIds) body.clase_ids = planPublicacio
     'los horarios elegidos = solo esas clases (`clase_ids`); "todos" va sin el');
 ok(MODAL.includes('wods: planPublicacion.fechas.map((fecha) => ({'),
     'un WOD por cada dia que se va a publicar (los que marca la grilla)');
-ok(/fuerza_habilidad: form\.musculacion\.trim\(\)/.test(MODAL)
-    && /wod_principal: form\.wod_descripcion\.trim\(\)/.test(MODAL),
-    'musculación → fuerza_habilidad y descripción → wod_principal');
+ok(MODAL.includes('contenidoMetconDesdeFormulario(form, bloques)')
+    && /fuerza_habilidad: \(form\?\.musculacion \|\| ''\)\.trim\(\) \|\| null/.test(
+        leer('../src/utils/formulariosWod.js'))
+    && /wod_principal: \(form\?\.wod_descripcion \|\| ''\)\.trim\(\)/.test(
+        leer('../src/utils/formulariosWod.js')),
+    'musculación → fuerza_habilidad y descripción → wod_principal (builder COMPARTIDO)');
 ok(/'publicado'/.test(MODAL), 'el WOD sale publicado (se ve el día que le toca)');
 
 console.log('== 2. La semana sale del util compartido (lunes→domingo) ==');
@@ -112,8 +115,10 @@ ok(MODAL.includes('clasesSemana = []'),
 const DASH = leer('../src/pages/coach/DashboardCoach.jsx');
 eq((DASH.match(/<ModalPublicarWod/g) || []).length, 1,
     'el Resumen y la pestana Clases montan el MISMO modal (una sola montura en el panel)');
-ok(DASH.includes('onClick={() => { setClaseWod(clase); setModalWod(true); }}'),
-    'el lapiz de la pestana Clases abre ESE modal con su horario');
+// Punto 5 (2026-11): la grilla por horario se reemplazó por los 3 sub-pasos. El "lápiz"
+// que abría ESE modal es ahora el botón Editar de la tarjeta del día ("Publicar WOD").
+ok(/data-testid="editar-wod-celda"/.test(DASH) && /abrirEditarWod\(/.test(DASH),
+    'el boton Editar de la pestana Clases abre ESE modal con su WOD');
 eq(DASH.includes('gestion-clases?fecha=${fechaISO}&clase='), false,
     'la celda de Clases ya no manda al formulario viejo');
 // El modo EDICIÓN (antes: el formulario viejo de Gestión de Clases, ya retirada) vive en el

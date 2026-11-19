@@ -62,43 +62,73 @@ ok(/const abrirPublicarWod = \(clase\) => \{[\s\S]{0,300}setClaseWod\(clase\);\s
     'el modal unificado se abre con la clase tocada (`claseDestino`) sin cambiar de ruta');
 ok(DASH.includes('onAbrirClase={abrirClaseDeHoy}'),
     'la fila de "Mis clases de hoy" (ResumenCoach) entra por ese camino');
-ok(/abrirPublicarWod\(\{ \.\.\.clase, fecha: clase\.fecha \|\| date \}\)/.test(DASH),
-    'la lista móvil de la semana entra por el mismo camino');
-// Si la clase YA tiene WOD no se publica otro: `batch-create` crea un WOD nuevo y re-apunta
-// `clase.wod_id`, así que volver a publicar dejaría el anterior huérfano.
+// Punto 5 (2026-11): la pestaña Clases se rediseñó en sub-pasos internos. La lista móvil
+// de la semana y la grilla por horario se retiraron A PROPÓSITO; lo que se fija acá es el
+// rediseño y que las funciones que vivían ahí (tomar/soltar, WOD por día, Excel) sigan.
+ok(!/abrirPublicarWod\(\{ \.\.\.clase, fecha: clase\.fecha \|\| date \}\)/.test(DASH),
+    'la lista móvil de la semana (y su grilla) se reemplazó por los sub-pasos');
 ok(/const abrirClaseDeHoy = \(clase\) => \{[\s\S]{0,220}if \(wod\) \{ abrirDetalleWod\(clase, wod\); return; \}/.test(DASH),
     'una clase con WOD publicado abre su detalle (no duplica el WOD)');
 ok(!/📋\s*Gestionar Clases\s*<\/button>/.test(DASH),
     'el botón "📋 Gestionar Clases" de la pestaña Clases ya no existe');
 
-console.log('== 4. La grilla semanal fusionada y el MISMO modal (Bloque 1, intacto) ==');
+console.log('== 4. La tarjeta Clases: 2 sub-pasos (Tomar / Publicar WOD) ==');
+// 2026-11: "Mis clases" dejó de ser el paso 2 y pasó a ser su propia sub-pestaña del
+// sidebar (COACH_SUBTABS → `?tab=mis-clases`, ver == 4c). La tarjeta queda con 2 pasos.
 ok(DASH.includes("const DAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']"),
-    'la grilla sigue siendo Lun→Dom');
-ok(DASH.includes('SCHEDULE_HOURS') && DASH.includes('data-testid="publicar-wod-celda"'),
-    'las celdas por horario siguen ahí');
-ok(DASH.includes('verSoloConWod') && /Ver solo con/.test(DASH),
-    'el filtro "Ver todas / Ver solo con WOD publicado" sigue en la pestaña Clases');
+    'los días siguen siendo Lun→Dom');
+for (const paso of ['tomar', 'wod']) {
+    ok(DASH.includes(`subTabClases === '${paso}'`), `el sub-paso '${paso}' tiene su contenido`);
+}
+ok(!DASH.includes("subTabClases === 'mis'") && !DASH.includes("{ id: 'mis'"),
+    '"Mis clases" ya NO es un sub-paso de la tarjeta Clases');
+ok(/data-testid=\{`tomar-dia-\$\{fecha\}`\}/.test(DASH),
+    'los 7 chips de día se marcan en naranja (`tomar-dia-<fecha>`)');
+ok(/data-testid=\{`tomar-atajo-\$\{atajo\.id\}`\}/.test(DASH) && DASH.includes('Lun a Vie'),
+    'los atajos "Lun a Vie" / "Toda la semana" / "Ninguno" están');
+ok(/data-testid=\{`tomar-horario-\$\{hora\}`\}/.test(DASH),
+    'los horarios libres se pueden marcar (y se aplican a todos los días marcados)');
+ok(DASH.includes('Tomar seleccionadas') && /accionClaseMut\.mutateAsync\(\{/.test(DASH),
+    '"Tomar seleccionadas" usa el MISMO endpoint (POST /clases/{id}/tomar) por clase');
+ok(/<AccionesClaseCoach/.test(DASH),
+    '"Mis clases" suelta con el componente de siempre (POST /clases/{id}/soltar) — ver 4c');
+ok(/data-testid=\{`wod-cargar-\$\{fecha\}`\}/.test(DASH) && DASH.includes('guardarWodDelDia'),
+    '"Publicar WOD" abre el formulario INLINE de cada día (sin modal)');
+ok(/crearWodsBatch\.mutateAsync\(\{/.test(DASH) && /clase_ids: grupo\.map/.test(DASH),
+    'el WOD del día se crea con `useCrearWodsBatch` para TODAS las clases de esa fecha');
+ok(DASH.includes('<CamposWod') && DASH.includes('testidPrefijo="inline-"'),
+    'el formulario inline monta los MISMOS campos que el modal (`CamposWod`)');
 
-console.log('== 4b. Punto 3: la fila de botones envuelve en el teléfono ==');
-// Los cuatro botones de la fila superior (Semana anterior / siguiente / Excel / Aviso rápido)
-// ocupaban más que el ancho del panel en 360px: el último se cortaba contra el borde
-// (`overflow-hidden`) y se pisaba con el de al lado. Ahora la fila ENVUELVE y nada se recorta.
+console.log('== 4b. Las dos entradas que ya existían siguen en la pestaña ==');
 ok(/<div className="flex min-w-0 flex-wrap items-center justify-end gap-2">/.test(DASH),
-    'la fila de los 4 botones usa flex-wrap (antes: flex items-center gap-2, que desbordaba)');
+    'la fila de semana anterior/siguiente + aviso rápido envuelve en el teléfono');
 ok(/data-testid="cargar-excel-semana"/.test(DASH) && /data-testid="aviso-rapido-clases"/.test(DASH),
-    'los cuatro botones siguen siendo los mismos (no cambia la función de ninguno)');
-ok(/flex w-full flex-wrap items-center gap-2 rounded-xl bg-gray-100 p-2 md:inline-flex md:w-auto md:gap-3/.test(DASH),
-    'el toggle "Ver todas / Ver solo con WOD publicado" envuelve en el teléfono y sigue inline en >=768px');
-ok(/flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all md:flex-none/.test(DASH),
-    'los dos botones del toggle se reparten el ancho sólo en <768px y el rótulo largo envuelve (sin recortarse)');
-ok(/w-full px-3 py-3 flex items-center gap-3 text-left transition-colors sm:px-4/.test(DASH),
-    'la lista de días gana aire en el teléfono (px-3) y queda igual desde sm');
-ok(/text-lg font-bold text-gray-800 w-16 shrink-0/.test(DASH),
-    'la hora de cada clase tiene más ancho (w-16) para que el resto no se comprima');
-ok(DASH.includes('onClick={() => { setClaseWod(clase); setModalWod(true); }}'),
-    'el lápiz/celda de la grilla abre ESE modal con su horario');
+    'el Excel de la semana y el aviso rápido del día siguen accesibles');
+ok(!/verSoloConWod/.test(DASH) && !/SCHEDULE_HOURS/.test(DASH),
+    'la grilla por horario y su toggle se retiraron (sin código muerto)');
 ok(DASH.includes('<ModalPublicarWod') && DASH.includes('clase={wodArchivo ? null : (claseWod || proximaClase || clasesHoy[0] || null)}'),
     'hay UNA sola montura del modal en el panel (Resumen + Clases)');
+
+console.log('== 4c. "Mis clases" es su propia sub-pestaña del sidebar ==');
+// 2026-11: el contenido del ex paso 2 se movió TAL CUAL a `?tab=mis-clases` (misma data:
+// `misClasesPorDia` ← `useClasesCoach`; mismo "Soltar" con `AccionesClaseCoach`).
+const subMis = COACH_SUBTABS.find((s) => s.key === 'mis-clases');
+ok(subMis && subMis.label === 'Mis clases' && subMis.path === '/coach/dashboard?tab=mis-clases',
+    'COACH_SUBTABS declara `mis-clases` con su propio query');
+eq(COACH_SUBTABS.findIndex((s) => s.key === 'mis-clases'),
+    COACH_SUBTABS.findIndex((s) => s.key === 'clases') + 1,
+    '"Mis clases" va inmediatamente después de "Clases" en el menú');
+ok(DASH.includes("activeTab === 'mis-clases'"),
+    'DashboardCoach tiene la rama de contenido de `?tab=mis-clases`');
+const iniMis = DASH.indexOf("activeTab === 'mis-clases'");
+const finMis = DASH.indexOf("{/* ─── TAB: ALUMNOS & RMs ─── */}", iniMis);
+const bloqueMis = iniMis === -1 || finMis === -1 ? '' : DASH.slice(iniMis, finMis);
+ok(/misClasesPorDia\.map/.test(bloqueMis) && /mis-clases-dia-\$\{fecha\}/.test(bloqueMis),
+    'la pestaña "Mis clases" agrupa por día real con la MISMA data (`misClasesPorDia`)');
+ok(/<AccionesClaseCoach/.test(bloqueMis) && /POST \/clases\/\{id\}\/soltar/.test(bloqueMis),
+    '"Soltar" vive ahí y sigue usando el endpoint de siempre');
+ok(bloqueMis.includes('data-testid="msg-clases"'),
+    'la pestaña muestra el resultado de Soltar (su propio aviso)');
 
 console.log('== 5. Los avisos de clase de la campana llevan al panel ==');
 for (const tipo of ['clase_asignada', 'clase_reasignada', 'clase_liberada']) {

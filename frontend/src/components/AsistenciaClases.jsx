@@ -47,13 +47,12 @@ import Toast from './Toast';
  *             que FILTRA la lista (deja a la vista sólo la franja elegida; "Todas" las
  *             muestra juntas); en ≥768px (tablet y escritorio) sigue EXACTAMENTE el acordeón
  *             por disciplina.
- *             Lo pide el coach (`DashboardCoach`, ?tab=asistencia) y NO el admin: su
- *             pestaña Asistencia monta el componente sin la prop y no cambia nada.
+ *             Lo pide el coach (`DashboardCoach`, ?tab=asistencia).
  *   permitirSinReserva — false (default): agrega el botón "+ Agregar alumno sin reserva"
  *             dentro del detalle de la clase, que abre `ModalAgregarSinReserva` (el
- *             walk-in: reserva normal si el alumno tiene créditos, presencia sin cargo si
- *             no). Lo pide el coach; el admin monta el componente sin la prop, así que su
- *             pestaña Asistencia queda EXACTAMENTE igual (mismo DOM).
+ *             walk-in: reserva normal si el alumno tiene créditos; presencia sin cargo si
+ *             tiene plan pero no créditos; y NO se ofrece si no tiene ningún plan —el
+ *             backend responde 409—). Lo piden el coach y el admin (`/admin/asistencia`).
  *   permitirFiltroDisciplina — false (default): muestra el selector "Disciplina" sobre la
  *             lista del día (sólo si hay más de una). Lo pide el admin; el coach conserva
  *             su pantalla sin controles extra. El filtro es en memoria: la lista del día ya
@@ -105,6 +104,14 @@ const AsistenciaClases = ({
     const alumnosQ = useAlumnosDeClase(claseSeleccionada?.id);
     const reservas = useMemo(() => alumnosQ.data?.reservas || [], [alumnosQ.data]);
     const marcada = !!alumnosQ.data?.marcada;
+    // Punto 2: quién marcó la asistencia. El backend manda el coach ASIGNADO de la clase
+    // (`coach_id`/`coach_nombre`) y, por reserva, `asistencia_marcada_por` (+ su nombre).
+    // Si la marcó otra persona (otro coach o el admin) se avisa con UNA línea simple: es
+    // una aclaración de trazabilidad, no una alerta.
+    const coachClaseId = alumnosQ.data?.coach_id ?? null;
+    const coachClaseNombre = alumnosQ.data?.coach_nombre || 'el coach asignado';
+    const marcadaPorOtraPersona = (r) => r?.asistencia_marcada_por != null
+        && r.asistencia_marcada_por !== coachClaseId;
     const cargandoReservas = Boolean(claseSeleccionada) && alumnosQ.isPending;
 
     // Si el detalle de la clase falla, el aviso del modal lo dice (mismo texto de antes).
@@ -461,18 +468,30 @@ const AsistenciaClases = ({
                                     {reservas.map((a) => (
                                         <li
                                             key={a.reserva_id}
-                                            className={`flex items-center justify-between p-3 rounded-lg border ${osc ? 'border-zinc-800' : 'border-gray-200'}`}
+                                            className={`p-3 rounded-lg border ${osc ? 'border-zinc-800' : 'border-gray-200'}`}
                                         >
-                                            <span className={`text-sm font-medium ${osc ? 'text-zinc-200' : 'text-gray-800'}`}>{a.nombre}</span>
-                                            <label className="flex items-center gap-2 cursor-pointer select-none">
-                                                <span className={`text-xs ${osc ? 'text-zinc-500' : 'text-gray-500'}`}>Asistió</span>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={valor(a.reserva_id)}
-                                                    onChange={() => toggle(a.reserva_id)}
-                                                    className="w-5 h-5 accent-orange-500"
-                                                />
-                                            </label>
+                                            <div className="flex items-center justify-between">
+                                                <span className={`text-sm font-medium ${osc ? 'text-zinc-200' : 'text-gray-800'}`}>{a.nombre}</span>
+                                                <label className="flex items-center gap-2 cursor-pointer select-none">
+                                                    <span className={`text-xs ${osc ? 'text-zinc-500' : 'text-gray-500'}`}>Asistió</span>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={valor(a.reserva_id)}
+                                                        onChange={() => toggle(a.reserva_id)}
+                                                        className="w-5 h-5 accent-orange-500"
+                                                    />
+                                                </label>
+                                            </div>
+                                            {/* Trazabilidad (Punto 2): la marcó otra persona. Texto
+                                                plano en gris, sin ícono ni color de alerta. */}
+                                            {marcadaPorOtraPersona(a) && (
+                                                <p
+                                                    data-testid="asistencia-marcada-por-otro"
+                                                    className={`mt-1 text-[11px] leading-snug ${osc ? 'text-zinc-500' : 'text-gray-400'}`}
+                                                >
+                                                    Asistencia marcada por {a.asistencia_marcada_por_nombre}, no por {coachClaseNombre}
+                                                </p>
+                                            )}
                                         </li>
                                     ))}
                                 </ul>

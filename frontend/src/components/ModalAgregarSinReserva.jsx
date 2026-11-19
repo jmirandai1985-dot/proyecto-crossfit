@@ -17,8 +17,11 @@ import {
  *     auditado que descuenta 1 crédito) y luego se marca presente
  *     (`PUT /reservas/{id}/asistencia`). Acá no hay NADA de dinero: se reusan los dos
  *     endpoints que ya usan el mesón y el staff.
- *   * no puede reservar (sin plan o sin créditos) → `POST /asistencia/clases/{id}/sin-reserva`:
- *     presencia SIN CARGO (`tokens_gastados = 0`), que es lo que su historial muestra.
+ *   * plan vigente SIN créditos → `POST /asistencia/clases/{id}/sin-reserva`: presencia SIN
+ *     CARGO (`tokens_gastados = 0`), que es lo que su historial muestra.
+ *   * SIN plan activo → NO se ofrece (la fila queda deshabilitada): un alumno sin plan no
+ *     entrena gratis. Si la lista quedó vieja y el backend responde 409, su `detail` se
+ *     muestra acá tal cual (es el texto que el coach lee).
  *
  * Un fallo del camino con crédito NO cae al camino sin cargo: si entre la lectura y el POST
  * el alumno se quedó sin créditos, se muestra el motivo del backend tal cual. Cobrar o no
@@ -38,7 +41,9 @@ import {
  *     `tokens_gastados = 1`, pero el backend sólo resta cuando el número existe
  *     (`reservas.py`: `if membresia.creditos_disponibles is not None`), así que prometer un
  *     descuento ahí sería mentira;
- *   · sin plan o sin créditos -> presencia SIN CARGO (`tokens_gastados = 0`).
+ *   · sin créditos (con plan vigente) -> presencia SIN CARGO (`tokens_gastados = 0`);
+ *   · SIN plan activo -> NO se ofrece (el backend responde 409): un alumno sin plan no
+ *     entrena gratis. El caso "sin plan" ya no llega a este camino.
  *
  * Props: `clase` {id, disciplina_nombre, hora_inicio, hora_fin}; `onCerrar`;
  * `onAgregado(datos)` — quien lo abre decide dónde muestra el resultado (el detalle de
@@ -77,14 +82,16 @@ const ModalAgregarSinReserva = ({ clase, onCerrar, onAgregado }) => {
     // Lo que le va a pasar al alumno, dicho ANTES de tocarlo (es el corazón del mockup).
     // ILIMITADO = `creditos_disponibles` NULL: la reserva registra 1 token usado, pero no hay
     // cupo que restar (ver el comentario de arriba), así que no se promete un descuento.
+    // SIN PLAN = no hay walk-in (el backend responde 409): la fila queda deshabilitada y lo
+    // dice acá, en vez de prometer una clase gratis que ya no se puede dar.
     const pista = (a) => {
         if (a.ya_presente) return 'Ya está en la clase';
+        if (!a.plan_vigente) return 'Sin plan · no puede asistir';
         if (a.puede_reservar) {
             return a.ilimitado ? 'Ilimitado · no se le descuenta cupo'
                 : `${a.creditos} créditos · se descuenta 1`;
         }
-        if (a.plan_vigente) return 'Sin créditos · queda sin cargo';
-        return 'Sin plan · queda sin cargo';
+        return 'Sin créditos · queda sin cargo';
     };
 
     // Tarjeta de confirmación (Bloque 2): el título dice QUÉ va a pasar y el detalle POR QUÉ.
@@ -103,15 +110,18 @@ const ModalAgregarSinReserva = ({ clase, onCerrar, onAgregado }) => {
                     detalle: 'La clase se reserva a su nombre y queda como presente.',
                 };
         }
-        return a.plan_vigente
-            ? {
+        // Con plan vigente sin créditos: el único caso que el backend acepta sin cargo.
+        if (a.plan_vigente) {
+            return {
                 titulo: `Se agregará a ${a.nombre} como presente sin costo`,
                 detalle: 'No le quedan créditos: queda SIN CARGO en su historial.',
-            }
-            : {
-                titulo: `Se agregará a ${a.nombre} como presente sin costo`,
-                detalle: 'No tiene plan vigente: queda SIN CARGO en su historial.',
             };
+        }
+        // Sin plan: el backend lo bloquea (409). La tarjeta lo explica en vez de ofrecerlo.
+        return {
+            titulo: `No se puede agregar a ${a.nombre}`,
+            detalle: 'No tiene un plan activo: debe contratar un plan para poder asistir a clases.',
+        };
     };
 
     // Toast posterior: lo pinta la pantalla que abrió el modal (esa sigue montada cuando el
@@ -122,7 +132,7 @@ const ModalAgregarSinReserva = ({ clase, onCerrar, onAgregado }) => {
                 ? `Se registró la clase de ${a.nombre} (plan ilimitado, sin descontar cupo)`
                 : `Se ha descontado un token del plan de ${a.nombre}`;
         }
-        return `${a.nombre} quedó presente sin cargo (queda en su historial)`;
+        return `${a.nombre} quedó presente sin cargo (no le quedaban créditos)`;
     };
 
     const agregar = async (alumno) => {
@@ -263,7 +273,8 @@ const ModalAgregarSinReserva = ({ clase, onCerrar, onAgregado }) => {
                     </label>
 
                     {error && (
-                        <div className="rounded-xl border border-red-700 bg-red-900/30 px-4 py-3 text-sm text-red-200">
+                        <div data-testid="error-sin-reserva"
+                            className="rounded-xl border border-red-700 bg-red-900/30 px-4 py-3 text-sm text-red-200">
                             <span className="font-bold uppercase tracking-wide">Error</span> {error}
                         </div>
                     )}
@@ -287,10 +298,15 @@ const ModalAgregarSinReserva = ({ clase, onCerrar, onAgregado }) => {
                                 <button
                                     key={a.alumno_id}
                                     type="button"
-                                    disabled={ocupado || a.ya_presente}
+                                    // Sin plan no hay walk-in (409 en el backend): la fila no se
+                                    // puede tocar y el texto de la derecha explica por qué.
+                                    disabled={ocupado || a.ya_presente || !a.plan_vigente}
+                                    title={!a.plan_vigente
+                                        ? `${a.nombre} no tiene un plan activo: no puede asistir`
+                                        : undefined}
                                     onClick={() => setConfirmando(a)}
                                     data-testid={`agregar-alumno-${a.alumno_id}`}
-                                    className={`flex w-full items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-left transition-colors ${a.ya_presente ? 'opacity-50' : 'hover:border-orange-500/60'
+                                    className={`flex w-full items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-left transition-colors ${a.ya_presente || !a.plan_vigente ? 'opacity-50' : 'hover:border-orange-500/60'
                                         } disabled:cursor-not-allowed`}
                                 >
                                     <span className="flex h-7 w-7 flex-none items-center justify-center rounded-full bg-zinc-800 text-[10px] font-bold text-zinc-300">

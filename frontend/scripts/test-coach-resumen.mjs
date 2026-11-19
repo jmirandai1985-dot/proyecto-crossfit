@@ -92,8 +92,8 @@ ok(/onNuevoAviso=\{\(\) => setModalAviso\(true\)\}/.test(DASH) && /<ModalAvisoRa
 console.log('== 1c. Punto 2: al coach le toca SÓLO su aviso rápido del día ==');
 ok(/import \{ TIPO_AVISO_RAPIDO \} from '\.\.\/\.\.\/utils\/avisosMarketing'/.test(DASH),
     'el panel importa el tipo del aviso rápido (no un literal suelto)');
-ok(/const avisosDelCoach = useMemo\(\s*\(\) => avisosVigentes\.filter\(\(a\) => a\.tipo === TIPO_AVISO_RAPIDO\)/.test(DASH),
-    'filtra los vigentes al tipo del aviso rápido: promoción/colaboración/evento quedan fuera');
+ok(/const avisosDelCoach = useMemo\([\s\S]{0,220}a\.tipo === TIPO_AVISO_RAPIDO && a\.creado_por === usuario_id/.test(DASH),
+    'filtra los vigentes al tipo del aviso rápido Y a los que creó ESTE coach (los del admin quedan fuera)');
 ok(/avisos=\{avisosDelCoach\}/.test(DASH),
     'a la sección le llega `avisosDelCoach` (ya no los vigentes crudos)');
 ok(/export const TIPO_AVISO_RAPIDO = 'aviso'/.test(ALMACEN_AVISOS),
@@ -148,8 +148,8 @@ eq(/medianoche[^.]{0,60}(crédito|token|plan)|(crédito|token|plan)[^.]{0,60}med
 // crédito—, sólo cambió de dueño: del Resumen al modal + `<Toast>`.
 ok(/Se ha descontado un token del plan de \$\{a\.nombre\}/.test(MODAL_WALKIN),
     'el aviso del walk-in dice que descontó el token del plan');
-ok(/quedó presente sin cargo \(queda en su historial\)/.test(MODAL_WALKIN),
-    'y cuando no tiene plan, dice que quedó sin cargo');
+ok(/quedó presente sin cargo \(no le quedaban créditos\)/.test(MODAL_WALKIN),
+    'y el aviso sin cargo es sólo del plan SIN créditos (el alumno sin plan ya no se ofrece)');
 ok(/setToastWalkin\(alumno\.mensaje\)/.test(DASH) && /<Toast texto=\{toastWalkin\} \/>/.test(DASH),
     'el Resumen muestra ese texto como toast (sobrevive al cierre del modal)');
 
@@ -182,7 +182,7 @@ eq(/clasesConWodPublicado|wodsPublicados/.test(DASH_CODIGO), false,
     'sin los contadores del KPI "WODs esta semana"');
 eq(/grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4/.test(DASH_CODIGO), false,
     'sin la fila de tarjetas grandes: los KPIs son sólo el grid 2x2 de ResumenCoach');
-ok(/activeTab === 'resumen'[\s\S]{0,60}\? ''/.test(DASH),
+ok(/activeTab === 'resumen'[\s\S]{0,140}\? ''/.test(DASH),
     'el panel claro ya no envuelve al Resumen (va sobre el fondo oscuro del Layout)');
 ok(/\{fechaCortaHoy\} · \{usuario \|\| 'Coach'\}/.test(DASH),
     'el encabezado dice "fecha · coach", como el hdr del mockup');

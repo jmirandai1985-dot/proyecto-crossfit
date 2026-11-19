@@ -156,7 +156,7 @@ console.log('== 5. Está montada en sus DOS entradas (coach y admin) ==');
 const sub = COACH_SUBTABS.find((s) => s.key === 'historial');
 ok(sub, 'COACH_SUBTABS declara la sub-pestaña `historial`');
 eq(sub?.path, '/coach/dashboard?tab=historial', 'y navega a su propio query');
-eq(COACH_SUBTABS.length, 7, 'el menú del coach sigue teniendo 7 pestañas (se sumó una, no se cambió otra)');
+eq(COACH_SUBTABS.length, 7, 'el menú del coach tiene 7 pestañas (se retiró `riesgo` y se sumó `mis-clases`)');
 ok(DASH.includes('activeTab === \'historial\''), 'DashboardCoach tiene su rama de contenido');
 ok(/import HistorialAsistencia from '\.\.\/\.\.\/components\/HistorialAsistencia'/.test(DASH)
     && DASH.includes('<HistorialAsistencia />'), 'y monta el componente (import + render)');
@@ -169,8 +169,8 @@ ok(ADMIN_HISTORIAL.includes('<Layout>'),
     'y vive dentro del Layout del panel (pestaña propia, no apilada)');
 ok(!/import\s+HistorialAsistencia/.test(ADMIN) && !/<HistorialAsistencia\s*\/>/.test(ADMIN),
     'la página Asistencia ya NO apila el historial (se separó en su pestaña)');
-ok(ADMIN.includes('<AsistenciaClases variant="dark" permitirFiltroDisciplina />'),
-    'el admin monta Asistencia con el filtro por disciplina');
+ok(ADMIN.includes('<AsistenciaClases variant="dark" permitirFiltroDisciplina permitirSinReserva />'),
+    'el admin monta Asistencia con el filtro por disciplina y "+ Agregar alumno sin reserva"');
 const itemHistorialAdmin = MENU_BY_ROL.administrador.find((i) => i.path === '/admin/historial');
 ok(itemHistorialAdmin && itemHistorialAdmin.label === 'Historial',
     'el menú del admin tiene la entrada "Historial" -> /admin/historial');

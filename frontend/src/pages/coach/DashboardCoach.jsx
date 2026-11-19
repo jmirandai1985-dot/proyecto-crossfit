@@ -1,13 +1,13 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import {
-    SIN_DATOS, useAlumnosCoachEnRiesgo, useAlumnosDeCoach, useAlumnosEnPrueba,
+    SIN_DATOS, useAccionClase, useAlumnosDeCoach, useAlumnosEnPrueba,
     useAvisosMarketingVigentes,
-    useClasesAsistenciaHoy,
-    useClasesCoach, useCoachDisciplinas, useContactarAlumnoCoach, useDisciplinas,
+    useClasesAsistenciaHoy, useClasesDelBox,
+    useClasesCoach, useCoachDisciplinas, useCrearWodsBatch, useDisciplinas,
     useHistorialRmTodos, useProgresoAlumnosCoach, useReservasPorClase, useRmsAlumno,
     useTodosLosWods,
 } from '../../hooks/queries';
@@ -16,7 +16,6 @@ import AsistenciaClases from '../../components/AsistenciaClases';
 // retirada del menú y del repo. Ahora es parte de la pestaña Clases (junto a la grilla).
 import AccionesClaseCoach from '../../components/AccionesClaseCoach';
 import AlumnoFichaCoach from '../../components/AlumnoFichaCoach';
-import PreviewEmailModal from '../../components/PreviewEmailModal';
 import WodDetalleModal from '../../components/WodDetalleModal';
 // Aviso rápido del día (el mismo modal de Marketing que usaba Gestión de Clases).
 import ModalAvisoRapido from '../../components/ModalAvisoRapido';
@@ -32,7 +31,17 @@ import { TIPO_AVISO_RAPIDO } from '../../utils/avisosMarketing';
 // Punto 5 del reporte móvil: el instante del próximo borde del día (arranque o cierre de una
 // clase), que es cuándo el panel tiene que volver a preguntar por el `estado` de las clases.
 import { proximoCambioDeClase } from '../../utils/relojClases';
+// Punto 5: las franjas del día son las MISMAS del resto del panel (Mañana/Tarde/Noche,
+// `utils/franjasAsistencia`): la pestaña Clases no inventa su propio corte horario.
+import { FRANJAS, franjaDe, horaCorta } from '../../utils/franjasAsistencia';
 import ModalPublicarWod from '../../components/ModalPublicarWod';
+// Los campos del WOD de la tarjeta inline son el MISMO subcomponente que usa el modal
+// (`CamposWod`), y el payload se arma con la MISMA función (`utils/formulariosWod`).
+import CamposWod from '../../components/CamposWod';
+import {
+    TIPO_FORMULARIO_DEFAULT, contenidoMetconDesdeFormulario, etiquetaTipoFormulario,
+    formularioMetconVacio, validarFormularioMetcon,
+} from '../../utils/formulariosWod';
 import ModalAgregarSinReserva from '../../components/ModalAgregarSinReserva';
 import ModalInvitarExterno from '../../components/ModalInvitarExterno';
 // Bloque 2: el walk-in avisa con un toast (el texto lo arma el modal en `alumno.mensaje`).
@@ -56,6 +65,15 @@ import {
 // alumno). 25 = el mismo tamaño de página que usa el padrón del admin.
 const POR_PAGINA_PROGRESO = 25;
 
+// ── PUNTO 5 · pestaña Clases ───────────────────────────────────────────────────────────
+// Atajos de la fila de días de "Tomar clases": los MISMOS tres del mockup. `cuantos` es la
+// cantidad de días (Lun→Dom) que marcan.
+const ATAJOS_DIAS = [
+    { id: 'laborables', label: 'Lun a Vie', cuantos: 5 },
+    { id: 'semana', label: 'Toda la semana', cuantos: 7 },
+    { id: 'ninguno', label: 'Ninguno', cuantos: 0 },
+];
+
 const DashboardCoach = () => {
     const navigate = useNavigate();
     const location = useLocation();
@@ -67,8 +85,24 @@ const DashboardCoach = () => {
     // ── UI states (lo que NO viene del backend: selección, filtros y mensajes) ──
     const [selectedAlumno, setSelectedAlumno] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
-    // Toggle Fase 2: "Ver todas" vs "Ver solo con WOD publicado"
-    const [verSoloConWod, setVerSoloConWod] = useState(false);
+    // ── Punto 5: la pestaña Clases tiene 3 sub-pasos DENTRO de la misma pantalla ──
+    // (`1 Tomar clases / 2 Mis clases / 3 Publicar WOD`). NO son entradas de COACH_SUBTABS.
+    const [subTabClases, setSubTabClases] = useState('tomar');
+    // Días marcados en "Tomar clases". `null` = todavía no tocó ninguno → arranca Lun a Vie.
+    const [diasTomarTocados, setDiasTomarTocados] = useState(null);
+    // Horarios del box marcados para tomar (se aplican a TODOS los días marcados).
+    const [horariosTomar, setHorariosTomar] = useState([]);
+    const [tomandoClases, setTomandoClases] = useState(false);
+    // Día con el formulario de WOD abierto INLINE (una sola tarjeta a la vez) + sus campos.
+    // Los campos son los MISMOS del `ModalPublicarWod` (subcomponente `CamposWod`): no se
+    // guarda acá una versión reducida del formulario.
+    const [wodInlineFecha, setWodInlineFecha] = useState(null);
+    const [wodForm, setWodForm] = useState(formularioMetconVacio);
+    const [wodBloques, setWodBloques] = useState([]);
+    const [wodGuardando, setWodGuardando] = useState(false);
+    const [wodError, setWodError] = useState('');
+    // Resultado de tomar/soltar/publicar (texto plano; los errores de carga tienen su banner).
+    const [msgClases, setMsgClases] = useState(null); // { tipo, texto }
     // Toggle Alumnos & RMs (Parte F): "Mis alumnos" (default) vs "Todos del box".
     const [verTodosDelBox, setVerTodosDelBox] = useState(false);
     // ── Modales del Resumen (Bloque C) ──
@@ -214,10 +248,7 @@ const DashboardCoach = () => {
     };
 
     const [weekRange, setWeekRange] = useState(getWeekRange);
-    // (El banner de secciones caídas y el umbral de riesgo se DERIVAN de las consultas.)
-    // Contacto por correo de los alumnos en riesgo (estado por alumno).
-    const [enviandoCorreoId, setEnviandoCorreoId] = useState(null);
-    const [msgContacto, setMsgContacto] = useState(null); // { id, tipo, texto }
+    // (El banner de secciones caídas se DERIVA de las consultas.)
     // Filtro por nivel en el tab Progreso (100% frontend).
     const [filtroProgreso, setFiltroProgreso] = useState('todos');
     // ── Tab Progreso (Parte 2 del pedido): buscador + nivel + paginación real ──
@@ -227,14 +258,17 @@ const DashboardCoach = () => {
     const [busquedaProgreso, setBusquedaProgreso] = useState('');
     const [filtroNivel, setFiltroNivel] = useState('todos');
     const [paginaProgreso, setPaginaProgreso] = useState(1);
-    // P2: ficha del alumno (modal coach-scoped). No reusa `selectedAlumno`
+    // P1: ficha del alumno (modal coach-scoped). No reusa `selectedAlumno`
     // porque ese state gobierna el panel de RMs del tab Alumnos.
     const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
-    // P1: alumno cuyo correo se está previsualizando (modal de preview).
-    const [previewAlumno, setPreviewAlumno] = useState(null);
     const irSemanaAnterior = () => {
         const start = new Date(weekRange.start + 'T12:00:00');
         start.setDate(start.getDate() - 7);
+        // La selección de días/horarios es de la semana que se estaba mirando: al cambiarla,
+        // se limpia (si no, quedarían fechas de otra semana que ya no existen en esta).
+        setDiasTomarTocados(null);
+        setHorariosTomar([]);
+        setWodInlineFecha(null);
         setWeekRange({
             start: toLocalDateStr(start),
             end: toLocalDateStr(new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6))
@@ -243,6 +277,9 @@ const DashboardCoach = () => {
     const irSemanaSiguiente = () => {
         const start = new Date(weekRange.start + 'T12:00:00');
         start.setDate(start.getDate() + 7);
+        setDiasTomarTocados(null);
+        setHorariosTomar([]);
+        setWodInlineFecha(null);
         setWeekRange({
             start: toLocalDateStr(start),
             end: toLocalDateStr(new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6))
@@ -261,36 +298,6 @@ const DashboardCoach = () => {
     };
     const dayDates = getDayDates();
 
-    // Fixed schedule times
-    // 14:00 agregado (Ronda 4): es una franja REAL del box — en TEST hay 15 franjas
-    // de `horarios` y 60 clases en las próximas 4 semanas a las 14:00, pero la grilla
-    // no podía mostrarlas porque no estaba en esta lista (12:00 y 13:00 no existen).
-    const SCHEDULE_HOURS = [
-        '06:00', '07:00', '08:00', '09:00', '10:00', '11:00',
-        '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'
-    ];
-
-    // -- Build week grid data --
-    const buildWeekGrid = () => {
-        const grid = {};
-        // Initialize all cells
-        dayDates.forEach(date => {
-            grid[date] = {};
-            SCHEDULE_HOURS.forEach(hour => {
-                grid[date][hour] = null;
-            });
-        });
-        // Fill with actual classes
-        (clasesSemana || []).forEach(clase => {
-            const fechaStr = clase.fecha ? (typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha) : '';
-            const horaInicio = clase.hora_inicio ? clase.hora_inicio.substring(0, 5) : '';
-            if (grid[fechaStr] && grid[fechaStr][horaInicio] !== undefined) {
-                grid[fechaStr][horaInicio] = clase;
-            }
-        });
-        return grid;
-    };
-
     // ═══ DATOS (React Query) ═══════════════════════════════════════════════════
     // Antes esto era un `fetchAllData` con 5 GET + una consulta de RMs POR alumno que
     // corría en CADA navegación al panel (la ruta es lazy). Ahora cada dato es su propia
@@ -299,7 +306,11 @@ const DashboardCoach = () => {
     const qc = useQueryClient();
     const clasesQ = useClasesCoach(usuario_id, weekRange.start, weekRange.end);
     const wodsQ = useTodosLosWods();
-    const riesgoQ = useAlumnosCoachEnRiesgo(usuario_id);
+    // Punto 5: TODAS las clases del box de la semana (para saber qué horarios quedan LIBRES)
+    // y las dos acciones de la pestaña Clases (tomar una clase y publicar el WOD del día).
+    const clasesBoxQ = useClasesDelBox(weekRange.start, weekRange.end);
+    const accionClaseMut = useAccionClase();
+    const crearWodsBatch = useCrearWodsBatch();
     const coachDiscQ = useCoachDisciplinas();
     // Catálogo de disciplinas: la carga masiva por Excel (modal SIN clase) necesita elegir
     // una y sólo se ofrecen las que este coach dicta (publicar en otra es un 403).
@@ -337,7 +348,6 @@ const DashboardCoach = () => {
     const avisosQ = useAvisosMarketingVigentes();
 
     // Mutaciones del panel: entregan el resultado y refrescan la caché por prefijo.
-    const contactarAlumno = useContactarAlumnoCoach();
 
     const detalleError = (e) => e?.response?.data?.detail
         || e?.message || 'No se pudo cargar';
@@ -387,15 +397,182 @@ const DashboardCoach = () => {
             return (a.hora_inicio || '').localeCompare(b.hora_inicio || '');
         }), [clasesFiltradas, weekRange.start, weekRange.end]);
 
+    // ═══ PUNTO 5 · PESTAÑA "CLASES": Tomar / Mis clases / Publicar WOD ═══════════════════
+    // Las tres viven DENTRO de la misma pestaña (chips arriba); no son entradas de
+    // `COACH_SUBTABS`. Todo lo de abajo es UI DERIVADA de las dos consultas de clases.
+    // Días marcados en "Tomar clases": si todavía no tocó ninguno, arranca en Lun a Vie.
+    const diasSeleccionados = diasTomarTocados ?? dayDates.slice(0, 5);
+    // Lo que YA es mío (asignado a mí) esta semana: alimenta "Mis clases" y "Publicar WOD".
+    const misClasesSemana = useMemo(
+        () => (clasesFiltradas || SIN_DATOS).filter((c) => c.coach_id === usuario_id),
+        [clasesFiltradas, usuario_id],
+    );
+    const clasesBoxSemana = clasesBoxQ.data || SIN_DATOS;
+    // "Libres" = sin coach asignado y de HOY en adelante (una clase pasada ya no se puede
+    // tomar: el backend contesta 409). Las que ya son mías o de otro coach NO entran.
+    const clasesLibresSemana = useMemo(() => clasesBoxSemana.filter(
+        (c) => !c.cancelada && c.coach_id == null && fechaISOde(c) >= today,
+    ), [clasesBoxSemana, today]);
+
+    // Horarios que tienen al menos UN día libre dentro de los días marcados arriba.
+    const horariosDisponibles = useMemo(() => {
+        const horas = new Set();
+        clasesLibresSemana.forEach((c) => {
+            if (diasSeleccionados.includes(fechaISOde(c))) horas.add(horaCorta(c.hora_inicio));
+        });
+        return [...horas].sort();
+    }, [clasesLibresSemana, diasSeleccionados]);
+    // Agrupados por la MISMA franja del resto del panel (Mañana / Tarde / Noche).
+    const horariosPorFranja = useMemo(() => FRANJAS
+        .map((franja) => ({
+            ...franja,
+            horas: horariosDisponibles.filter((h) => franjaDe(h) === franja.id),
+        }))
+        .filter((franja) => franja.horas.length > 0), [horariosDisponibles]);
+
+    // Tocar un horario lo aplica a TODOS los días marcados: el plan es la lista REAL de
+    // clases (día+horario) que se van a tomar, y es lo que se cuenta en pantalla.
+    const clasesATomar = useMemo(() => {
+        const plan = [];
+        diasSeleccionados.forEach((fecha) => {
+            horariosTomar.forEach((hora) => {
+                const clase = clasesLibresSemana.find(
+                    (c) => fechaISOde(c) === fecha && horaCorta(c.hora_inicio) === hora,
+                );
+                if (clase) plan.push(clase);
+            });
+        });
+        return plan;
+    }, [diasSeleccionados, horariosTomar, clasesLibresSemana]);
+
+    // Mis clases agrupadas por DÍA REAL (Lun→Dom de la semana en curso).
+    const misClasesPorDia = useMemo(() => dayDates.map((fecha) => ({
+        fecha,
+        clases: misClasesSemana
+            .filter((c) => fechaISOde(c) === fecha)
+            .sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || '')),
+    // `dayDates` se deriva de `weekRange.start` (no hace falta en las dependencias).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    })), [misClasesSemana, weekRange.start]);
+    // "Publicar WOD": sólo los días con clases tomadas y de HOY en adelante.
+    const diasConClasesParaWod = useMemo(
+        () => misClasesPorDia.filter((d) => d.clases.length > 0 && d.fecha >= today),
+        [misClasesPorDia, today],
+    );
+    const nombreDiaDe = (fecha) => DAYS[dayDates.indexOf(fecha)] || '';
+
+    const toggleDiaTomar = (fecha) => {
+        const marcados = new Set(diasSeleccionados);
+        if (marcados.has(fecha)) marcados.delete(fecha); else marcados.add(fecha);
+        setDiasTomarTocados(dayDates.filter((d) => marcados.has(d)));
+    };
+    const atajoDias = (cuantos) => setDiasTomarTocados(dayDates.slice(0, cuantos));
+    const toggleHorarioTomar = (hora) => setHorariosTomar((prev) => (prev.includes(hora)
+        ? prev.filter((h) => h !== hora) : [...prev, hora]));
+
+    /**
+     * "Tomar seleccionadas": UNA llamada al endpoint de siempre por cada día+horario
+     * (`POST /clases/{id}/tomar`, alcance 'clase'). Va EN SERIE a propósito: el backend
+     * valida choques por horario y así el primer 409 no deja media tanda sin explicar.
+     * Cada clase tomada queda a nombre del coach (✅) y se ve en Supervisión.
+     */
+    const tomarSeleccionadas = async () => {
+        if (clasesATomar.length === 0) {
+            setMsgClases({ tipo: 'error', texto: 'Marca al menos un horario disponible.' });
+            return;
+        }
+        setMsgClases(null);
+        setTomandoClases(true);
+        let tomadas = 0;
+        const errores = [];
+        for (const clase of clasesATomar) {
+            try {
+                await accionClaseMut.mutateAsync({
+                    claseId: clase.id, accion: 'tomar', params: { alcance: 'clase' },
+                });
+                tomadas += 1;
+            } catch (e) {
+                errores.push(`${horaCorta(clase.hora_inicio)} ${fechaISOde(clase).slice(5)}: `
+                    + `${e.response?.data?.detail || 'no se pudo tomar'}`);
+            }
+        }
+        setTomandoClases(false);
+        setHorariosTomar([]);
+        setMsgClases(errores.length === 0
+            ? { tipo: 'exito', texto: `${tomadas} clase(s) quedaron a tu nombre.` }
+            : {
+                tipo: 'error',
+                texto: `${tomadas} clase(s) tomadas · ${errores.length} sin tomar — ${errores.join(' · ')}`,
+            });
+    };
+
+    const abrirWodInline = (fecha) => {
+        setWodError('');
+        setMsgClases(null);
+        setWodForm(formularioMetconVacio());
+        setWodBloques([]);
+        setWodInlineFecha(fecha);
+    };
+
+    /**
+     * "Publicar WOD" de UN día: un WOD para TODAS las clases de ese coach en esa fecha (las
+     * que se listan como chips), no uno por horario. El contenido se arma con
+     * `contenidoMetconDesdeFormulario` —la MISMA función que usa `ModalPublicarWod`—, así que
+     * la tarjeta y el modal mandan exactamente la misma forma de WOD (calentamiento,
+     * musculación, nombre, tipo, descripción y bloques).
+     *
+     * `useCrearWodsBatch` ya hace el alta (`POST /wods/batch-create`), pero el backend filtra
+     * las clases por `disciplina_id`: si el día mezcla disciplinas se manda un lote por
+     * disciplina con el MISMO contenido. El coach ve un solo WOD por día, igual que el mockup.
+     */
+    const guardarWodDelDia = async (fecha, clases) => {
+        const errorFormulario = validarFormularioMetcon(wodForm);
+        if (errorFormulario) {
+            setWodError(errorFormulario);
+            return;
+        }
+        const contenido = contenidoMetconDesdeFormulario(wodForm, wodBloques);
+        const porDisciplina = new Map();
+        clases.forEach((c) => {
+            if (!porDisciplina.has(c.disciplina_id)) porDisciplina.set(c.disciplina_id, []);
+            porDisciplina.get(c.disciplina_id).push(c);
+        });
+        setWodError('');
+        setWodGuardando(true);
+        try {
+            let vinculadas = 0;
+            for (const [disciplinaId, grupo] of porDisciplina.entries()) {
+                const r = await crearWodsBatch.mutateAsync({
+                    body: {
+                        wods: [{ fecha, ...contenido, estado: 'publicado' }],
+                        clase_ids: grupo.map((c) => c.id),
+                    },
+                    params: { disciplina_id: disciplinaId },
+                });
+                vinculadas += r?.clases_vinculadas || 0;
+            }
+            setMsgClases({
+                tipo: 'exito',
+                texto: `WOD publicado en ${vinculadas} clase(s) del ${fecha}.`,
+            });
+            setWodInlineFecha(null);
+            setWodForm(formularioMetconVacio());
+            setWodBloques([]);
+        } catch (e) {
+            setWodError(e.response?.data?.detail || 'No se pudo publicar el WOD.');
+        } finally {
+            setWodGuardando(false);
+        }
+    };
+
     // WODs del box: el de hoy (tarjeta) y la lista completa (tab Clases y registros).
     const wods = wodsQ.data || SIN_DATOS;
     const wodHoy = useMemo(() => wods.find(
         (w) => fechaISOde(w) === today && w.activo !== false,
     ) || null, [wods, today]);
 
-    // Alumnos, riesgo y progreso (los dos últimos son datos derivados del backend).
+    // Alumnos y progreso (el segundo es un dato derivado del backend).
     const alumnos = alumnosQ.data || SIN_DATOS;
-    const alumnosEnRiesgo = riesgoQ.data?.alumnos_alerta || SIN_DATOS;
     const progresoAlumnos = progresoQ.data || SIN_DATOS;
     // Avisos vigentes hoy (los del carrusel del alumno). El endpoint es el mismo que alimenta
     // el Inicio del alumno: trae TODAS las categorías (promoción, colaboración, evento, aviso
@@ -405,9 +582,14 @@ const DashboardCoach = () => {
     // cuatro categorías mezcladas. Al coach le toca UNA: el aviso rápido del día (tipo `aviso`,
     // el que publica + Nuevo aviso); Promoción, Colaboración y Evento son del admin desde
     // Marketing y los alumnos los leen igual en su Inicio, pero no son cosa del coach.
+    // Punto 1: además del TIPO, tiene que ser SU aviso. Antes bastaba con `tipo === 'aviso'`,
+    // así que el aviso del box que publicaba el ADMIN (mismo tipo) salía acá como si fuera
+    // del coach. `creado_por` viaja desde `serializar()` (services/avisos_marketing.py).
     const avisosDelCoach = useMemo(
-        () => avisosVigentes.filter((a) => a.tipo === TIPO_AVISO_RAPIDO),
-        [avisosVigentes],
+        () => avisosVigentes.filter(
+            (a) => a.tipo === TIPO_AVISO_RAPIDO && a.creado_por === usuario_id,
+        ),
+        [avisosVigentes, usuario_id],
     );
 
     // RMs del alumno abierto en el tab Alumnos.
@@ -487,69 +669,17 @@ const DashboardCoach = () => {
         const fallos = [];
         if (clasesQ.isError) fallos.push(`Clases de la semana — ${detalleError(clasesQ.error)}`);
         if (wodsQ.isError) fallos.push(`WODs — ${detalleError(wodsQ.error)}`);
-        if (riesgoQ.isError) fallos.push(`Alumnos en riesgo — ${detalleError(riesgoQ.error)}`);
         if (coachDiscQ.isError) fallos.push(`Disciplinas del coach — ${detalleError(coachDiscQ.error)}`);
         if (alumnosQ.isError) fallos.push(`Alumnos del coach — ${detalleError(alumnosQ.error)}`);
         if (progresoQ.isError) fallos.push(`Progreso/registros — ${detalleError(progresoQ.error)}`);
         if (rmsRecientesQ.isError) fallos.push(`Registros recientes — ${detalleError(rmsRecientesQ.error)}`);
         return fallos;
-    }, [clasesQ.isError, clasesQ.error, wodsQ.isError, wodsQ.error, riesgoQ.isError,
-        riesgoQ.error, coachDiscQ.isError, coachDiscQ.error, alumnosQ.isError, alumnosQ.error,
+    }, [clasesQ.isError, clasesQ.error, wodsQ.isError, wodsQ.error,
+        coachDiscQ.isError, coachDiscQ.error, alumnosQ.isError, alumnosQ.error,
         progresoQ.isError, progresoQ.error, rmsRecientesQ.isError, rmsRecientesQ.error]);
 
     // "Reintentar" del banner: refetchea TODO lo que la pantalla tiene en uso.
     const reintentar = () => qc.invalidateQueries();
-
-    // La grilla de la semana DERIVA de `clasesSemana` (arriba), así que se arma acá y no
-    // junto a su función: llamarla antes dejaría `clasesSemana` en zona muerta (TDZ).
-    const weekGrid = buildWeekGrid();
-
-    // ---- Handlers ----
-    // Contacto por CORREO (reemplaza el viejo WhatsApp/wa.me: decision confirmada).
-    // P1: el boton NO envia directo -> abre el PREVIEW del correo (asunto + cuerpo
-    // reales, renderizados por el backend). El envio sale desde "Confirmar envío".
-    const enviarCorreo = (alumno) => {
-        if (!alumno.correo) {
-            setMsgContacto({
-                id: alumno.id,
-                tipo: 'error',
-                texto: `${alumno.nombre} no tiene correo registrado. Cárgalo desde Admin y reintenta.`,
-            });
-            return;
-        }
-        setMsgContacto(null);
-        setPreviewAlumno(alumno);
-    };
-
-    // Confirmado el preview: POST real (mismo endpoint de siempre). Se registra en
-    // notificaciones_enviadas y en auditoria (EMAIL_MANUAL, origen panel_coach).
-    const confirmarEnvioCorreo = async (alumno) => {
-        setEnviandoCorreoId(alumno.id);
-        try {
-            // Mismo endpoint de siempre: la mutación sólo devuelve la respuesta (el
-            // envío queda en notificaciones_enviadas y en auditoría: no hay caché que mover).
-            const d = (await contactarAlumno.mutateAsync({
-                coachId: usuario_id,
-                alumnoId: alumno.id,
-            })) || {};
-            setMsgContacto({
-                id: alumno.id,
-                tipo: d.exito ? 'exito' : 'error',
-                texto: d.exito
-                    ? `Correo enviado a ${alumno.nombre} (${d.dias_inactividad} días sin entrenar).`
-                    : (d.detalle_error || 'No se pudo enviar el correo.'),
-            });
-        } catch (e) {
-            setMsgContacto({
-                id: alumno.id,
-                tipo: 'error',
-                texto: e.response?.data?.detail || 'No se pudo enviar el correo.',
-            });
-        } finally {
-            setEnviandoCorreoId(null);
-            setPreviewAlumno(null);
-        }
-    };
 
     // ── Tab Progreso: los DOS filtros se combinan (estado × nivel) sobre la página cargada,
     // y la paginación sale del padrón ya buscado (los 251), no de los enriquecidos. ──
@@ -676,10 +806,12 @@ const DashboardCoach = () => {
                     usando las pestañas viejas (Clases / Alumnos & RMs / Progreso / Riesgo /
                     Asistencia). */}
                 <div className={activeTab === 'resumen' || activeTab === 'historial'
+                    || activeTab === 'clases' || activeTab === 'mis-clases'
                     ? ''
                     : 'overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm'}
                     data-testid="coach-dashboard-content">
                     <div className={activeTab === 'resumen' || activeTab === 'historial'
+                        || activeTab === 'clases' || activeTab === 'mis-clases'
                         ? '' : 'p-4 md:p-6'}>
                         {/* ─── TAB: RESUMEN (mockup #pantalla-resumen) ─── */}
                         {activeTab === 'resumen' && (
@@ -710,45 +842,36 @@ const DashboardCoach = () => {
                             </>
                         )}
 
-                        {/* ─── TAB: CLASES (Fusión Fase 2: Clases + Mis WODs con toggle) ─── */}
+                        {/* ─── TAB: CLASES (rediseño: Tomar / Publicar WOD) ───
+                            Dos sub-pasos DENTRO de la misma pestaña (chips arriba), como el
+                            mockup: "Mis clases" se fue a su propia sub-pestaña del sidebar
+                            (`?tab=mis-clases`). NO son entradas de COACH_SUBTABS: la navegación
+                            entre estos dos pasos es interna.
+                            Toda la información sale de `useClasesCoach` (lo mío), `useClasesDelBox`
+                            (los horarios libres del box) y `useTodosLosWods` (el WOD de cada día). */}
                         {activeTab === 'clases' && (
-                            <div className="space-y-6">
-                                <div className="flex items-center justify-between flex-wrap gap-3">
+                            <div className="space-y-4">
+                                {/* Encabezado: la semana que se está mirando + las dos entradas que
+                                    ya existían (aviso rápido del día). */}
+                                <div className="flex flex-wrap items-center justify-between gap-3">
                                     <div>
-                                        <h2 className="text-xl font-bold uppercase tracking-wide text-gray-900">Clases y {getTerminoDisciplina('CrossFit')}s de la Semana</h2>
-                                        <p className="text-sm text-gray-600 mt-1">
+                                        <h2 className="text-xl font-bold uppercase tracking-wide text-zinc-100">Clases de la semana</h2>
+                                        <p className="mt-1 text-sm text-zinc-400">
                                             Semana: {weekRange.start} → {weekRange.end}
                                         </p>
                                     </div>
-                                    {/* Punto 3 del reporte móvil: en 360px los cuatro botones no
-                                        entraban en la fila y el último quedaba cortado por el
-                                        borde del panel (`overflow-hidden`), pisándose con el de
-                                        al lado. Ahora la fila ENVUELVE (`flex-wrap`) y se alinea
-                                        a la derecha: en >=768px todo cabe igual que antes. */}
                                     <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
                                         <button
                                             onClick={irSemanaAnterior}
-                                            className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-zinc-600 transition-colors"
+                                            className="px-3 py-2 bg-zinc-800 text-zinc-200 rounded-lg text-sm font-medium hover:bg-zinc-700 transition-colors"
                                         >
                                             Semana anterior
                                         </button>
                                         <button
                                             onClick={irSemanaSiguiente}
-                                            className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-zinc-600 transition-colors"
+                                            className="px-3 py-2 bg-zinc-800 text-zinc-200 rounded-lg text-sm font-medium hover:bg-zinc-700 transition-colors"
                                         >
                                             Semana siguiente
-                                        </button>
-                                        {/* Acá estaba "Gestionar Clases": navegaba a la
-                                            pantalla vieja, ya retirada. La grilla de arriba ES
-                                            esa vista semanal (fusionada) y desde acá se llega
-                                            a las dos cosas que sólo vivían allá: la carga
-                                            masiva por Excel y el aviso rápido del día. */}
-                                        <button
-                                            onClick={abrirCargaMasiva}
-                                            data-testid="cargar-excel-semana"
-                                            className="px-3 py-2 rounded-lg text-sm font-bold text-zinc-900 bg-lime-300 hover:bg-lime-200 transition-colors"
-                                        >
-                                            + Cargar {getTerminoDisciplina('CrossFit')}s de la semana (Excel)
                                         </button>
                                         <button
                                             onClick={() => setModalAviso(true)}
@@ -760,281 +883,417 @@ const DashboardCoach = () => {
                                     </div>
                                 </div>
 
-                                {/* Filtro (Parte E): UN checkbox. Desmarcado = todas las clases
-                                    (el default actual `verSoloConWod=false`); marcado = solo las que
-                                    tienen WOD publicado. Reemplaza el viejo toggle de dos botones. */}
-                                <label className="flex w-full cursor-pointer items-center gap-2.5 rounded-xl bg-gray-100 px-3 py-2.5 text-sm font-medium text-gray-700 md:inline-flex md:w-auto">
-                                    <input
-                                        type="checkbox"
-                                        checked={verSoloConWod}
-                                        onChange={() => setVerSoloConWod((v) => !v)}
-                                        data-testid="filtro-solo-con-wod"
-                                        className="h-4 w-4 rounded border-zinc-400 text-orange-600 focus:ring-orange-500"
-                                    />
-                                    <span>Mostrar solo clases con {getTerminoDisciplina('CrossFit')} publicado</span>
-                                </label>
+                                {/* Los 2 sub-pasos de la tarjeta (navegación interna).
+                                    "Mis clases" ya NO está acá: es la sub-pestaña del sidebar. */}
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                    {[
+                                        { id: 'tomar', label: '1 · Tomar clases' },
+                                        { id: 'wod', label: '2 · Publicar WOD' },
+                                    ].map((paso) => (
+                                        <button
+                                            key={paso.id}
+                                            type="button"
+                                            data-testid={`clases-paso-${paso.id}`}
+                                            aria-pressed={subTabClases === paso.id}
+                                            onClick={() => { setSubTabClases(paso.id); setMsgClases(null); }}
+                                            className={`rounded-xl border px-3 py-2.5 text-sm font-bold transition-colors ${subTabClases === paso.id
+                                                ? 'border-orange-500 bg-orange-500/15 text-orange-200'
+                                                : 'border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-500'}`}
+                                        >
+                                            {paso.label}
+                                        </button>
+                                    ))}
+                                </div>
 
-                                {/* Vista MOBILE (Fase 3): lista vertical de clases — visible solo en < md */}
-                                <div className="block md:hidden space-y-3">
-                                    {dayDates.map((date, dayIdx) => {
-                                        // Clases de este día, ordenadas por hora
-                                        const clasesDelDia = (clasesSemana || [])
-                                            .filter(c => {
-                                                const fechaStr = c.fecha ? (typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha) : '';
-                                                return fechaStr === date;
-                                            })
-                                            .sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || ''));
+                                {/* Resultado de la última acción (tomar / soltar / publicar). */}
+                                {msgClases && (
+                                    <div
+                                        data-testid="msg-clases"
+                                        className={`rounded-xl border px-4 py-3 text-sm ${msgClases.tipo === 'exito'
+                                            ? 'border-emerald-700/60 bg-emerald-900/20 text-emerald-100'
+                                            : 'border-red-700/60 bg-red-900/20 text-red-100'}`}
+                                    >
+                                        {msgClases.texto}
+                                    </div>
+                                )}
 
-                                        // WODs de este día
-                                        const wodDeClase = (clase) => clase ? wods.find(w => {
-                                            const fechaW = w.fecha ? (typeof w.fecha === 'string' ? w.fecha.split('T')[0] : w.fecha) : '';
-                                            return fechaW === date && w.id === clase.wod_id;
-                                        }) : null;
+                                {/* ── PASO 1: TOMAR CLASES ─────────────────────────────────────── */}
+                                {subTabClases === 'tomar' && (
+                                    <div className="space-y-4">
+                                        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+                                            <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                                                Días donde tomar
+                                            </p>
+                                            <div className="mt-2 flex flex-wrap gap-1.5">
+                                                {dayDates.map((fecha, i) => {
+                                                    const activo = diasSeleccionados.includes(fecha);
+                                                    return (
+                                                        <button
+                                                            key={fecha}
+                                                            type="button"
+                                                            data-testid={`tomar-dia-${fecha}`}
+                                                            aria-pressed={activo}
+                                                            onClick={() => toggleDiaTomar(fecha)}
+                                                            className={`w-[46px] rounded-lg border px-1 py-1.5 text-center text-[10px] font-semibold transition-colors ${activo
+                                                                ? 'border-orange-500 bg-orange-500/15 text-orange-200'
+                                                                : 'border-zinc-700 text-zinc-400 hover:border-zinc-500'}`}
+                                                        >
+                                                            <span className="block">{DAYS[i]}</span>
+                                                            <span className="block text-[12px]">{fecha.slice(8, 10)}</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-zinc-500">
+                                                {ATAJOS_DIAS.map((atajo) => (
+                                                    <button
+                                                        key={atajo.id}
+                                                        type="button"
+                                                        data-testid={`tomar-atajo-${atajo.id}`}
+                                                        onClick={() => atajoDias(atajo.cuantos)}
+                                                        className="underline hover:text-zinc-300"
+                                                    >
+                                                        {atajo.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
 
-                                        // Fase 2/3: si el toggle está en "solo con WOD publicado", filtrar
-                                        const clasesVisibles = verSoloConWod
-                                            ? clasesDelDia.filter(c => wodDeClase(c))
-                                            : clasesDelDia;
-
-                                        return (
-                                            <div key={date} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                                                {/* Encabezado del día */}
-                                                <div className={`px-4 py-2.5 flex items-center justify-between ${date === today ? 'bg-orange-50 border-b border-orange-200' : 'bg-gray-50 border-b border-gray-200'}`}>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className={`text-sm font-bold ${date === today ? 'text-orange-600' : 'text-gray-700'}`}>
-                                                            {DAYS[dayIdx]} {date.split('-')[2]}
-                                                        </span>
-                                                        {date === today && (
-                                                            <span className="text-[10px] font-bold bg-orange-500 text-white px-2 py-0.5 rounded-full uppercase">Hoy</span>
-                                                        )}
-                                                    </div>
-                                                    <span className="text-xs text-gray-500">{clasesVisibles.length} clase(s)</span>
+                                        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+                                            <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                                                Horarios con días libres
+                                            </p>
+                                            {clasesBoxQ.isPending ? (
+                                                <div className="flex items-center justify-center py-8">
+                                                    <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-orange-500"></div>
                                                 </div>
-
-                                                {/* Clases del día (vertical) */}
-                                                <div className="divide-y divide-gray-100">
-                                                    {clasesVisibles.length > 0 ? (
-                                                        clasesVisibles.map((clase) => {
-                                                            const wod = wodDeClase(clase);
+                                            ) : horariosPorFranja.length === 0 ? (
+                                                <p className="py-6 text-center text-sm text-zinc-500">
+                                                    {diasSeleccionados.length === 0
+                                                        ? 'Marca al menos un día para ver los horarios libres.'
+                                                        : 'No quedan horarios libres en los días marcados.'}
+                                                </p>
+                                            ) : horariosPorFranja.map((franja) => (
+                                                <div key={franja.id} className="mt-3">
+                                                    <p className="text-[10.5px] uppercase tracking-wide text-zinc-500">
+                                                        {franja.label}
+                                                    </p>
+                                                    <div className="mt-1.5 flex flex-wrap gap-2">
+                                                        {franja.horas.map((hora) => {
+                                                            const activo = horariosTomar.includes(hora);
+                                                            const diasLibres = diasSeleccionados.filter((fecha) =>
+                                                                clasesLibresSemana.some((c) => fechaISOde(c) === fecha
+                                                                    && horaCorta(c.hora_inicio) === hora)).length;
                                                             return (
-                                                                <React.Fragment key={clase.id}>
                                                                 <button
-                                                                    key={clase.id}
-                                                                    data-testid={wod ? 'ver-wod-lista' : 'publicar-wod-lista'}
-                                                                    title={wod ? 'Ver el WOD completo' : 'Publicar WOD para esta clase'}
-                                                                    onClick={() => (wod
-                                                                        ? abrirDetalleWod({ ...clase, fecha: clase.fecha || date }, wod)
-                                                                        : abrirPublicarWod({ ...clase, fecha: clase.fecha || date }))}
-                                                                    className={`w-full px-3 py-3 flex items-center gap-3 text-left transition-colors sm:px-4 ${wod
-                                                                        ? 'bg-green-50 hover:bg-green-100'
-                                                                        : 'bg-yellow-50 hover:bg-yellow-100'
-                                                                        }`}
+                                                                    key={hora}
+                                                                    type="button"
+                                                                    data-testid={`tomar-horario-${hora}`}
+                                                                    aria-pressed={activo}
+                                                                    onClick={() => toggleHorarioTomar(hora)}
+                                                                    className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${activo
+                                                                        ? 'border-orange-500 bg-orange-500 text-zinc-950'
+                                                                        : 'border-zinc-700 text-zinc-200 hover:border-orange-500/60'}`}
                                                                 >
-                                                                    <span className="text-lg font-bold text-gray-800 w-16 shrink-0">
-                                                                        {clase.hora_inicio ? clase.hora_inicio.substring(0, 5) : '--:--'}
-                                                                    </span>
-                                                                    <div className="flex-1 min-w-0">
-                                                                        <p className="text-sm font-semibold text-gray-900 truncate">
-                                                                            {clase.disciplina_nombre || 'Clase'}
-                                                                        </p>
-                                                                        <p className={`text-xs truncate ${wod ? 'text-green-700 font-medium' : 'text-gray-600'}`}>
-                                                                            {wod ? (
-                                                                                <span className="whitespace-pre-line">
-                                                                                    <span className="font-bold text-green-700">{wod.titulo || 'WOD publicado'}</span>
-                                                                                    {wod.calentamiento && <span className="block text-[10px] text-gray-600 mt-0.5">{wod.calentamiento}</span>}
-                                                                                    {wod.fuerza_habilidad && <span className="block text-[10px] text-gray-600">{wod.fuerza_habilidad}</span>}
-                                                                                    {wod.wod_principal && <span className="block text-[10px] text-gray-700">{wod.wod_principal}</span>}
-                                                                                </span>
-                                                                            ) : (
-                                                                                <span className="text-[10px] font-bold uppercase tracking-wide">Sin {getTerminoDisciplina(clase.disciplina_nombre)}</span>
-                                                                            )}
-                                                                        </p>
-                                                                        <p className="text-xs text-gray-500">
-                                                                            {clase.asistentes_confirmados || 0}
-                                                                            {clase.cupo_maximo === null || clase.cupo_maximo === undefined
-                                                                                ? ' inscriptos (acceso libre)'
-                                                                                : `/${clase.cupo_maximo} inscriptos`}
-                                                                        </p>
-                                                                    </div>
+                                                                    {hora}
+                                                                    <span className="ml-1 text-[10px] font-normal opacity-70">{diasLibres}d</span>
                                                                 </button>
-                                                                {/* Tomar / soltar / cubrir suplencia: se hacía en la
-                                                                    pantalla vieja y ahora vive acá, en la misma tarjeta. */}
-                                                                <div className="border-t border-gray-100 px-3 pb-2">
-                                                                    <AccionesClaseCoach
-                                                                        clase={{ ...clase, fecha: clase.fecha || date }}
-                                                                        coachId={usuario_id}
-                                                                        coachDisciplinas={coachDisciplinas}
-                                                                        onAviso={setMsgPublicado}
-                                                                    />
-                                                                </div>
-                                                                </React.Fragment>
                                                             );
-                                                        })
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-800 pt-3">
+                                                <p className="text-xs text-zinc-400" data-testid="tomar-resumen">
+                                                    {clasesATomar.length === 0
+                                                        ? 'Ningún horario marcado.'
+                                                        : `Se tomarán ${clasesATomar.length} clase(s) en ${diasSeleccionados.length} día(s).`}
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    onClick={tomarSeleccionadas}
+                                                    disabled={tomandoClases || clasesATomar.length === 0}
+                                                    data-testid="tomar-seleccionadas"
+                                                    className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-bold text-zinc-950 hover:bg-orange-400 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                >
+                                                    {tomandoClases ? 'Tomando…' : 'Tomar seleccionadas'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* ── PASO 2: PUBLICAR WOD (un WOD por día) ────────────────────── */}
+                                {subTabClases === 'wod' && (
+                                    <div className="space-y-3">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <p className="text-xs text-zinc-400">
+                                                Un WOD por día, para todas tus clases de esa fecha.
+                                            </p>
+                                            {/* El MISMO flujo del Excel que ya existía (abajo se monta el
+                                                modal con `soloArchivo`): acá sólo se le da otro acceso. */}
+                                            <button
+                                                onClick={abrirCargaMasiva}
+                                                data-testid="cargar-excel-semana"
+                                                className="px-3 py-2 rounded-lg text-sm font-bold text-zinc-900 bg-lime-300 hover:bg-lime-200 transition-colors"
+                                            >
+                                                + Cargar {getTerminoDisciplina('CrossFit')}s de la semana (Excel)
+                                            </button>
+                                        </div>
+                                        {diasConClasesParaWod.length === 0 ? (
+                                            <p className="rounded-xl border border-zinc-800 bg-zinc-900 p-6 text-center text-sm text-zinc-400">
+                                                No tienes clases tomadas de hoy en adelante. Tómalas en «Tomar clases».
+                                            </p>
+                                        ) : diasConClasesParaWod.map(({ fecha, clases }) => {
+                                            const pendientes = clases.filter((c) => !c.wod_id);
+                                            const yaTienen = clases.length - pendientes.length;
+                                            const abierto = wodInlineFecha === fecha;
+                                            // El formulario inline es el de METCON (los campos del
+                                            // modal). Si la disciplina usa otra familia (Fuerza,
+                                            // Secuencia…), se deriva al formulario completo: escribir un
+                                            // metcon en una clase de Fuerza sería un dato equivocado.
+                                            const tipoFormularioDelDia = pendientes[0]?.disciplina_tipo_formulario
+                                                || TIPO_FORMULARIO_DEFAULT;
+                                            const formularioMetcon = pendientes.every(
+                                                (c) => (c.disciplina_tipo_formulario || TIPO_FORMULARIO_DEFAULT)
+                                                    === TIPO_FORMULARIO_DEFAULT,
+                                            );
+                                            return (
+                                                <div
+                                                    key={fecha}
+                                                    data-testid={`wod-dia-${fecha}`}
+                                                    className="rounded-xl border border-zinc-800 bg-zinc-900 p-4"
+                                                >
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <span className="text-sm font-bold text-zinc-100">
+                                                            {nombreDiaDe(fecha)} {fecha.slice(8, 10)}
+                                                        </span>
+                                                        <span className="text-[11px] text-zinc-500">
+                                                            {clases.length} clase(s) tomada(s)
+                                                        </span>
+                                                    </div>
+                                                    {pendientes.length === 0 ? (
+                                                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                                                            <span className="rounded bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-300">
+                                                                {getTerminoDisciplina('CrossFit')} cargado en todas las clases del día
+                                                            </span>
+                                                            <button
+                                                                type="button"
+                                                                data-testid="editar-wod-celda"
+                                                                onClick={() => abrirEditarWod(
+                                                                    { ...clases[0], fecha },
+                                                                    wods.find((w) => w.id === clases[0].wod_id) || null,
+                                                                )}
+                                                                className="rounded-lg border border-orange-500/60 px-3 py-1.5 text-[11.5px] font-semibold text-orange-200 hover:bg-orange-500/10"
+                                                            >
+                                                                Editar
+                                                            </button>
+                                                        </div>
                                                     ) : (
-                                                        <p className="px-4 py-4 text-sm text-gray-400 text-center italic">
-                                                            {verSoloConWod ? 'Sin WODs publicados este día' : 'Sin clases este día'}
-                                                        </p>
+                                                        <>
+
+                                                            <p className="mt-1 text-[12.5px] text-zinc-400">
+                                                                Tienes {pendientes.length} clase(s) tomada(s) a las{' '}
+                                                                {pendientes.map((c) => horaCorta(c.hora_inicio)).join(', ')}.
+                                                                {' '}¿Quieres cargar el {getTerminoDisciplina('CrossFit')} para estas {pendientes.length} clases?
+                                                            </p>
+                                                            <div className="mt-2 flex flex-wrap gap-1.5">
+                                                                {pendientes.map((c) => (
+                                                                    <span
+                                                                        key={c.id}
+                                                                        className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10.5px] font-semibold text-zinc-300"
+                                                                    >
+                                                                        {horaCorta(c.hora_inicio)}
+                                                                    </span>
+                                                                ))}
+                                                                {yaTienen > 0 && (
+                                                                    <span className="text-[10.5px] text-zinc-500">
+                                                                        ({yaTienen} clase(s) del día ya tienen {getTerminoDisciplina('CrossFit')})
+                                                                    </span>
+                                                                )}
+                                                            </div>
+
+                                                            {/* El formulario abre INLINE: nunca un modal ni un alert.
+                                                                Si la disciplina no es de metcon, se deriva al
+                                                                formulario completo (que conoce las 5 familias). */}
+                                                            {!formularioMetcon ? (
+                                                                <div className="mt-3 rounded-lg border border-zinc-700 bg-zinc-950/60 p-3">
+                                                                    <p className="text-[11.5px] text-zinc-400">
+                                                                        La disciplina de estas clases usa el formulario
+                                                                        «{etiquetaTipoFormulario(tipoFormularioDelDia)}»:
+                                                                        cárgala desde el formulario completo.
+                                                                    </p>
+                                                                    <button
+                                                                        type="button"
+                                                                        data-testid={`wod-cargar-modal-${fecha}`}
+                                                                        onClick={() => abrirPublicarWod({ ...pendientes[0], fecha })}
+                                                                        className="mt-2 rounded-lg bg-orange-500 px-3 py-2 text-sm font-bold text-zinc-950 hover:bg-orange-400"
+                                                                    >
+                                                                        Abrir formulario completo
+                                                                    </button>
+                                                                </div>
+                                                            ) : abierto ? (
+                                                                <div className="mt-3 rounded-lg border border-zinc-700 bg-zinc-950/60 p-3">
+                                                                    {/* Los MISMOS campos del `ModalPublicarWod` (subcomponente
+                                                                        compartido): calentamiento, musculación, nombre, tipo,
+                                                                        descripción y bloques. Prefijo `inline-` para que los
+                                                                        testids no choquen con los del modal. */}
+                                                                    <CamposWod
+                                                                        form={wodForm}
+                                                                        setForm={setWodForm}
+                                                                        bloques={wodBloques}
+                                                                        setBloques={setWodBloques}
+                                                                        testidPrefijo="inline-"
+                                                                    />
+                                                                    {wodError && (
+                                                                        <p
+                                                                            data-testid="wod-inline-error"
+                                                                            className="mt-2 rounded border border-red-700/60 bg-red-900/20 px-2 py-1 text-[11.5px] text-red-200"
+                                                                        >
+                                                                            {wodError}
+                                                                        </p>
+                                                                    )}
+                                                                    <div className="mt-3 flex gap-2">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => guardarWodDelDia(fecha, pendientes)}
+                                                                            disabled={wodGuardando}
+                                                                            data-testid="wod-inline-guardar"
+                                                                            className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+                                                                        >
+                                                                            {wodGuardando ? 'Guardando…' : `Guardar en ${pendientes.length} clase(s)`}
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => setWodInlineFecha(null)}
+                                                                            disabled={wodGuardando}
+                                                                            className="rounded-lg bg-zinc-800 px-3 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-700 disabled:opacity-50"
+                                                                        >
+                                                                            Cancelar
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => abrirWodInline(fecha)}
+                                                                    data-testid={`wod-cargar-${fecha}`}
+                                                                    className="mt-3 rounded-lg bg-orange-500 px-3 py-2 text-sm font-bold text-zinc-950 hover:bg-orange-400"
+                                                                >
+                                                                    Cargar {getTerminoDisciplina('CrossFit')} para estas {pendientes.length} clases
+                                                                </button>
+                                                            )}
+                                                        </>
                                                     )}
                                                 </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* ─── TAB: MIS CLASES (sólo lectura + Soltar) ───
+                            Este contenido ERA el paso 2 dentro de la tarjeta Clases; ahora es
+                            su propia sub-pestaña del sidebar (`?tab=mis-clases`, COACH_SUBTABS).
+                            No se reescribió nada: el hook y la data son los MISMOS
+                            (`misClasesPorDia` ← `useClasesCoach`), sólo cambió dónde se
+                            renderiza. "Soltar" sigue usando `AccionesClaseCoach`
+                            (`POST /clases/{id}/soltar`). */}
+                        {activeTab === 'mis-clases' && (
+                            <div className="space-y-4">
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                    <div>
+                                        <h2 className="text-xl font-bold uppercase tracking-wide text-zinc-100">Mis clases</h2>
+                                        <p className="mt-1 text-sm text-zinc-400">
+                                            Lo que ya tomaste · semana {weekRange.start} → {weekRange.end}
+                                        </p>
+                                    </div>
+                                    <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                                        <button
+                                            onClick={irSemanaAnterior}
+                                            className="px-3 py-2 bg-zinc-800 text-zinc-200 rounded-lg text-sm font-medium hover:bg-zinc-700 transition-colors"
+                                        >
+                                            Semana anterior
+                                        </button>
+                                        <button
+                                            onClick={irSemanaSiguiente}
+                                            className="px-3 py-2 bg-zinc-800 text-zinc-200 rounded-lg text-sm font-medium hover:bg-zinc-700 transition-colors"
+                                        >
+                                            Semana siguiente
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Resultado de "Soltar" (el aviso lo escribe `AccionesClaseCoach`). */}
+                                {msgClases && (
+                                    <div
+                                        data-testid="msg-clases"
+                                        className={`rounded-xl border px-4 py-3 text-sm ${msgClases.tipo === 'exito'
+                                            ? 'border-emerald-700/60 bg-emerald-900/20 text-emerald-100'
+                                            : 'border-red-700/60 bg-red-900/20 text-red-100'}`}
+                                    >
+                                        {msgClases.texto}
+                                    </div>
+                                )}
+
+                                <div className="space-y-3">
+                                    {misClasesPorDia.every((d) => d.clases.length === 0) ? (
+                                        <p className="rounded-xl border border-zinc-800 bg-zinc-900 p-6 text-center text-sm text-zinc-400">
+                                            No tienes clases tomadas esta semana. Tómalas en «Clases → Tomar clases».
+                                        </p>
+                                    ) : misClasesPorDia.map(({ fecha, clases }) => {
+                                        if (clases.length === 0) return null;
+                                        const esHoy = fecha === today;
+                                        return (
+                                            <div
+                                                key={fecha}
+                                                data-testid={`mis-clases-dia-${fecha}`}
+                                                className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900"
+                                            >
+                                                <div className={`flex items-center justify-between px-4 py-2 ${esHoy ? 'bg-orange-500/15' : 'bg-zinc-800/60'}`}>
+                                                    <span className={`text-sm font-bold ${esHoy ? 'text-orange-200' : 'text-zinc-200'}`}>
+                                                        {nombreDiaDe(fecha)} {fecha.slice(8, 10)}
+                                                    </span>
+                                                    <span className="text-[11px] text-zinc-400">{clases.length} clase(s)</span>
+                                                </div>
+                                                <ul className="divide-y divide-zinc-800">
+                                                    {clases.map((clase) => (
+                                                        <li key={clase.id} className="px-4 py-2.5">
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <span className="w-12 shrink-0 text-sm font-bold text-zinc-200">
+                                                                    {horaCorta(clase.hora_inicio)}
+                                                                </span>
+                                                                <span className="text-sm text-zinc-300">
+                                                                    {clase.disciplina_nombre || 'Clase'}
+                                                                </span>
+                                                                <span className="text-[11px] text-zinc-500">
+                                                                    {clase.asistentes_confirmados || 0}
+                                                                    {clase.cupo_maximo === null || clase.cupo_maximo === undefined
+                                                                        ? ' inscriptos (acceso libre)'
+                                                                        : `/${clase.cupo_maximo} inscriptos`}
+                                                                </span>
+                                                                {clase.wod_id && (
+                                                                    <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-300">
+                                                                        WOD
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            {/* Soltar (y cubrir suplencia) con el MISMO componente de
+                                                                siempre: usa `POST /clases/{id}/soltar`. */}
+                                                            <AccionesClaseCoach
+                                                                clase={{ ...clase, fecha: clase.fecha || fecha }}
+                                                                coachId={usuario_id}
+                                                                coachDisciplinas={coachDisciplinas}
+                                                                onAviso={(texto) => setMsgClases({ tipo: 'exito', texto })}
+                                                            />
+                                                        </li>
+                                                    ))}
+                                                </ul>
                                             </div>
                                         );
                                     })}
                                 </div>
-
-                                {/* Week Grid (DESKTOP) — celda clickeable: crear WOD si no existe, editar si ya existe */}
-                                <div className="hidden md:block overflow-x-auto">
-                                    <table className="w-full border-collapse min-w-[900px]">
-                                        <thead>
-                                            <tr>
-                                                <th className="bg-zinc-800 text-white px-3 py-3 text-sm font-bold uppercase sticky left-0 z-10 min-w-[90px]">
-                                                    Horario
-                                                </th>
-                                                {DAYS.map((day, i) => {
-                                                    const isToday = dayDates[i] === today;
-                                                    return (
-                                                        <th
-                                                            key={day}
-                                                            className={`px-3 py-3 text-sm font-bold uppercase text-center min-w-[130px] ${isToday ? 'bg-orange-600 text-white ring-2 ring-orange-500/40 shadow-inner' : 'bg-zinc-800 text-white'
-                                                                }`}
-                                                        >
-                                                            <div className="text-base">{day}</div>
-                                                            <div className="text-xl font-bold">{dayDates[i].split('-')[2]}</div>
-                                                            {isToday && <div className="text-[10px] font-black bg-white text-orange-600 rounded-full mt-1 px-2 py-0.5">HOY</div>}
-                                                        </th>
-                                                    );
-                                                })}
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {SCHEDULE_HOURS.map(hour => (
-                                                <tr key={hour} className="border-b border-gray-200 hover:bg-gray-50">
-                                                    <td className="sticky left-0 bg-white border-r border-gray-200 px-3 py-3 text-base font-bold text-gray-700 whitespace-nowrap z-10">
-                                                        {hour}
-                                                    </td>
-                                                    {dayDates.map((date, dayIdx) => {
-                                                        const clase = weekGrid[date]?.[hour];
-                                                        // WOD asociado a esta clase (directamente desde el objeto clase que ahora trae wod_id)
-                                                        const wodDeClase = clase ? wods.find(w => {
-                                                            const fechaW = w.fecha ? (typeof w.fecha === 'string' ? w.fecha.split('T')[0] : w.fecha) : '';
-                                                            return fechaW === date && w.id === clase.wod_id;
-                                                        }) : null;
-
-                                                        // Fase 2: si el toggle está en "solo con WOD publicado" y la celda no tiene WOD, ocultarla
-                                                        if (verSoloConWod && (!clase || !wodDeClase)) {
-                                                            return null;
-                                                        }
-
-                                                        return (
-                                                            <td
-                                                                key={`${date}-${hour}`}
-                                                                className={`p-2 text-center transition-all border-r border-zinc-700 ${dayIdx === 6 ? 'border-r-0' : ''
-                                                                    }`}
-                                                            >
-                                                                <div>
-                                                                {clase ? (
-                                                                    wodDeClase ? (
-                                                                        // Celda con WOD publicado — fondo naranja translúcido sobre dark
-                                                                        <>
-                                                                        <button
-                                                                            data-testid="ver-wod-celda"
-                                                                            title="Ver el WOD completo"
-                                                                            onClick={() => abrirDetalleWod({ ...clase, fecha: clase.fecha || date }, wodDeClase)}
-                                                                            className="w-full h-full min-h-[64px] flex flex-col items-center justify-center gap-1 rounded-lg transition-all cursor-pointer bg-orange-500/20 border-2 border-orange-500 hover:bg-orange-500/30"
-                                                                        >
-                                                                            <div className="text-base font-bold text-orange-200 leading-tight capitalize">
-                                                                                {clase.disciplina_nombre || 'Clase'}
-                                                                            </div>
-                                                                            <div className="text-sm text-orange-300 font-bold leading-tight max-w-[110px] text-center">
-                                                                                {wodDeClase.titulo || 'WOD publicado'}
-                                                                            </div>
-                                                                            <div className="text-[9px] text-orange-400 leading-tight max-w-[110px] text-center whitespace-pre-line overflow-hidden">
-                                                                                {wodDeClase.calentamiento && wodDeClase.calentamiento.split('\n').slice(0, 2).join('\n')}
-                                                                                {wodDeClase.fuerza_habilidad && `\n${wodDeClase.fuerza_habilidad.split('\n').slice(0, 2).join('\n')}`}
-                                                                                {wodDeClase.wod_principal && `\n${wodDeClase.wod_principal.split('\n').slice(0, 2).join('\n')}`}
-                                                                            </div>
-                                                                            <div className="text-[10px] font-black uppercase tracking-wide text-emerald-300">
-                                                                                Publicado
-                                                                            </div>
-                                                                        </button>
-                                                                        {/* Editar el WOD ya publicado: el MISMO modal del panel,
-                                                                            precargado (portado de Gestión de Clases). */}
-                                                                        <button
-                                                                            data-testid="editar-wod-celda"
-                                                                            title="Editar este WOD: el cambio se ve en TODAS las clases que lo llevan"
-                                                                            onClick={() => abrirEditarWod({ ...clase, fecha: clase.fecha || date }, wodDeClase)}
-                                                                            className="mt-1 w-full rounded-lg border border-orange-500/60 bg-zinc-900 px-2 py-1 text-[10.5px] font-semibold text-orange-200 hover:bg-orange-500/20"
-                                                                        >
-                                                                            Editar
-                                                                        </button>
-                                                                        </>
-                                                                    ) : (
-                                                                        // Celda con clase sin WOD — fondo zinc-800 oscuro + texto claro legible
-                                                                        <button
-                                                                            data-testid="publicar-wod-celda"
-                                                                            data-fecha={date}
-                                                                            title="Publicar el WOD de esta clase"
-                                                                            onClick={() => { setClaseWod(clase); setModalWod(true); }}
-                                                                            className="w-full h-full min-h-[64px] flex flex-col items-center justify-center gap-1 rounded-lg transition-all cursor-pointer bg-zinc-800 border border-zinc-600 hover:bg-zinc-700"
-                                                                        >
-                                                                            <div className="text-base font-semibold text-zinc-200 leading-tight capitalize">
-                                                                                {clase.disciplina_nombre || 'Clase'}
-                                                                            </div>
-                                                                            <div className="text-[10px] font-bold uppercase tracking-wide text-zinc-300">
-                                                                                Sin {getTerminoDisciplina(clase.disciplina_nombre)}
-                                                                            </div>
-                                                                            <div className="text-sm text-zinc-400">
-                                                                                {clase.asistentes_confirmados || 0}
-                                                                                {clase.cupo_maximo === null || clase.cupo_maximo === undefined
-                                                                                    ? ' inscriptos (acceso libre)'
-                                                                                    : `/${clase.cupo_maximo} inscriptos`}
-                                                                            </div>
-                                                                        </button>
-                                                                    )
-                                                                ) : (
-                                                                    <div className="flex items-center justify-center h-full py-3 bg-zinc-900/60 rounded-lg">
-                                                                        <span className="text-zinc-500 text-base italic">—</span>
-                                                                    </div>
-                                                                )}
-                                                                {/* De quién es la clase y sus acciones, en la MISMA
-                                                                    grilla (antes había que ir a Gestión de Clases). */}
-                                                                {clase && (
-                                                                    <AccionesClaseCoach
-                                                                        clase={{ ...clase, fecha: clase.fecha || date }}
-                                                                        coachId={usuario_id}
-                                                                        coachDisciplinas={coachDisciplinas}
-                                                                        onAviso={setMsgPublicado}
-                                                                    />
-                                                                )}
-                                                                </div>
-                                                            </td>
-                                                        );
-                                                    })}
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-
-                                {/* Legend */}
-                                <div className="flex flex-wrap gap-4 text-xs text-zinc-400 mt-2 p-3 bg-zinc-900 rounded-lg border border-zinc-800">
-                                    <span className="flex items-center gap-1 font-semibold uppercase tracking-wide">
-                                        <span className="w-3 h-3 rounded-sm bg-orange-500/30 border-2 border-orange-500"></span> Con {getTerminoDisciplina('CrossFit')} publicado
-                                    </span>
-                                    <span className="flex items-center gap-1 font-semibold uppercase tracking-wide">
-                                        <span className="w-3 h-3 rounded-sm bg-zinc-800 border border-zinc-600"></span> Sin {getTerminoDisciplina('CrossFit')}
-                                    </span>
-                                    <span className="flex items-center gap-1 font-semibold uppercase tracking-wide">
-                                        <span className="w-3 h-3 rounded-sm bg-zinc-900/60 border border-zinc-700"></span> Celda vacía
-                                    </span>
-                                    {!verSoloConWod && (
-                                        <span className="text-zinc-500 italic">Clic en una celda gris oscura para crear el {getTerminoDisciplina('CrossFit')} de esa clase</span>
-                                    )}
-                                </div>
-                                <p className="text-xs text-gray-400 text-center">
-                                    Clic en una celda para publicar el {getTerminoDisciplina('CrossFit')} de esa clase
-                                    y en «Editar» para editarlo. Debajo de cada clase están tu estado y las acciones
-                                    (tomarla, soltarla o cubrir la suplencia).
-                                </p>
                             </div>
                         )}
 
@@ -1086,7 +1345,7 @@ const DashboardCoach = () => {
                                                    otro —HTML inválido—, así que el contenedor pasa a
                                                    ser un <div>: la tarjeta grande sigue seleccionando
                                                    (el panel de RMs de la derecha) y el botón chico
-                                                   abre la MISMA ficha del tab Riesgo
+                                                   abre la ficha del alumno (AlumnoFichaCoach)
                                                    (`fichaAlumnoId` → `<AlumnoFichaCoach>`). */
                                                 <div
                                                     key={alumno.id}
@@ -1405,66 +1664,11 @@ const DashboardCoach = () => {
                             </div>
                         )}
 
-                        {/* ─── TAB: RIESGO ─── */}
-                        {activeTab === 'riesgo' && (
-                            <div className="space-y-4">
-                                <div>
-                                    <h2 className="text-xl font-bold uppercase tracking-wide text-red-700">Alumnos en Riesgo de Abandono</h2>
-                                    <p className="text-gray-600 mt-1">Alumnos sin actividad en más de 7 días — requieren contacto</p>
-                                </div>
-                                {alumnosEnRiesgo.length > 0 ? (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        {alumnosEnRiesgo.map((alumno) => (
-                                            <div key={alumno.id} className="p-4 bg-red-50 border-l-4 border-red-500 rounded-lg hover:shadow-md transition-shadow">
-                                                <div className="flex items-start justify-between">
-                                                    <div>
-                                                        <p className="font-bold text-gray-900">{alumno.nombre}</p>
-                                                        <p className="text-sm text-gray-600 mt-1">
-                                                            {alumno.tiene_historial === false
-                                                                ? <span className="font-semibold text-red-500">Sin actividad registrada</span>
-                                                                : <>Sin entrenar: <span className="font-semibold text-red-500">{alumno.dias_ausente} días</span></>}
-                                                        </p>
-                                                        <p className="text-xs text-gray-500 mt-1">Última asistencia: {alumno.ultima_asistencia || 'Nunca'}</p>
-                                                        {alumno.correo && <p className="text-xs text-gray-500"><span className="font-semibold uppercase tracking-wide">Correo</span> {alumno.correo}</p>}
-                                                        {alumno.telefono && <p className="text-xs text-gray-500"><span className="font-semibold uppercase tracking-wide">Teléfono</span> {alumno.telefono}</p>}
-                                                    </div>
-                                                    <span className="shrink-0 rounded bg-red-600 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-white">Riesgo</span>
-                                                </div>
-                                                {msgContacto?.id === alumno.id && (
-                                                    <div className={`mt-3 px-3 py-2 rounded text-sm font-medium ${msgContacto.tipo === 'exito' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`} data-testid="contacto-msg">
-                                                        {msgContacto.texto}
-                                                    </div>
-                                                )}
-                                                <div className="mt-3 flex gap-2">
-                                                    <button
-                                                        data-testid="btn-contactar"
-                                                        onClick={() => enviarCorreo(alumno)}
-                                                        disabled={enviandoCorreoId === alumno.id}
-                                                        className="flex-1 px-3 py-2 bg-red-500 text-white rounded text-sm font-medium hover:bg-red-600 transition-colors"
-                                                    >
-                                                            {enviandoCorreoId === alumno.id ? 'Enviando correo...' : 'Enviar correo'}
-                                                    </button>
-                                                    <button
-                                                        data-testid="btn-ver-perfil"
-                                                        onClick={() => setFichaAlumnoId(alumno.id)}
-                                                        className="px-3 py-2 bg-white border border-red-500/30 text-red-500 rounded text-sm font-medium hover:bg-red-500/10 transition-colors"
-                                                    >
-                                                        Ver Perfil
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <div className="text-center py-12 bg-green-50 rounded-lg border border-green-200">
-                                        <p className="text-xl font-black uppercase tracking-wide text-green-700">¡Excelente! Ningún alumno está en riesgo</p>
-                                        <p className="text-sm text-green-600 mt-2">No hay alumnos en riesgo de abandono</p>
-                                    </div>
-                                )}
-                            </div>
-                        )}
+                                                 {/* (La pestaña "Riesgo" se retiró del panel del coach: la función de
+                            fidelización sigue viva en la pantalla Fidelización del admin — backend
+                            `fidelizacion.py` intacto —, pero el coach ya no la ve acá.) */}
 
-                        {/* ── TAB: ASISTENCIA ──
+{/* ── TAB: ASISTENCIA ──
                             `franjas`: en el teléfono (<768px) las clases del día van por
                             franja (Mañana/Tarde/Noche, mockup 6b); en tablet/escritorio
                             sigue el acordeón por disciplina, igual que el panel del admin. */}
@@ -1483,17 +1687,6 @@ const DashboardCoach = () => {
                         )}
                     </div>
                 </div>
-
-                {/* P1: preview del correo antes de enviarlo */}
-                {previewAlumno && (
-                    <PreviewEmailModal
-                        alumnoId={previewAlumno.id}
-                        coachId={usuario_id}
-                        enviando={enviandoCorreoId === previewAlumno.id}
-                        onClose={() => setPreviewAlumno(null)}
-                        onConfirmar={() => confirmarEnvioCorreo(previewAlumno)}
-                    />
-                )}
 
                 {/* P2: ficha acotada del alumno (modal coach-scoped) */}
                 {fichaAlumnoId && (
