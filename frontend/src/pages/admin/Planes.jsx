@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Check } from 'lucide-react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { fmtFechaChile } from '../../utils/fecha';
@@ -93,14 +94,37 @@ const Planes = () => {
     // respuesta del PUT (que ya trae la config nueva).
     const [matriculaActivaEdit, setMatriculaActivaEdit] = useState(null);
     const [matriculaMontoEdit, setMatriculaMontoEdit] = useState(null);
-    const [mensajeMatricula, setMensajeMatricula] = useState('');
+    // ── Feedback del guardado (3 piezas, cada una con su reloj) ─────────────
+    //   · `toastMatricula`  → aviso flotante de éxito, se va solo a los 3 s.
+    //   · `errorMatricula`  → error inline (rojo). NO se auto-oculta: si falló,
+    //     el admin tiene que poder leer el motivo.
+    //   · `guardadoMonto`   → pill "Guardado" DENTRO del input + pulso verde en
+    //     el borde, 1,8 s. `guardadoSeq` re-monta el bloque en cada guardado para
+    //     que la animación se reinicie si el admin guarda dos veces seguidas (si
+    //     sólo se togglea la clase, React la deja puesta y el pulso no vuelve).
+    const [toastMatricula, setToastMatricula] = useState(false);
+    const [errorMatricula, setErrorMatricula] = useState('');
+    const [guardadoMonto, setGuardadoMonto] = useState(false);
+    const [guardadoSeq, setGuardadoSeq] = useState(0);
+    const toastTimerRef = useRef(null);
+    const guardadoTimerRef = useRef(null);
+    useEffect(() => () => {
+        clearTimeout(toastTimerRef.current);
+        clearTimeout(guardadoTimerRef.current);
+    }, []);
     const matriculaActiva = matriculaActivaEdit === null
         ? Boolean(configMatricula?.activa) : matriculaActivaEdit;
     const matriculaMonto = matriculaMontoEdit === null
         ? (configMatricula?.monto_clp ?? '') : matriculaMontoEdit;
 
     const guardarConfigMatricula = async () => {
-        setMensajeMatricula('');
+        // Cada guardado arranca limpio: sin error viejo, sin toast viejo y sin el
+        // pulso anterior (los timers se cancelan para no pisar el nuevo estado).
+        setErrorMatricula('');
+        setToastMatricula(false);
+        setGuardadoMonto(false);
+        clearTimeout(toastTimerRef.current);
+        clearTimeout(guardadoTimerRef.current);
         try {
             const guardada = await guardarMatricula.mutateAsync({
                 activa: Boolean(matriculaActiva),
@@ -108,9 +132,15 @@ const Planes = () => {
             });
             setMatriculaActivaEdit(Boolean(guardada?.activa));
             setMatriculaMontoEdit(guardada?.monto_clp ?? '');
-            setMensajeMatricula('Matrícula guardada.');
+            // Éxito: toast 3 s + "Guardado" con pulso 1,8 s (el pulso son 2
+            // repeticiones de 900 ms; el timer apaga la pill cuando termina).
+            setToastMatricula(true);
+            setGuardadoSeq((n) => n + 1);
+            setGuardadoMonto(true);
+            toastTimerRef.current = setTimeout(() => setToastMatricula(false), 3000);
+            guardadoTimerRef.current = setTimeout(() => setGuardadoMonto(false), 1800);
         } catch (error) {
-            setMensajeMatricula(
+            setErrorMatricula(
                 error.response?.data?.detail || 'No se pudo guardar la matrícula.');
         }
     };
@@ -250,6 +280,37 @@ const Planes = () => {
 
     return (
         <Layout>
+            {/* Animaciones del feedback de matrícula. Van locales (no hay keyframes
+                globales en el proyecto) y respetan `prefers-reduced-motion`. */}
+            <style>{`
+                @keyframes matricula-toast-in {
+                    from { opacity: 0; transform: translateY(-16px); }
+                    to   { opacity: 1; transform: translateY(0); }
+                }
+                .matricula-toast { animation: matricula-toast-in 350ms cubic-bezier(.16, 1, .3, 1) both; }
+
+                @keyframes matricula-guardado-pulso {
+                    0%   { box-shadow: 0 0 0 0 rgba(16, 185, 129, .55); }
+                    60%  { box-shadow: 0 0 0 5px rgba(16, 185, 129, .16); }
+                    100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+                }
+                /* 2 repeticiones × 900 ms = 1,8 s */
+                .matricula-guardado-pulso { animation: matricula-guardado-pulso 900ms ease-out 2; }
+
+                @keyframes matricula-guardado-fade {
+                    0%   { opacity: 0; transform: translateY(2px); }
+                    12%  { opacity: 1; transform: translateY(0); }
+                    75%  { opacity: 1; }
+                    100% { opacity: 0; }
+                }
+                .matricula-guardado-fade { animation: matricula-guardado-fade 1800ms ease-out both; }
+
+                @media (prefers-reduced-motion: reduce) {
+                    .matricula-toast,
+                    .matricula-guardado-pulso,
+                    .matricula-guardado-fade { animation: none !important; }
+                }
+            `}</style>
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
                     <div><h1 className="text-3xl font-bold text-zinc-100">Planes</h1><p className="text-zinc-400 mt-1">Administra los planes de suscripción</p></div>
@@ -281,17 +342,44 @@ const Planes = () => {
                         <div>
                             <label htmlFor="matricula-monto"
                                 className="block text-xs text-zinc-500 mb-1">Monto ($)</label>
-                            <input id="matricula-monto" type="number" min="0"
-                                value={matriculaMonto}
-                                onChange={(e) => setMatriculaMontoEdit(e.target.value)}
-                                data-testid="monto-matricula"
-                                className="w-40 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100" />
+                            {/* `key={guardadoSeq}` re-monta en cada guardado para que el pulso
+                                verde vuelva a correr aunque se guarde dos veces seguidas. */}
+                            <div key={guardadoSeq} className="relative w-44">
+                                <input id="matricula-monto" type="number" min="0"
+                                    value={matriculaMonto}
+                                    onChange={(e) => setMatriculaMontoEdit(e.target.value)}
+                                    data-testid="monto-matricula"
+                                    className={`w-44 rounded-lg border border-zinc-700 bg-zinc-950 py-2 pl-3 text-sm text-zinc-100 ${guardadoMonto
+                                        ? 'pr-[5.75rem] matricula-guardado-pulso'
+                                        : 'pr-3'}`} />
+                                {guardadoMonto && (
+                                    <span
+                                        data-testid="guardado-matricula"
+                                        aria-live="polite"
+                                        className="matricula-guardado-fade pointer-events-none absolute inset-y-0 right-2.5 flex items-center gap-1 text-[11px] font-semibold text-emerald-400">
+                                        <Check size={14} strokeWidth={3} aria-hidden="true" />
+                                        Guardado
+                                    </span>
+                                )}
+                            </div>
                         </div>
-                        <p className="text-sm text-zinc-400">
-                            {configMatricula?.activada_en
-                                ? `Activa desde el ${fmtFechaChile(configMatricula.activada_en)}`
-                                : 'Todavía no se activó.'}
-                        </p>
+                        {configMatricula?.activada_en ? (
+                            <span
+                                data-testid="badge-matricula"
+                                className="inline-flex items-center gap-2 rounded-full border border-[#A7F3D0] bg-[#ECFDF5] px-3 py-1 text-xs font-semibold text-[#047857]">
+                                <span aria-hidden="true"
+                                    className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+                                Activa desde el {fmtFechaChile(configMatricula.activada_en)}
+                            </span>
+                        ) : (
+                            <span
+                                data-testid="badge-matricula"
+                                className="inline-flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-800/60 px-3 py-1 text-xs font-semibold text-zinc-300">
+                                <span aria-hidden="true"
+                                    className="h-2 w-2 shrink-0 rounded-full bg-zinc-500" />
+                                Todavía no se activó
+                            </span>
+                        )}
                         <p className="text-sm text-zinc-400" data-testid="contador-matricula">
                             <strong className="text-zinc-200">
                                 {configMatricula?.alumnos_cobrados ?? 0}
@@ -305,10 +393,30 @@ const Planes = () => {
                             {guardarMatricula.isPending ? 'Guardando...' : 'Guardar matrícula'}
                         </button>
                     </div>
-                    {mensajeMatricula && (
-                        <p className="mt-3 text-sm text-zinc-300" data-testid="mensaje-matricula">
-                            {mensajeMatricula}
+                    {errorMatricula && (
+                        <p role="alert" data-testid="mensaje-matricula"
+                            className="mt-3 text-sm font-medium text-red-400">
+                            {errorMatricula}
                         </p>
+                    )}
+                    {/* Toast flotante de éxito: fixed arriba a la derecha, entra con
+                        slide-down + fade (350 ms) y se va solo a los 3 s. Es el
+                        reemplazo del texto plano "Matrícula guardada.": el error
+                        sigue siendo inline (arriba), para que se pueda leer. */}
+                    {toastMatricula && (
+                        <div role="status" aria-live="polite" data-testid="toast-matricula"
+                            className="matricula-toast fixed right-4 top-4 z-[80] flex w-[min(92vw,22rem)] items-start gap-3 rounded-xl border border-emerald-500/25 bg-[#0F172A] p-4 shadow-2xl sm:right-6 sm:top-6">
+                            <span aria-hidden="true"
+                                className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white">
+                                <Check size={20} strokeWidth={3} />
+                            </span>
+                            <div className="min-w-0">
+                                <p className="text-sm font-bold text-white">Matrícula guardada</p>
+                                <p className="mt-0.5 text-xs text-zinc-300">
+                                    Los cambios se aplicaron correctamente
+                                </p>
+                            </div>
+                        </div>
                     )}
                 </div>
 
