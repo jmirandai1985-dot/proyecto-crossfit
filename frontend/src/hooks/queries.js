@@ -150,6 +150,11 @@ export const claves = {
     // lo mueven publicar/editar un WOD; `['reservas']` lo mueve la asistencia.
     clasesCoach: (coachId, desde, hasta) => ['clases', 'coach', coachId, desde, hasta],
     clasesDia: (fecha, limite) => ['clases', 'dia', fecha, limite],
+    // Punto 5 (pestaña Clases): TODAS las clases del box en la semana, sin `coach_id`.
+    // "Tomar clases" necesita ver los horarios LIBRES: si sólo se pidieran las del coach,
+    // los horarios de otro coach —o de una disciplina que no dicta— no existirían para la
+    // pantalla y no habría forma de saber que están ocupados.
+    clasesSemanaBox: (desde, hasta) => ['clases', 'semana-box', desde, hasta],
     clasesDetalle: (claseId) => ['clases', 'detalle', claseId],
     clasesDisciplinaSemana: (disciplinaId, desde, hasta) =>
         ['clases', 'disciplina', disciplinaId, desde, hasta],
@@ -1381,6 +1386,25 @@ export function useClasesCoach(coachId, desde, hasta) {
         // invalidan `['clases']`); el horario en sí cambia poco.
         staleTime: 30_000,
         enabled: Boolean(coachId) && Boolean(desde) && Boolean(hasta),
+    });
+}
+
+// TODAS las clases del box en un rango de fechas (SIN `coach_id`). La usa la pestaña Clases
+// del coach ("Tomar clases"): para saber qué horarios están LIBRES hay que ver también las
+// clases de otro coach y las de disciplinas que el coach no dicta. `limite` alto a propósito:
+// una semana del box con varias disciplinas por hora pasa el default de 100.
+export function useClasesDelBox(desde, hasta, limite = 500) {
+    return useQuery({
+        queryKey: claves.clasesSemanaBox(desde, hasta),
+        queryFn: async () => {
+            const data = (await api.get('/api/v1/clases/', {
+                params: { fecha_desde: desde, fecha_hasta: hasta, limit: limite },
+            })).data;
+            const lista = data?.clases || data || [];
+            return Array.isArray(lista) ? lista : [];
+        },
+        staleTime: 30_000,
+        enabled: Boolean(desde) && Boolean(hasta),
     });
 }
 
