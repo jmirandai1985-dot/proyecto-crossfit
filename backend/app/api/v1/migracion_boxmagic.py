@@ -92,7 +92,8 @@ real: ese vínculo es por correo y cambiarlo rompería el LEFT JOIN.
 import hashlib
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
@@ -101,11 +102,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_admin
+from app.core.security import get_password_hash
 from app.core.urls import url_frontend
 from app.db.database import get_db
 from app.models.candidato_boxmagic import (
-    ESTADO_BOXMAGIC_ACTIVO, GRUPO_ACTIVACION, GRUPO_RECUPERACION,
-    CandidatoBoxmagic, normalizar_correo,
+    ESTADO_BOXMAGIC_ACTIVO, ESTADO_BOXMAGIC_COMPLETADO, GRUPO_ACTIVACION,
+    GRUPO_RECUPERACION, CandidatoBoxmagic, normalizar_correo,
 )
 from app.models.configuracion import ConfiguracionNegocio
 from app.models.plan import Plan
@@ -147,6 +149,11 @@ VENTANA_ACTIVACION = timedelta(hours=24)
 # (1 h): el candidato lee el correo cuando puede, así que una semana es el plazo
 # razonable. Si vence sin usarse, la próxima corrida del envío le genera otro.
 VIGENCIA_TOKEN_MIGRACION = timedelta(days=7)
+
+# 404 genérico del link de activación. Es el MISMO texto que usa `validar-token`
+# (arriba): ni la pantalla ni el alumno pueden deducir si el token no existía, ya se
+# había usado o había vencido.
+DETALLE_TOKEN_INVALIDO = "El link de activación es inválido o expiró."
 
 
 def _etapa(alumno, plan_nombre):
@@ -529,6 +536,209 @@ def validar_token_activacion(
 
     return {"nombre": candidato.nombre, "correo": candidato.correo}
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ACTIVACIÓN DE LA CUENTA (Fase 2: la pantalla pública `/migracion/activar`)
+#
+#  El alumno llega desde el correo con `?token=...`; la pantalla valida el link con
+#  `GET /activacion/validar-token` (arriba) y recién al enviar el formulario llama a
+#  este POST. Es el ÚNICO endpoint de este router que ESCRIBE datos del alumno: crea
+#  el `Usuario` real del padrón en la MISMA transacción en que consume el token.
+#
+#  TOKEN: mismo hash sha256, misma vigencia y mismo uso único que el reset de
+#  contraseña. Cualquier token inexistente/vencido/usado responde el MISMO 404
+#  genérico (no se revela cuál condición falló).
+#
+#  ESTADO DEL PADRÓN: al completarse, `candidatos_boxmagic.estado_boxmagic` pasa a
+#  'Completado'. Ese valor no viene del Excel (ver `ESTADO_BOXMAGIC_COMPLETADO`) y
+#  tiene dos efectos buscados: el panel deja de contarlo entre los 'Activo' y el envío
+#  masivo —que filtra `estado_boxmagic == 'Activo'`— no le manda un SEGUNDO correo
+#  ahora que ya tiene cuenta (el guard de token vigente sólo cubre mientras el token
+#  está sin usar). La etapa del embudo NO depende de esa columna: se deduce de la
+#  cuenta real (`acepta_tyc_en`/`acepta_salud_en`), así que queda en
+#  'registro_completo' sola.
+#
+#  ROL Y DATOS: nace `alumno`, activo y SIN contraseña temporal (la elige el alumno
+#  acá, así que `cambiar_password_al_login` queda en False). `rut`, `fecha_nacimiento`,
+#  `estatura` y `peso` son OPCIONALES: el padrón no copia los datos sensibles del
+#  Excel y el alumno los completa por su cuenta (migración 091: `usuarios.rut` deja de
+#  ser NOT NULL para que el campo vacío sea el dato real, no un RUT inventado).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class CompletarActivacion(BaseModel):
+    """Body del alta desde el link de activación (`POST /activacion/completar`).
+
+    Las validaciones que pueden responder con el mensaje "pegado" al campo viven acá
+    (Pydantic -> 422): contraseña corta, contraseñas distintas y consentimientos sin
+    marcar. El 404 del token y el 409 del correo duplicado se resuelven en el endpoint
+    porque necesitan la base de datos.
+    """
+
+    token: str = Field(..., min_length=1, max_length=200,
+                       description="Token del link de activación")
+    # 72 bytes es el límite real de bcrypt: más allá se truncaría en silencio.
+    password: str = Field(..., min_length=8, max_length=72)
+    password_confirm: str = Field(..., min_length=8, max_length=72)
+    rut: Optional[str] = Field(
+        None, max_length=12,
+        description="RUT chileno en formato libre (opcional)")
+    fecha_nacimiento: Optional[date] = None
+    estatura: Optional[float] = Field(
+        None, gt=0, le=300, description="Estatura en cm (opcional)")
+    peso: Optional[float] = Field(
+        None, gt=0, le=400, description="Peso en kg (opcional)")
+    acepta_tyc: bool
+    acepta_salud: bool
+
+    @field_validator("rut")
+    @classmethod
+    def _rut_normalizado(cls, valor):
+        """Mismo trato que el alta pública: recortado y en MAYÚSCULAS; vacío = None."""
+        limpio = str(valor or "").strip().upper()
+        return limpio or None
+
+    @field_validator("fecha_nacimiento")
+    @classmethod
+    def _fecha_no_futura(cls, valor):
+        if valor is not None and valor > date.today():
+            raise ValueError("La fecha de nacimiento no puede ser futura")
+        return valor
+
+    @model_validator(mode="after")
+    def _consentimientos_y_passwords(self):
+        """Reglas que cruzan campos: se validan juntas para dar UN mensaje claro."""
+        if self.password != self.password_confirm:
+            raise ValueError("Las contraseñas no coinciden.")
+        if not self.acepta_tyc:
+            raise ValueError("Debes aceptar los Términos y Condiciones.")
+        if not self.acepta_salud:
+            raise ValueError("Debes aceptar la declaración de salud.")
+        return self
+
+
+
+@router.post("/activacion/completar")
+def completar_activacion(
+    datos: CompletarActivacion,
+    db: Session = Depends(get_db),
+):
+    """Crea la cuenta real del alumno y consume el token (endpoint PÚBLICO).
+
+    Todo ocurre en UNA transacción: usuario + `tokens_migracion_boxmagic.used_at` +
+    `candidatos_boxmagic.estado_boxmagic`. Si algo falla después del `flush`, el
+    `rollback()` deja el padrón y el token exactamente como estaban, así que el link
+    sigue sirviendo para reintentar.
+    """
+    ahora = datetime.now(timezone.utc)
+    token_hash = hashlib.sha256(datos.token.encode("utf-8")).hexdigest()
+    fila = (
+        db.query(TokenMigracionBoxmagic)
+        .filter(TokenMigracionBoxmagic.token_hash == token_hash)
+        .first()
+    )
+    # Inexistente, vencido o ya usado: el MISMO 404 que `validar-token` (no se revela
+    # cuál de las tres condiciones falló).
+    if (fila is None
+            or fila.used_at is not None
+            or _como_utc(fila.expires_at) <= ahora):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=DETALLE_TOKEN_INVALIDO,
+        )
+
+    candidato = (
+        db.query(CandidatoBoxmagic)
+        .filter(CandidatoBoxmagic.id == fila.candidato_id)
+        .first()
+    )
+    # Token huérfano (padrón borrado) o candidato sin correo: no hay a quién crearle
+    # la cuenta. Mismo error genérico, sin filtrar qué pasó.
+    correo = normalizar_correo(candidato.correo) if candidato is not None else ""
+    if not correo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=DETALLE_TOKEN_INVALIDO,
+        )
+
+    # El correo es la identidad del padrón: si ya tiene cuenta en ESTE box, el link es
+    # un duplicado (el alumno se registró por otra vía) y NO se crea una segunda.
+    ya_existe = (
+        db.query(Usuario)
+        .filter(
+            Usuario.tenant_id == candidato.tenant_id,
+            func.lower(func.trim(Usuario.correo)) == correo,
+        )
+        .first()
+    )
+    if ya_existe is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ya existe una cuenta con este correo.",
+        )
+
+    usuario = Usuario(
+        tenant_id=candidato.tenant_id,
+        rut=datos.rut,
+        nombre=candidato.nombre.strip(),
+        correo=correo,
+        password_hash=get_password_hash(datos.password),
+        rol=RolUsuario.alumno,
+        activo=True,
+        estado="activo",
+        # El alumno ya eligió su contraseña: no hay temporal que cambiar al entrar.
+        cambiar_password_al_login=False,
+        peso_kg=datos.peso,
+        estatura_cm=(round(datos.estatura)
+                     if datos.estatura is not None else None),
+        fecha_nacimiento=datos.fecha_nacimiento,
+        acepta_tyc_en=ahora,
+        acepta_tyc_version="1.0",
+        acepta_salud_en=ahora,
+        acepta_salud_version="1.0",
+    )
+
+    try:
+        db.add(usuario)
+        db.flush()
+        # Uso único del link y cierre del padrón: los tres cambios viajan juntos.
+        fila.used_at = ahora
+        candidato.estado_boxmagic = ESTADO_BOXMAGIC_COMPLETADO
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        detalle = str(getattr(e, "orig", e)).lower()
+        if "not-null" in detalle or "null value" in detalle:
+            # Esquema viejo (falta la migración 091, `usuarios.rut` nullable): NO es
+            # culpa de los datos del alumno, así que no se disfraza de 409.
+            logger.error(
+                "[migracion_activacion] alta rechazada por un NOT NULL: "
+                "¿falta `alembic upgrade head`? %s", detalle)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="No pudimos activar tu cuenta. Contacta al box.",
+            ) from e
+        if "correo" in detalle:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Ya existe una cuenta con este correo.",
+            ) from e
+        if "rut" in detalle:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Ya existe una cuenta con ese RUT en el box.",
+            ) from e
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No se pudo crear la cuenta: revisa los datos.",
+        ) from e
+    except Exception:
+        # Cualquier otro fallo deshace el alta completa: no queda usuario sin token
+        # consumido ni candidato marcado 'Completado' sin cuenta.
+        db.rollback()
+        raise
+
+    return {"mensaje": "Cuenta activada. Ya puedes iniciar sesión."}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

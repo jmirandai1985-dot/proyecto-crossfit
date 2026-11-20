@@ -12,6 +12,10 @@ import { DASHBOARD_MAP, ROLES_ADMIN, ROLES_COACH, ROLES_ALUMNO } from './config/
 import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
+// Activación de la cuenta migrada desde BoxMagic: pantalla PÚBLICA del link del
+// correo (`/migracion/activar?token=...`). Eager como las demás de entrada: es la
+// primera pantalla para quien todavía no tiene cuenta en el SaaS.
+import MigracionActivar from './pages/public/MigracionActivar';
 
 // ─── Pages por rol (LAZY) ─────────────────────────────────────────────────
 // Cada pantalla se importa dinámicamente => chunk propio, cargado SOLO al
@@ -158,6 +162,11 @@ function App() {
 
           {/* ── /reset-password → nueva contraseña con token de un solo uso ── */}
           <Route path="/reset-password" element={<ResetPassword />} />
+
+          {/* ── /migracion/activar?token=... → activación de la cuenta migrada ──
+              PÚBLICA (el alumno todavía no tiene cuenta): valida el token del correo
+              y crea el usuario del padrón de BoxMagic. */}
+          <Route path="/migracion/activar" element={<MigracionActivar />} />
 
           {/* ── Rutas de Administrador ──────────────────────────── */}
           <Route path="/admin/*" element={<ProtectedRoute roles={ROLES_ADMIN} />}>

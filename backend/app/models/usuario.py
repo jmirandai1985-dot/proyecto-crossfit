@@ -27,7 +27,11 @@ class Usuario(Base):
     id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
         "tenants.id", ondelete="CASCADE"), nullable=False)
-    rut = Column(String(12), nullable=False)
+    rut = Column(String(12), nullable=True)
+    # nullable desde la migración 091: el alta por el link de activación de BoxMagic no
+    # exige RUT (el padrón no copia los datos del Excel y el alumno lo completa
+    # después). El UNIQUE `uq_rut_por_tenant` se mantiene: en Postgres cada NULL es
+    # distinto, así que varios alumnos sin RUT conviven en el mismo box sin chocar.
     nombre = Column(String(150), nullable=False)
     telefono = Column(String(20), nullable=True)
     correo = Column(String(150), nullable=False)

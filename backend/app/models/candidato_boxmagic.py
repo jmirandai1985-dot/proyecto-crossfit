@@ -29,6 +29,13 @@ ESTADOS_BOXMAGIC: Final[tuple] = (
     ESTADO_BOXMAGIC_PRUEBA,
 )
 
+# Estado de SALIDA del padrón: lo escribe la activación pública
+# (`POST /api/v1/migracion-boxmagic/activacion/completar`) cuando el alumno ya creó
+# su cuenta real. NO viene del Excel, por eso queda FUERA de `ESTADOS_BOXMAGIC` (esa
+# tupla es el vocabulario del archivo que lee el importador): así `estado_canonico()`
+# lo devuelve tal cual y el importador no lo confunde con un estado de BoxMagic.
+ESTADO_BOXMAGIC_COMPLETADO: Final[str] = "Completado"
+
 # ── Grupos del padrón (lo que separa los dos paneles) ───────────────────────
 #   'activacion'   -> hay que invitarlo / activarlo (NO está Inactivo)
 #   'recuperacion' -> dejó de venir (está Inactivo): hay que traerlo de vuelta
