@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
-import { Pencil } from 'lucide-react';
+import { ChevronDown, ChevronUp, Mail, Pencil, Send } from 'lucide-react';
 import Layout from '../../components/Layout';
 import { KpiCard } from '../../components/kpis/KpiCard';
 import EditarCandidatoBoxmagic from '../../components/EditarCandidatoBoxmagic';
-import { useMigracionActivacion } from '../../hooks/queries';
 import {
-    BLOQUE_ALUMNOS, ETAPAS_ACTIVACION, activadosHoy, badgeEtapa, conteoPorEtapa, filtrarAlumnos,
+    useEnviarActivacionMasiva, useGuardarCorreoCandidato, useMigracionActivacion,
+} from '../../hooks/queries';
+import {
+    BLOQUE_ALUMNOS, ETAPAS_ACTIVACION, activadosHoy, badgeEtapa,
+    candidatosParaMigrar, candidatosSinCorreo, conteoPorEtapa, filtrarAlumnos,
     hayFiltro, paginaAlumnos, pendientesPorActivar, porcentajeComprado, totalAlumnos,
 } from '../../utils/migracionActivacion';
 
@@ -32,6 +35,10 @@ import {
  */
 const MigracionActivacion = () => {
     const { data, isPending, isFetching, isError, error, refetch } = useMigracionActivacion();
+    // Envío masivo del correo de activación (sólo Activos) y correo puntual de una
+    // fila que llegó sin email.
+    const enviarActivacion = useEnviarActivacionMasiva();
+    const guardarCorreo = useGuardarCorreoCandidato();
     // Filtros de la tabla. Se COMBINAN entre sí (etapa + "se activaron hoy") y, encima de
     // los dos, el buscador de texto.
     const [etapaFiltro, setEtapaFiltro] = useState(null);
@@ -42,6 +49,16 @@ const MigracionActivacion = () => {
     const [busqueda, setBusqueda] = useState('');
     // Candidato abierto en el modal de corrección del padrón (nombre/correo).
     const [alumnoEditar, setAlumnoEditar] = useState(null);
+    // ── Envío masivo del correo de activación ──
+    // "Faltan correos" arranca ABIERTO: es lo primero que el admin tiene que ver
+    // antes de apretar el botón. El borrador del input se guarda por `candidato_id`
+    // y no se pierde si la consulta se refresca mientras escribe.
+    const [faltanAbiertas, setFaltanAbiertas] = useState(true);
+    const [correosBorrador, setCorreosBorrador] = useState({});
+    const [erroresCorreo, setErroresCorreo] = useState({});
+    const [guardandoCorreoId, setGuardandoCorreoId] = useState(null);
+    const [resultadoEnvio, setResultadoEnvio] = useState(null);
+    const [errorEnvio, setErrorEnvio] = useState('');
     // Cuántos resultados se pintan. Arranca en el primer bloque y "Cargar 25 más" lo
     // agranda (AGREGA filas, no reemplaza las que ya se están mirando). El reset a 25 NO
     // va en un efecto (dispararía un render de más): el estado guarda, junto al límite, la
@@ -54,6 +71,15 @@ const MigracionActivacion = () => {
 
     const alumnos = data?.alumnos || [];
     const resumen = data?.resumen || {};
+    // Envío masivo: el backend sólo manda a los 'Activo'. El panel cuenta con las
+    // MISMAS reglas (`utils/migracionActivacion.js`) para que el número del botón y
+    // la advertencia de "faltan correos" no mientan.
+    const activosConCorreo = candidatosParaMigrar(alumnos);
+    const activosSinCorreo = candidatosSinCorreo(alumnos);
+    // El botón cuenta a TODOS los Activos (con y sin correo): el backend omite a los
+    // que no tienen email y lo informa en `omitidos`. Los dos números cuadran con
+    // `total` de la respuesta.
+    const activosTotales = activosConCorreo.length + activosSinCorreo.length;
     // Derivaciones baratas (el backend ya mandó el resumen hecho y son cientos de filas):
     // se calculan en el render, sin `useMemo` — memoizar objetos que se arman con `||`
     // sólo agrega una dependencia que cambia en cada render.
@@ -78,6 +104,61 @@ const MigracionActivacion = () => {
     const quitarFiltros = () => { setEtapaFiltro(null); setSoloHoy(false); setBusqueda(''); };
     const cargarMas = () => setPaginacion({ clave: claveFiltros, limite: limite + BLOQUE_ALUMNOS });
 
+    // ── "Faltan correos": guardar el email de UNA fila ──
+    // Misma validación liviana que el modal de edición del padrón (el backend
+    // revalida con EmailStr y responde 422/409 si hace falta).
+    const correoValido = (valor) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(valor);
+
+    const guardarCorreoFila = async (candidatoId) => {
+        const valor = String(correosBorrador[candidatoId] ?? '').trim();
+        if (!correoValido(valor)) {
+            setErroresCorreo((previo) => ({
+                ...previo,
+                [candidatoId]: 'Ingresa un correo válido (ej: nombre@dominio.cl).',
+            }));
+            return;
+        }
+        setGuardandoCorreoId(candidatoId);
+        setErroresCorreo((previo) => {
+            const copia = { ...previo };
+            delete copia[candidatoId];
+            return copia;
+        });
+        try {
+            await guardarCorreo.mutateAsync({ candidatoId, correo: valor });
+            // Al guardar OK la fila deja de estar "sin correo": se limpia el borrador
+            // y la caché de la consulta ya trae el email nuevo.
+            setCorreosBorrador((previo) => {
+                const copia = { ...previo };
+                delete copia[candidatoId];
+                return copia;
+            });
+        } catch (err) {
+            const detalle = err?.response?.data?.detail;
+            const texto = Array.isArray(detalle) ? detalle[0]?.msg : detalle;
+            setErroresCorreo((previo) => ({
+                ...previo,
+                [candidatoId]: texto || 'No se pudo guardar el correo.',
+            }));
+        } finally {
+            setGuardandoCorreoId(null);
+        }
+    };
+
+    // ── "Comenzar migración": dispara el envío masivo ──
+    const comenzarMigracion = async () => {
+        setErrorEnvio('');
+        setResultadoEnvio(null);
+        try {
+            const dataEnvio = await enviarActivacion.mutateAsync();
+            setResultadoEnvio(dataEnvio);
+        } catch (err) {
+            const detalle = err?.response?.data?.detail;
+            const texto = Array.isArray(detalle) ? detalle[0]?.msg : detalle;
+            setErrorEnvio(texto || 'No se pudo comenzar la migración.');
+        }
+    };
+
     const mensajeError = error?.response?.data?.detail || 'No se pudo cargar el panel de activación.';
 
     if (isPending) {
@@ -100,7 +181,7 @@ const MigracionActivacion = () => {
                         </h1>
                         <p className="text-zinc-400 text-sm mt-1">
                             En qué etapa del alta quedó cada alumno del padrón de BoxMagic.
-                            Sólo lectura: acá no se activa a nadie.
+                            Desde acá se envía el correo de activación a los Activos.
                         </p>
                     </div>
                     <button
@@ -129,6 +210,159 @@ const MigracionActivacion = () => {
                         </button>
                     </div>
                 )}
+
+                {/* ── Envío masivo del correo de activación (sólo Activos) ──
+                    El backend filtra grupo='activacion' + estado 'Activo' y omite a
+                    los que ya tienen un token vigente. Los otros estados del padrón
+                    (Nuevo/Prueba/Congelado) no tienen botón: son otra sesión. */}
+                <section
+                    data-testid="envio-migracion-activos"
+                    className="mb-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-4 sm:p-5"
+                >
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex items-start gap-3">
+                            <Mail className="mt-0.5 h-5 w-5 shrink-0 text-orange-400" aria-hidden="true" />
+                            <div>
+                                <h2 className="text-base font-bold text-zinc-100">
+                                    Correo de activación — Activos
+                                </h2>
+                                <p className="text-[13px] text-zinc-400">
+                                    Invita a los candidatos Activos que ya tienen correo en el padrón.
+                                    Los que tengan un link vigente no reciben otro.
+                                </p>
+                            </div>
+                        </div>
+                        <span className="shrink-0 self-start rounded-full border border-orange-500/40 bg-orange-500/10 px-3 py-1 text-xs font-semibold text-orange-300">
+                            {activosConCorreo.length} con correo
+                        </span>
+                    </div>
+
+                    {/* ── Faltan correos: filas del padrón Activo sin email ──
+                        Sin correo el envío no puede invitarlos. Se completan acá, una
+                        por una, con el mismo PATCH que valida formato + UNIQUE. */}
+                    {activosSinCorreo.length > 0 && (
+                        <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/5">
+                            <button
+                                type="button"
+                                onClick={() => setFaltanAbiertas((previo) => !previo)}
+                                aria-expanded={faltanAbiertas}
+                                data-testid="toggle-faltan-correos"
+                                className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-[13px] font-semibold text-amber-200 transition hover:text-amber-100"
+                            >
+                                <span className="inline-flex items-center gap-2">
+                                    <Mail className="h-4 w-4" aria-hidden="true" />
+                                    Faltan correos ({activosSinCorreo.length})
+                                </span>
+                                {faltanAbiertas
+                                    ? <ChevronUp className="h-4 w-4" aria-hidden="true" />
+                                    : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
+                            </button>
+                            {faltanAbiertas && (
+                                <ul
+                                    className="max-h-72 space-y-2 overflow-y-auto px-3 pb-3"
+                                    data-testid="faltan-correos-lista"
+                                >
+                                    {activosSinCorreo.map((alumno) => {
+                                        const candidatoId = alumno.candidato_id ?? alumno.id;
+                                        const guardando = guardandoCorreoId === candidatoId;
+                                        const errorFila = erroresCorreo[candidatoId];
+                                        return (
+                                            <li
+                                                key={candidatoId}
+                                                className="rounded-lg border border-zinc-800 bg-zinc-900/80 p-2.5"
+                                            >
+                                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                                    <p className="min-w-0 flex-1 break-words text-[13px] font-semibold text-zinc-200">
+                                                        {alumno.nombre}
+                                                    </p>
+                                                    <input
+                                                        type="email"
+                                                        value={correosBorrador[candidatoId] ?? ''}
+                                                        onChange={(e) => setCorreosBorrador((previo) => ({
+                                                            ...previo,
+                                                            [candidatoId]: e.target.value,
+                                                        }))}
+                                                        placeholder="correo@dominio.cl"
+                                                        aria-label={`Correo de ${alumno.nombre}`}
+                                                        data-testid={`correo-candidato-${candidatoId}`}
+                                                        disabled={guardando}
+                                                        className="w-full rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-60 sm:w-64"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => guardarCorreoFila(candidatoId)}
+                                                        disabled={guardando}
+                                                        data-testid={`guardar-correo-${candidatoId}`}
+                                                        className="shrink-0 rounded-lg bg-orange-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-orange-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                                                    >
+                                                        {guardando ? 'Guardando...' : 'Guardar'}
+                                                    </button>
+                                                </div>
+                                                {errorFila && (
+                                                    <p
+                                                        className="mt-1.5 text-[11.5px] text-red-300"
+                                                        data-testid={`error-correo-${candidatoId}`}
+                                                    >
+                                                        {errorFila}
+                                                    </p>
+                                                )}
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            )}
+                        </div>
+                    )}
+
+                    {activosSinCorreo.length > 0 && (
+                        <p className="mt-3 text-[12px] text-amber-300" data-testid="aviso-faltan-correos">
+                            Aún hay {activosSinCorreo.length} candidatos sin correo — igual puedes
+                            comenzar, se omitirán.
+                        </p>
+                    )}
+
+                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+                        <button
+                            type="button"
+                            onClick={comenzarMigracion}
+                            disabled={enviarActivacion.isPending || activosTotales === 0}
+                            aria-busy={enviarActivacion.isPending}
+                            data-testid="comenzar-migracion"
+                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-orange-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            <Send className="h-4 w-4" aria-hidden="true" />
+                            {enviarActivacion.isPending
+                                ? 'Enviando...'
+                                : `Comenzar migración (${activosTotales})`}
+                        </button>
+                        {activosTotales === 0 && (
+                            <p className="text-[12px] text-zinc-500">
+                                No hay candidatos Activos para invitar.
+                            </p>
+                        )}
+                    </div>
+
+                    {errorEnvio && (
+                        <p
+                            className="mt-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12.5px] text-red-200"
+                            data-testid="error-envio-migracion"
+                        >
+                            {errorEnvio}
+                        </p>
+                    )}
+
+                    {resultadoEnvio && (
+                        <div
+                            className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[12.5px] text-emerald-200"
+                            data-testid="resultado-envio-migracion"
+                        >
+                            Migración ejecutada: <b>{resultadoEnvio.enviados}</b> enviados,{' '}
+                            <b>{resultadoEnvio.fallidos}</b> fallidos,{' '}
+                            <b>{resultadoEnvio.omitidos}</b> omitidos de{' '}
+                            {resultadoEnvio.total}.
+                        </div>
+                    )}
+                </section>
 
                 {/* ── Pendientes por activar: el número que importa + avance del embudo ── */}
                 <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 mb-4">

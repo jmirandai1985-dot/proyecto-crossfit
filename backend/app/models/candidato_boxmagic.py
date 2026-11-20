@@ -108,6 +108,12 @@ class CandidatoBoxmagic(Base):
     grupo = Column(String(20), nullable=False)
     cargado_en = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())
+    # ── Migración 089: cuándo se le mandó el correo de activación ─────────────
+    # Se escribe recién cuando el envío masivo confirma el correo (migración 089).
+    # Vive acá y no en `usuarios` porque el candidato todavía no tiene cuenta real:
+    # `Usuario.correo_migracion_enviado_en` (migración 077) se llena el día que el
+    # alumno crea su cuenta, y esta columna es la huella del envío ANTES de ese paso.
+    correo_migracion_enviado_en = Column(TIMESTAMP(timezone=True), nullable=True)
 
     __table_args__ = (
         # El UPSERT del importador se apoya en esta clave: un correo no se repite dos

@@ -36,6 +36,7 @@ from app.models.asistencia import Asistencia
 from app.models.hito_alumno import HitoAlumno
 from app.models.auditoria import Auditoria
 from app.models.password_reset_token import PasswordResetToken
+from app.models.token_migracion_boxmagic import TokenMigracionBoxmagic
 from app.models.beneficio import Beneficio, EstadoBeneficio, TipoBeneficio
 from app.models.aviso_marketing import AvisoMarketing
 from app.models.referidos import (
@@ -59,7 +60,8 @@ __all__ = ["Tenant", "Usuario", "RolUsuario",
            "CandidatoBoxmagic",
            "AsistenciaArchivo", "ReservaArchivo", "RetencionBloqueo",
            "RetencionAlumno", "SolicitudPlan", "Asistencia", "HitoAlumno",
-           "Auditoria", "PasswordResetToken", "Beneficio", "EstadoBeneficio",
+           "Auditoria", "PasswordResetToken", "TokenMigracionBoxmagic",
+           "Beneficio", "EstadoBeneficio",
            "TipoBeneficio", "AvisoMarketing",
            "Invitacion", "OrigenInvitacion", "EstadoInvitacion",
            "CodigoReferido", "ReferidoAplicado", "EstadoReferido",

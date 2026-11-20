@@ -171,3 +171,30 @@ export function paginaAlumnos(alumnos, limite = BLOQUE_ALUMNOS) {
         hayMas: lista.length > mostrados.length,
     };
 }
+
+// ── Envío masivo del correo de activación (sólo candidatos 'Activo') ──────────
+// El backend filtra `grupo='activacion' AND estado_boxmagic='Activo'`; el panel
+// usa estas MISMAS reglas para contar a quién le va a llegar y a quién le falta
+// el correo. Los otros estados del padrón (Nuevo/Prueba/Congelado) no entran.
+export const ESTADO_BOXMAGIC_ACTIVO = 'Activo';
+
+export function esCandidatoActivo(alumno) {
+    return String((alumno && alumno.estado_boxmagic) ?? '').trim().toLowerCase()
+        === ESTADO_BOXMAGIC_ACTIVO.toLowerCase();
+}
+
+// Activos que SÍ pueden recibir el correo (tienen email en el padrón). Es el
+// número del botón "Comenzar migración (N)".
+export function candidatosParaMigrar(alumnos) {
+    const lista = Array.isArray(alumnos) ? alumnos : [];
+    return lista.filter((alumno) => esCandidatoActivo(alumno)
+        && String((alumno && alumno.correo) ?? '').trim() !== '');
+}
+
+// Activos SIN correo: van a la sección "Faltan correos (N)". `null` y '' (o sólo
+// espacios) cuentan igual: sin email el envío no puede invitarlos.
+export function candidatosSinCorreo(alumnos) {
+    const lista = Array.isArray(alumnos) ? alumnos : [];
+    return lista.filter((alumno) => esCandidatoActivo(alumno)
+        && String((alumno && alumno.correo) ?? '').trim() === '');
+}

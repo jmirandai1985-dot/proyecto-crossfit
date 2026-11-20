@@ -2782,6 +2782,54 @@ export function useEditarCandidatoBoxmagic() {
     });
 }
 
+// Completa el correo de UN candidato que llegó sin email (sección "Faltan
+// correos" del panel de Activación). Es un PATCH puntual: no toca el nombre ni la
+// cuenta real, sólo el correo del padrón. El backend valida el formato y el UNIQUE
+// por box (409 si ese correo ya es de otro candidato).
+//
+// `onSuccess` parchea la fila en la caché de los dos paneles al instante y después
+// invalida la familia: al quedar con correo, la fila desaparece de "Faltan correos"
+// sin recargar la página.
+export function useGuardarCorreoCandidato() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ candidatoId, correo }) => api.patch(
+            `/api/v1/migracion-boxmagic/candidato/${candidatoId}/correo`,
+            { correo },
+        ).then((r) => r.data),
+        onSuccess: (data) => {
+            [claves.migracionActivacion, claves.migracionRecuperacion].forEach((queryKey) => {
+                qc.setQueriesData({ queryKey }, (previo) => {
+                    if (!previo || !Array.isArray(previo.alumnos)) return previo;
+                    return {
+                        ...previo,
+                        alumnos: previo.alumnos.map((alumno) => (
+                            alumno.candidato_id === data.candidato_id
+                                ? { ...alumno, correo: data.correo }
+                                : alumno
+                        )),
+                    };
+                });
+            });
+            qc.invalidateQueries({ queryKey: ['migracion-boxmagic'] });
+        },
+    });
+}
+
+// Envío masivo del correo de activación a los candidatos 'Activo' del padrón.
+// Sin argumentos: el backend decide la lista (tenant del token + estado Activo) y
+// devuelve `{enviados, fallidos, omitidos, total}`. No manda nada real si el
+// entorno está en `EMAIL_MODO=noop`.
+export function useEnviarActivacionMasiva() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: () => api.post(
+            '/api/v1/migracion-boxmagic/activacion/enviar',
+        ).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['migracion-boxmagic'] }),
+    });
+}
+
 // Configurar la oferta de UN candidato inactivo del padrón y mandarle el correo dedicado.
 //
 // Operan por `candidato_id` (migración 080), no por `usuario_id`: los desertores de

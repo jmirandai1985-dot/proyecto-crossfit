@@ -35,6 +35,12 @@ class ConfiguracionNegocio(Base):
     # NULL/vacío = el correo no promete un canal que el box no atiende.
     whatsapp = Column(String(30), nullable=True)
 
+    # ── Migración 089: primera corrida exitosa del envío masivo de activación ──
+    # Hito del BOX (una fila por tenant), no de un candidato: es la fecha que usa
+    # BI/ML para contar los 6 meses de stand-by. Se escribe UNA sola vez (si ya
+    # tiene fecha no se pisa) y sólo cuando el envío terminó con enviados > 0.
+    migracion_completada_en = Column(TIMESTAMP(timezone=True), nullable=True)
+
     # ── Trazabilidad del último cambio (I1, migración 046) ───────────────────
     # Con DOS admins por box, "quién cambió la cuenta bancaria y cuándo" no puede vivir
     # sólo en `auditoria` (el admin que abre esta pantalla no lee la auditoría): el que

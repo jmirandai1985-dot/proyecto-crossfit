@@ -1695,3 +1695,58 @@ def enviar_email_promocion_recuperacion(alumno: dict, tipo_beneficio: str,
         tipo="migracion_promocion", tenant_id=(alumno or {}).get("tenant_id"))
     logger.info(f"[migracion_promocion] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok, notificacion_id
+
+
+def render_email_migracion_boxmagic(nombre: str, link: str) -> tuple:
+    """Renderiza (asunto, html) del correo de ACTIVACIÓN de un candidato BoxMagic.
+
+    Fuente ÚNICA del copy: la usan el envío real (`enviar_email_migracion_boxmagic`)
+    y los tests, así el alumno recibe exactamente el texto aprobado. Pasa por
+    `_template()` como todos los correos del sistema (encabezado de marca, botón
+    naranja y pie con el contacto del box), no arma su propio HTML.
+
+    El link es de un solo uso y lo genera el endpoint de envío masivo
+    (`/migracion/activar?token=...`); acá sólo se incrusta en el botón.
+    """
+    asunto = ("Tu cuenta de Urban Training Box ahora es digital - "
+              "activa tu acceso aqui")
+    titulo = "Tu cuenta ahora es digital"
+    saludo = f"Hola {nombre},"
+    # Texto aprobado por el box: se copia TAL CUAL (sin tildes ni cambios de
+    # redacción). Va como un solo párrafo, igual que el resto de los correos.
+    cuerpo = (
+        "Urban Training Box esta pasando a un nuevo sistema de gestion - y viene "
+        "con hartas cosas nuevas: Tu Performance Hub (todas tus marcas y metricas "
+        "de rendimiento en un solo lugar), Tu evolucion (ve tu progreso a traves "
+        "del tiempo, clase a clase), El Bazar (pide tus productos y accesorios del "
+        "box directo desde la app), y tus clases/plan/pagos todo desde un solo "
+        "lugar. Si todavia tienes clases o creditos pendientes en BoxMagic se "
+        "mantienen sin cambios hasta que se agoten. Despues de activar tu cuenta y "
+        "entrar por primera vez te va a aparecer un aviso para instalar la app en "
+        "la pantalla principal de tu telefono.")
+    return asunto, _template(titulo, saludo, cuerpo, "Activar mi cuenta", link)
+
+
+def enviar_email_migracion_boxmagic(candidato: dict, link: str) -> bool:
+    """Manda el correo de activación a UN candidato del padrón (tipo propio).
+
+    El destinatario todavía NO es un `Usuario` del SaaS: se manda con `alumno_id=None`
+    y los datos del padrón en `destinatario_*`, para que el envío aparezca igual en
+    /admin/notificaciones. `destinatario_rol='lead'` deja claro que no es un alumno
+    con cuenta (el comentario de `notificaciones_enviadas` reserva NULL para alumno).
+
+    Sin correo no se intenta nada: devuelve `False` y el envío masivo cuenta el
+    candidato como omitido/fallido según corresponda.
+    """
+    nombre = (candidato or {}).get("nombre") or "Atleta"
+    correo = (candidato or {}).get("correo") or ""
+    if not correo:
+        return False
+    asunto, html = render_email_migracion_boxmagic(nombre, link)
+    ok = _enviar(
+        correo, asunto, html, None, tipo="migracion_activacion",
+        destinatario_nombre=nombre, destinatario_rol="lead",
+        tenant_id=(candidato or {}).get("tenant_id"))
+    logger.info(
+        f"[migracion_activacion] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    return ok

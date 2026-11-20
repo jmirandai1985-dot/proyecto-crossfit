@@ -11,8 +11,9 @@ import { readFileSync } from 'node:fs';
 
 import {
     BLOQUE_ALUMNOS, ETAPAS_ACTIVACION, ETAPA_DESCONOCIDA, ETAPA_PLAN_COMPRADO,
-    activadosHoy, badgeEtapa, coincideBusqueda, conteoPorEtapa, etapaDe, filtrarAlumnos,
-    hayFiltro, paginaAlumnos, pendientesPorActivar, porcentajeComprado, totalAlumnos,
+    activadosHoy, badgeEtapa, candidatosParaMigrar, candidatosSinCorreo,
+    coincideBusqueda, conteoPorEtapa, etapaDe, filtrarAlumnos, hayFiltro,
+    paginaAlumnos, pendientesPorActivar, porcentajeComprado, totalAlumnos,
 } from '../src/utils/migracionActivacion.js';
 
 let fallos = 0;
@@ -173,7 +174,27 @@ eq(paginaAlumnos(filtrarAlumnos(muchos, { busqueda: 'Alumno 1' }), 5).total,
     filtrarAlumnos(muchos, { busqueda: 'Alumno 1' }).length,
     'el bloque se calcula SOBRE lo filtrado (buscar primero, paginar después)');
 
-// ── 5. El componente: hook real y SIN emojis ────────────────────────────────
+// ── 4d. Envío masivo del correo de activación (sólo Activos) ────────────────
+// El backend filtra grupo='activacion' AND estado_boxmagic='Activo'. El panel usa
+// estas funciones para el número del botón y para "Faltan correos (N)".
+console.log('== 4d. Envío masivo: sólo Activos ==');
+const padronEstados = [
+    { id: 1, nombre: 'Activo con correo', correo: 'a@test.com', estado_boxmagic: 'Activo' },
+    { id: 2, nombre: 'Activo sin correo', correo: '   ', estado_boxmagic: 'Activo' },
+    { id: 3, nombre: 'Activo null', correo: null, estado_boxmagic: 'activo' },
+    { id: 4, nombre: 'Nuevo', correo: 'n@test.com', estado_boxmagic: 'Nuevo' },
+    { id: 5, nombre: 'Prueba', correo: '', estado_boxmagic: 'Prueba' },
+    { id: 6, nombre: 'Congelado', correo: 'c@test.com', estado_boxmagic: 'Congelado' },
+];
+eq(candidatosParaMigrar(padronEstados).map((a) => a.id).join(','), '1',
+    'el botón cuenta SÓLO los Activos con correo');
+eq(candidatosSinCorreo(padronEstados).map((a) => a.id).join(','), '2,3',
+    '"Faltan correos" son los Activos con correo vacío/null (sin importar mayúsculas)');
+eq(candidatosParaMigrar(null).length, 0, 'sin datos no rompe');
+eq(candidatosSinCorreo(undefined).length, 0, 'sin datos no rompe (faltan correos)');
+ok(!candidatosSinCorreo([{ estado_boxmagic: 'Nuevo', correo: '' }]).length,
+    'un Nuevo sin correo NO entra al envío de Activos');
+
 console.log('== 5. MigracionActivacion.jsx (fuente) ==');
 const PANTALLA = readFileSync(
     new URL('../src/pages/admin/MigracionActivacion.jsx', import.meta.url), 'utf8');
@@ -240,6 +261,27 @@ ok(MODAL.includes('modal-editar-candidato-nombre')
     'el modal precarga Nombre/Correo y tiene Guardar');
 ok(MODAL.includes('tieneCuenta') && MODAL.includes('disabled={guardando || tieneCuenta}'),
     'el correo se bloquea en el modal si el candidato ya tiene cuenta real');
+// Envío masivo (sólo Activos): "Faltan correos", botón y resultado del backend.
+ok(PANTALLA.includes('envio-migracion-activos'), 'el panel tiene la sección de envío a Activos');
+ok(PANTALLA.includes('Faltan correos (') && PANTALLA.includes('toggle-faltan-correos'),
+    'la sección "Faltan correos (N)" existe y es colapsable');
+ok(PANTALLA.includes('faltan-correos-lista') && PANTALLA.includes('correo-candidato-${candidatoId}')
+    && PANTALLA.includes('guardar-correo-${candidatoId}'),
+    'cada fila sin correo tiene input y botón Guardar');
+ok(PANTALLA.includes('avisos-faltan-correos') || PANTALLA.includes('aviso-faltan-correos'),
+    'hay aviso de que los sin correo se omitirán (no bloquea el botón)');
+ok(PANTALLA.includes('comenzar-migracion') && PANTALLA.includes('Comenzar migración ('),
+    'el botón "Comenzar migración (N)" existe');
+ok(PANTALLA.includes('disabled={enviarActivacion.isPending || activosTotales === 0}'),
+    'el botón sólo se desactiva mientras envía o si no hay Activos (no por faltar correos)');
+ok(PANTALLA.includes('resultado-envio-migracion') && PANTALLA.includes('resultadoEnvio.enviados'),
+    'el panel muestra enviados/fallidos/omitidos al terminar');
+ok(HOOKS.includes('useEnviarActivacionMasiva')
+    && HOOKS.includes('/api/v1/migracion-boxmagic/activacion/enviar'),
+    'el hook del envío pega al endpoint masivo');
+ok(HOOKS.includes('useGuardarCorreoCandidato')
+    && HOOKS.includes('/api/v1/migracion-boxmagic/candidato/${candidatoId}/correo'),
+    'el hook del correo puntual pega al PATCH de candidatos');
 // Regla fija del proyecto: nada de emojis (color, negrita y badges en su lugar).
 const EMOJI = /[\u{1F000}-\u{1FAFF}\u{2190}-\u{21FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/u;
 ok(!EMOJI.test(PANTALLA), 'la pantalla no tiene emojis ni flechas-icono');

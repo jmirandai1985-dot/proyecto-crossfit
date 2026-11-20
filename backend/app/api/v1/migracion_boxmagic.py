@@ -89,7 +89,9 @@ Excel real trae correos truncados/mal escritos). Valida el correo, respeta el UN
 `(tenant_id, correo)` y BLOQUEA el cambio de correo si el candidato ya tiene una cuenta
 real: ese vínculo es por correo y cambiarlo rompería el LEFT JOIN.
 """
+import hashlib
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -99,16 +101,20 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_admin
+from app.core.urls import url_frontend
 from app.db.database import get_db
 from app.models.candidato_boxmagic import (
-    GRUPO_ACTIVACION, GRUPO_RECUPERACION, CandidatoBoxmagic, normalizar_correo,
+    ESTADO_BOXMAGIC_ACTIVO, GRUPO_ACTIVACION, GRUPO_RECUPERACION,
+    CandidatoBoxmagic, normalizar_correo,
 )
+from app.models.configuracion import ConfiguracionNegocio
 from app.models.plan import Plan
 from app.models.promocion_recuperacion import (
     ESTADO_PROMO_ENVIADA, ESTADO_PROMO_RECUPERADO, ESTADO_PROMO_VENCIDA,
     TIPO_BENEFICIO_DIAS_GRATIS, TIPOS_BENEFICIO_PROMOCION, PromocionRecuperacion,
 )
 from app.models.suscripcion import Suscripcion
+from app.models.token_migracion_boxmagic import TokenMigracionBoxmagic
 from app.models.usuario import RolUsuario, Usuario
 from app.services import beneficios_service, email_service
 # "¿Hace cuánto no entrena?" = última asistencia REAL (`reservas.asistio`), la misma
@@ -136,6 +142,11 @@ ETAPAS = (
 
 # "Activado hoy": el hito de la etapa alcanzada cayó en las últimas 24 h.
 VENTANA_ACTIVACION = timedelta(hours=24)
+
+# Vigencia del link de activación del envío masivo. No es un reset de contraseña
+# (1 h): el candidato lee el correo cuando puede, así que una semana es el plazo
+# razonable. Si vence sin usarse, la próxima corrida del envío le genera otro.
+VIGENCIA_TOKEN_MIGRACION = timedelta(days=7)
 
 
 def _etapa(alumno, plan_nombre):
@@ -191,6 +202,70 @@ def _candidatos(db: Session, tenant_id: int, grupo: str) -> list:
         .order_by(CandidatoBoxmagic.nombre.asc(), CandidatoBoxmagic.id.asc())
         .all()
     )
+
+
+def _candidatos_activos(db: Session, tenant_id: int) -> list:
+    """Padrón que el envío masivo TIENE que invitar: grupo activación + estado Activo.
+
+    `Nuevo`, `Prueba` y `Congelado` quedan fuera a propósito: esta corrida es sólo
+    para los Activos de BoxMagic (los otros bloques son otra sesión). El filtro por
+    `estado_boxmagic` es el que manda, no la etapa del embudo: un Activo que ya se
+    registró igual entra acá y el guard de token vigente evita duplicarle el correo.
+    """
+    return (
+        db.query(CandidatoBoxmagic)
+        .filter(
+            CandidatoBoxmagic.tenant_id == tenant_id,
+            CandidatoBoxmagic.grupo == GRUPO_ACTIVACION,
+            CandidatoBoxmagic.estado_boxmagic == ESTADO_BOXMAGIC_ACTIVO,
+        )
+        .order_by(CandidatoBoxmagic.nombre.asc(), CandidatoBoxmagic.id.asc())
+        .all()
+    )
+
+
+def _ids_con_token_vigente(db: Session, ahora: datetime) -> set:
+    """IDs de candidatos que YA tienen un token sin usar y sin vencer.
+
+    Es el guard de idempotencia del envío masivo: si el admin aprieta el botón dos
+    veces, el candidato que ya tiene un link vigente no recibe un segundo correo.
+    Un token VENCIDO no cuenta (la próxima corrida le genera uno nuevo), y uno
+    marcado como usado tampoco.
+    """
+    filas = (
+        db.query(TokenMigracionBoxmagic.candidato_id)
+        .filter(
+            TokenMigracionBoxmagic.used_at.is_(None),
+            TokenMigracionBoxmagic.expires_at > ahora,
+        )
+        .all()
+    )
+    return {fila[0] for fila in filas}
+
+
+def _marcar_migracion_completada(db: Session, tenant_id: int, cuando: datetime):
+    """Guarda la PRIMERA corrida exitosa del envío masivo del box.
+
+    La fecha vive en `configuracion_negocio.migracion_completada_en` (una fila por
+    tenant) porque el hito es del BOX, no de un candidato: es la fecha que después
+    usa BI/ML para contar los 6 meses de stand-by. Si ya tiene fecha NO se pisa:
+    volver a correr el envío no reinicia el contador.
+    """
+    config = (
+        db.query(ConfiguracionNegocio)
+        .filter(ConfiguracionNegocio.tenant_id == tenant_id)
+        .first()
+    )
+    if config is None:
+        # Un box que nunca guardó datos bancarios no tiene fila: se crea vacía,
+        # igual que hace el resto de la configuración.
+        config = ConfiguracionNegocio(tenant_id=tenant_id)
+        db.add(config)
+    if config.migracion_completada_en is None:
+        config.migracion_completada_en = cuando
+        db.commit()
+    return config
+
 
 
 def _usuarios_por_correo(db: Session, tenant_id: int, correos: list) -> dict:
@@ -292,6 +367,7 @@ def get_activacion(
             "candidato_id": candidato.id,
             "nombre": candidato.nombre,
             "correo": candidato.correo,
+            "estado_boxmagic": candidato.estado_boxmagic,
             "etapa": etapa,
             "plan_comprado": plan_nombre,
             "activado_hoy": activado_hoy,
@@ -305,6 +381,153 @@ def get_activacion(
             "activados_hoy": total_activados_hoy,
         },
     }
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ENVÍO MASIVO DEL CORREO DE ACTIVACIÓN (sólo estado 'Activo')
+#
+#  Mismo patrón que `POST /fidelizacion/campana-email`: recorre la lista, manda un
+#  correo por candidato, espacia con `espaciar_envio()` y devuelve conteos. La
+#  diferencia es el token de un solo uso: cada candidato recibe un link ÚNICO
+#  (`/migracion/activar?token=...`) y en la base sólo queda su hash sha256.
+#
+#  IDEMPOTENCIA: un candidato con token sin usar y vigente NO vuelve a recibir
+#  correo (correr el endpoint dos veces no duplica envíos). Si el envío falla, el
+#  token recién creado se invalida para que la próxima corrida lo reintente.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.post("/activacion/enviar")
+def enviar_activacion_masiva(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Manda el correo de activación a los candidatos 'Activo' del padrón del box.
+
+    Devuelve `{enviados, fallidos, omitidos, total}`. `omitidos` son los que no
+    tienen correo en el padrón (el Excel trae filas sin email) y los que ya tienen
+    un token sin usar y vigente. `total` es el padrón Activo completo, así que
+    `enviados + fallidos + omitidos == total`.
+
+    La PRIMERA corrida con `enviados > 0` deja la fecha en
+    `configuracion_negocio.migracion_completada_en` (hito del box para los 6 meses
+    de stand-by de BI/ML). Si esa fecha ya existe, no se toca.
+    """
+    tenant_id = current_user["tenant_id"]
+    ahora = datetime.now(timezone.utc)
+
+    candidatos = _candidatos_activos(db, tenant_id)
+    con_token_vigente = _ids_con_token_vigente(db, ahora)
+
+    enviados = 0
+    fallidos = 0
+    omitidos = 0
+
+    for candidato in candidatos:
+        # Ya tiene un link vigente en su correo: no se le manda otro.
+        if candidato.id in con_token_vigente:
+            omitidos += 1
+            continue
+
+        correo = normalizar_correo(candidato.correo)
+        if not correo:
+            omitidos += 1
+            continue
+
+        token = secrets.token_urlsafe(32)
+        fila_token = TokenMigracionBoxmagic(
+            candidato_id=candidato.id,
+            token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+            expires_at=ahora + VIGENCIA_TOKEN_MIGRACION,
+        )
+        db.add(fila_token)
+        try:
+            db.commit()
+        except IntegrityError:
+            # Colisión de hash (prácticamente imposible): se omite y sigue la ráfaga.
+            db.rollback()
+            omitidos += 1
+            continue
+
+        link = url_frontend(f"/migracion/activar?token={token}")
+        try:
+            ok = email_service.enviar_email_migracion_boxmagic(
+                {"id": None, "nombre": candidato.nombre, "correo": correo,
+                 "tenant_id": tenant_id},
+                link)
+        except Exception as e:  # noqa: BLE001 — una fila no puede cortar la ráfaga
+            logger.warning(
+                f"[migracion_activacion] no se pudo enviar el correo al candidato "
+                f"{candidato.id}: {e}")
+            ok = False
+
+        if ok:
+            candidato.correo_migracion_enviado_en = datetime.now(timezone.utc)
+            db.commit()
+            enviados += 1
+        else:
+            # El link no llegó a nadie: se invalida el token para que la próxima
+            # corrida reintente en vez de saltear al candidato por un token vigente.
+            fila_token.used_at = datetime.now(timezone.utc)
+            db.commit()
+            fallidos += 1
+
+        # Ráfaga: espacia el próximo correo (en `noop` no duerme).
+        email_service.espaciar_envio()
+
+    if enviados > 0:
+        _marcar_migracion_completada(db, tenant_id, ahora)
+
+    return {
+        "enviados": enviados,
+        "fallidos": fallidos,
+        "omitidos": omitidos,
+        "total": len(candidatos),
+    }
+
+
+@router.get("/activacion/validar-token")
+def validar_token_activacion(
+    token: str = Query(..., min_length=1, max_length=200,
+                       description="Token del link de activación"),
+    db: Session = Depends(get_db),
+):
+    """Valida el token del link y devuelve el nombre/correo del candidato.
+
+    Endpoint PÚBLICO (lo llama la pantalla `/migracion/activar` antes de pedir los
+    datos del alta). No consume el token: eso lo hace el endpoint de activación.
+    Cualquier token inexistente, ya usado o vencido responde el MISMO 404 genérico
+    —no se revela si el token existió—, igual que el reset de contraseña.
+    """
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    fila = (
+        db.query(TokenMigracionBoxmagic)
+        .filter(TokenMigracionBoxmagic.token_hash == token_hash)
+        .first()
+    )
+    ahora = datetime.now(timezone.utc)
+    if (fila is None
+            or fila.used_at is not None
+            or _como_utc(fila.expires_at) <= ahora):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El link de activación es inválido o expiró.",
+        )
+
+    candidato = (
+        db.query(CandidatoBoxmagic)
+        .filter(CandidatoBoxmagic.id == fila.candidato_id)
+        .first()
+    )
+    if candidato is None:
+        # Token huérfano: mismo error genérico, sin filtrar qué pasó.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El link de activación es inválido o expiró.",
+        )
+
+    return {"nombre": candidato.nombre, "correo": candidato.correo}
 
 
 
@@ -526,6 +749,75 @@ def editar_candidato(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Ya existe un candidato con ese correo",
+        )
+    db.refresh(candidato)
+
+    return {
+        "candidato_id": candidato.id,
+        "nombre": candidato.nombre,
+        "correo": candidato.correo,
+    }
+
+
+class CandidatoCorreoIn(BaseModel):
+    """Correo puntual para una fila del padrón que llegó sin email."""
+
+    correo: EmailStr = Field(
+        ..., max_length=150,
+        description="Correo real del candidato (se guarda normalizado)")
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("correo")
+    @classmethod
+    def _correo_normalizado(cls, valor):
+        return normalizar_correo(str(valor))
+
+
+@router.patch("/candidato/{candidato_id}/correo")
+def actualizar_correo_candidato(
+    candidato_id: int,
+    body: CandidatoCorreoIn,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Completa el correo de UN candidato del padrón (fila que vino sin email).
+
+    Es el "UPSERT" del correo que usa la sección "Faltan correos" del panel: el
+    Excel real trae candidatos sin email y, sin correo, el envío masivo no puede
+    invitarlos. Valida el formato (`EmailStr`), guarda normalizado y respeta el
+    UNIQUE `(tenant_id, correo)`: si ese correo ya es de otro candidato del box
+    responde 409 (mismo dato que rompería el constraint), sin escribir nada.
+    """
+    tenant_id = current_user["tenant_id"]
+    candidato = _candidato_del_box(db, tenant_id, candidato_id)
+    correo_nuevo = normalizar_correo(str(body.correo))
+
+    if correo_nuevo != normalizar_correo(candidato.correo):
+        repetido = (
+            db.query(CandidatoBoxmagic)
+            .filter(
+                CandidatoBoxmagic.tenant_id == tenant_id,
+                CandidatoBoxmagic.correo == correo_nuevo,
+                CandidatoBoxmagic.id != candidato.id,
+            )
+            .first()
+        )
+        if repetido is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Ya existe un candidato con ese correo en este box",
+            )
+
+    candidato.correo = correo_nuevo
+    try:
+        db.commit()
+    except IntegrityError:
+        # Carrera con otra edición/importación: el UNIQUE es la última palabra.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ya existe un candidato con ese correo en este box",
         )
     db.refresh(candidato)
 
