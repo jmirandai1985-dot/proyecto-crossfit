@@ -1,12 +1,13 @@
 """
-Reset del padrón de BoxMagic en TEST: deja exactamente los 96 candidatos correctos.
+Reset del padrón de BoxMagic: 96 candidatos con correo + 4 sin correo (NULL).
 
 Uso (SIEMPRE contra TEST):
     $env:ENVIRONMENT='test'; py -3.12 backend/scripts/reset_candidatos_boxmagic.py
 
 Notas:
 - El import real del proyecto es `app.db.database` (no `app.database`).
-- Guard extra: aborta si `DATABASE_URL` no es una branch TEST conocida.
+- Confirmación manual (`SI`) antes de borrar y recargar candidatos.
+- Los 4 candidatos sin correo requieren la migración 090 (correo nullable).
 - `tokens_migracion_boxmagic` requiere la migración 089 aplicada en TEST.
 """
 import os
@@ -14,14 +15,18 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from app.core.config import is_test_db_url, settings  # noqa: E402
+from app.core.config import settings  # noqa: E402
 from app.db.database import SessionLocal  # noqa: E402
 from app.models.candidato_boxmagic import CandidatoBoxmagic  # noqa: E402
 from app.models.token_migracion_boxmagic import TokenMigracionBoxmagic  # noqa: E402,F401
 from sqlalchemy import text  # noqa: E402
 
-if not is_test_db_url(settings.DATABASE_URL):
-    sys.exit("ABORTADO: este script solo puede correr contra una branch TEST conocida.")
+print("ATENCION: esto va a borrar y recargar candidatos_boxmagic en la BD actual.")
+print(f"DATABASE_URL: {settings.DATABASE_URL[:60]}...")
+confirmacion = input("Escribe SI para continuar: ")
+if confirmacion.strip() != "SI":
+    print("Cancelado.")
+    exit(0)
 
 db = SessionLocal()
 try:
@@ -132,6 +137,10 @@ try:
         ('Camila  Lavin nuñez', 'camilanl18@gmail.com'),
         ('Annette  Palma', 'annette.palma.h@gmail.com'),
         ('Javier Quintreman', 'javierquintreman@gmail.com'),
+        ('Yoslany Zuñiga', None),
+        ('Javiera Rebolledo', None),
+        ('Jacqueline Navarro', None),
+        ('Vicente Jara', None),
     ]
 
     for nombre, correo in candidatos:

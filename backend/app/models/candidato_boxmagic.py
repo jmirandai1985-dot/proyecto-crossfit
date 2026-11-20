@@ -101,7 +101,9 @@ class CandidatoBoxmagic(Base):
         "tenants.id", ondelete="CASCADE"), nullable=False)
     nombre = Column(String(150), nullable=False)
     # Normalizado con `normalizar_correo()`: sin espacios y en minúsculas.
-    correo = Column(String(150), nullable=False)
+    # NULL = todavía no tenemos su correo: el candidato existe en el padrón y se
+    # completa después desde el panel ("Faltan correos"). Migración 090.
+    correo = Column(String(150), nullable=True)
     # 'Activo' | 'Inactivo' | 'Congelado' | 'Nuevo' | 'Prueba' (ver ESTADOS_BOXMAGIC).
     estado_boxmagic = Column(String(20), nullable=False)
     # 'activacion' | 'recuperacion' (ver `grupo_desde_estado`).
