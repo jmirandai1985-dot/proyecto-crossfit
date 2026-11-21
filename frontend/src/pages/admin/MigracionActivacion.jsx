@@ -59,6 +59,9 @@ const MigracionActivacion = () => {
     const [guardandoCorreoId, setGuardandoCorreoId] = useState(null);
     const [resultadoEnvio, setResultadoEnvio] = useState(null);
     const [errorEnvio, setErrorEnvio] = useState('');
+    // Toggle de seguridad: el botón "Comenzar migración" queda bloqueado hasta que
+    // el admin lo arme explícitamente. Se resetea al recargar la página (intencional).
+    const [armado, setArmado] = useState(false);
     // Cuántos resultados se pintan. Arranca en el primer bloque y "Cargar 25 más" lo
     // agranda (AGREGA filas, no reemplaza las que ya se están mirando). El reset a 25 NO
     // va en un efecto (dispararía un render de más): el estado guarda, junto al límite, la
@@ -321,24 +324,40 @@ const MigracionActivacion = () => {
                         </p>
                     )}
 
-                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+                    {/* Toggle de seguridad: debe armarse antes de enviar */}
+                    <div className="mt-4 flex items-center gap-3">
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked={armado}
+                            onClick={() => setArmado((prev) => !prev)}
+                            data-testid="toggle-armado"
+                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 focus:ring-offset-zinc-900 ${armado ? 'border-orange-500 bg-orange-500' : 'border-zinc-600 bg-zinc-700'}`}
+                        >
+                            <span
+                                aria-hidden="true"
+                                className={`pointer-events-none inline-block h-4 w-4 translate-y-[1px] rounded-full bg-white shadow transition-transform ${armado ? 'translate-x-5' : 'translate-x-0.5'}`}
+                            />
+                        </button>
+                        <span className={`text-[13px] font-semibold ${armado ? 'text-orange-400' : 'text-zinc-500'}`}>
+                            {armado ? 'Listo para enviar' : 'Desarmado — activa para habilitar el envío'}
+                        </span>
+                    </div>
+
+                    <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
                         <button
                             type="button"
                             onClick={comenzarMigracion}
-                            disabled={enviarActivacion.isPending || activosTotales === 0}
+                            disabled={enviarActivacion.isPending || activosTotales === 0 || !armado}
                             aria-busy={enviarActivacion.isPending}
                             data-testid="comenzar-migracion"
                             className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-orange-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                             <Send className="h-4 w-4" aria-hidden="true" />
-                            {enviarActivacion.isPending
-                                ? 'Enviando...'
-                                : `Comenzar migración (${activosTotales})`}
+                            {enviarActivacion.isPending ? 'Enviando...' : `Comenzar migración (${activosTotales})`}
                         </button>
                         {activosTotales === 0 && (
-                            <p className="text-[12px] text-zinc-500">
-                                No hay candidatos Activos para invitar.
-                            </p>
+                            <p className="text-[12px] text-zinc-500">No hay candidatos Activos para invitar.</p>
                         )}
                     </div>
 
