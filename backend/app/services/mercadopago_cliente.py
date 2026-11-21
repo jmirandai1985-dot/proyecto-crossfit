@@ -23,6 +23,8 @@ viaja al frontend.
 """
 import logging
 
+from typing import Optional
+
 from app.core.config import settings
 from app.utils.rut import normalizar_rut, validar_rut
 
@@ -454,6 +456,22 @@ def leer_pago(payment_id) -> dict:
                        payment_id, estado_http)
         raise ErrorMercadoPago("Mercado Pago no devolvió el pago")
     return datos
+
+
+def ts_de_firma(x_signature) -> Optional[str]:
+    """`ts` del header `x-signature` de MP (sólo para la bitácora del evento).
+
+    Vive acá —y no en cada router— para que los DOS endpoints que pueden recibir
+    un aviso (cobros y suscripciones/pagos) guarden el MISMO valor en
+    `pagos_eventos.ts_header`. No participa de la validación: la firma se valida
+    completa en `validar_firma`.
+    """
+    if not x_signature:
+        return None
+    for parte in str(x_signature).split(","):
+        if parte.strip().startswith("ts="):
+            return parte.split("=", 1)[1].strip()[:20]
+    return None
 
 
 def validar_firma(x_signature, x_request_id, data_id, secreto: str) -> None:

@@ -2,7 +2,7 @@
 import calendar
 from datetime import date, datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -39,12 +39,14 @@ from app.services.alertas_email_service import (
     _marcar_fallido, reclamar_envio_manual,
 )
 from app.services.auditoria_service import registrar_auditoria
+from app.services import aprobacion_planes
 from app.services import email_service
 from app.services import referidos_service as svc
 from app.services.email_service import (
     render_con_contacto, render_email_clase_prueba, render_email_contratar_plan,
     send_clase_prueba, send_contratar_plan,
 )
+from app.schemas.solicitud import ActivacionManualPlanRequest
 
 router = APIRouter()
 
@@ -855,4 +857,67 @@ def enviar_invitacion_prueba(
         "enviado_en": (_ultimos_envios_manuales(db, [alumno.id]).get(alumno.id)
                        if exito else None),
     }
+
+
+# ── Activación manual de un plan (rescate del admin, sin Mercado Pago) ───────
+@router.post("/planes/{plan_id}/activar-manual")
+def activar_plan_manual(
+    plan_id: int,
+    datos: ActivacionManualPlanRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Activa un plan a mano para un alumno del box.
+
+    Para cuando el dinero entró por fuera del flujo online (efectivo,
+    transferencia directa) o cuando Mercado Pago COBRÓ pero el webhook nunca
+    llegó: antes, en ese caso, el admin no podía aprobar la solicitud (409 por
+    el guard del pago online sin confirmar) y el alumno quedaba sin plan.
+
+    Usa la MISMA función que la aprobación normal (`activar_plan` con
+    `forzar=True`): crea la suscripción con inicio HOY (hora de Chile), los
+    créditos del plan, la transacción financiera, la auditoría y el correo al
+    alumno. Si el alumno ya tiene un plan vigente, el nuevo queda EN COLA.
+
+    Seguridad: `tenant_id` y `actor_id` salen del JWT del admin
+    (`get_current_admin`), nunca del body. Un plan o un alumno de otro box
+    responden 404 (no se revela que existen).
+    """
+    try:
+        return aprobacion_planes.activar_plan_manual(
+            db,
+            tenant_id=current_user["tenant_id"],
+            alumno_id=datos.alumno_id,
+            plan_id=plan_id,
+            actor_id=current_user["usuario_id"],
+            motivo=datos.motivo,
+            background_tasks=background_tasks,
+        )
+    except aprobacion_planes.PlanNoEncontrado:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Plan no encontrado")
+    except aprobacion_planes.AlumnoNoEncontrado:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alumno no encontrado")
+    except aprobacion_planes.SolicitudNoProcesable as error:
+        if error.motivo == "ya_en_cola":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=("El alumno ya tiene un plan en cola: primero debe "
+                        "activarse el que está esperando."))
+        if error.motivo == "otra_pendiente":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=("El alumno tiene otra solicitud pendiente: actívala o "
+                        "recházala antes de activar esta."))
+        if error.motivo == "ya_activa":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="El alumno ya tiene este plan activo.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La solicitud ya fue procesada (aprobada o rechazada).")
 

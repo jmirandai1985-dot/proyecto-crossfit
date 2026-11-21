@@ -9,11 +9,20 @@ Por qué hay DOS webhooks y este no reemplaza al otro:
 * Este es el que se configura en el panel de MP para **suscripciones**. Procesa
   `type=subscription_preapproval` (estado del cobro recurrente) y
   `type=subscription_authorized_payment` (cada cobro mensual).
+* Además acepta `type=payment` (Checkout Pro: la compra de UN plan o del Bazar) y
+  lo delega en el MISMO camino firmado del webhook de cobros
+  (`services/pagos.procesar_aviso_pago`). Motivo: en el panel de MP la URL de
+  notificación se configura UNA sola vez por aplicación; si el admin la registra
+  acá, un cobro real no puede quedar ignorado sólo por el topic.
 
 Regla de oro: **siempre 200**. MP corta a los 22 s, reintenta cada 15 min y un 5xx
 por "ese id no existe" (la simulación del panel manda ids de prueba como `123456`)
 sólo genera reintentos inútiles. Todo lo que puede fallar —red, 404, 401, 5xx,
 respuesta que no es JSON, error de base— se loguea y se traduce a 200.
+
+Excepción deliberada: `type=payment` SÍ responde 401 (firma inválida) o 503 (sin
+`MERCADOPAGO_WEBHOOK_SECRET`), igual que el webhook de cobros. Ahí se activa un
+plan con plata real: fail-closed antes que procesar una notificación sin firma.
 
 Eso es seguro porque el endpoint NO confía en el body:
 
@@ -37,12 +46,14 @@ import re
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.rate_limit import LIMIT_CRITICO, limiter
 from app.db.database import get_db
+from app.services import mercadopago_cliente as mp
+from app.services import pagos
 from app.services import suscripciones_mp
 
 logger = logging.getLogger(__name__)
@@ -61,6 +72,12 @@ TOPICOS_PREAPPROVAL = frozenset({"subscription_preapproval", "preapproval"})
 # Topic de cada cobro mensual: su `data.id` es un `authorized_payment`, no un
 # preapproval, y se lee en OTRA ruta de la API.
 TOPICO_COBRO = "subscription_authorized_payment"
+
+# Topic de Checkout Pro (compra de UN plan o del Bazar). No se procesa acá: se
+# delega en `services/pagos.procesar_aviso_pago`, el mismo camino del webhook de
+# cobros, con la MISMA firma HMAC. Así da igual cuál de las dos URLs quedó
+# registrada en el panel de MP.
+TOPICO_PAGO = "payment"
 
 # Forma de un id de MP. Se valida ANTES de armar la URL: el id viene del body de un
 # endpoint público y no puede convertirse en un path traversal. `fullmatch` (y no
@@ -143,6 +160,48 @@ def _leer_cobro_autorizado(recurso_id: str) -> Optional[dict]:
     return _leer(URL_COBRO_AUTORIZADO, recurso_id)
 
 
+def _procesar_pago(db: Session, request: Request, *, recurso_id: str,
+                   notificacion_id: str) -> dict:
+    """Aviso `type=payment`: firma HMAC obligatoria y el camino del webhook de cobros.
+
+    Es la ÚNICA rama de este endpoint que puede responder 401/503 (fail-closed):
+    acá se activa un plan con dinero real, así que una firma que no se puede
+    verificar no se procesa. El estado y el monto NO salen del body: los relee
+    `pagos.procesar_aviso_pago` en Mercado Pago con el token del servidor.
+    """
+    secreto = (settings.MERCADOPAGO_WEBHOOK_SECRET or "").strip()
+    if not secreto:
+        logger.error(
+            "Webhook MP (payment) rechazado: MERCADOPAGO_WEBHOOK_SECRET vacío")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Webhook de pagos no configurado")
+
+    x_signature = request.headers.get("x-signature")
+    x_request_id = request.headers.get("x-request-id")
+    try:
+        mp.validar_firma(x_signature, x_request_id, recurso_id, secreto)
+    except mp.FirmaInvalida as error:
+        logger.warning(
+            "Webhook MP (payment) con firma inválida (%s, request_id=%s, ip=%s)",
+            error.motivo, x_request_id,
+            request.client.host if request.client else "?")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Firma inválida")
+    except mp.ErrorMercadoPago as error:  # SDK ausente o roto
+        logger.error("Webhook MP (payment) sin validador disponible: %s", error)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Webhook de pagos no disponible")
+
+    resultado = pagos.procesar_aviso_pago(
+        db, notificacion_id=notificacion_id, tipo=TOPICO_PAGO,
+        recurso_id=recurso_id, request_id=x_request_id,
+        ts_header=mp.ts_de_firma(x_signature))
+    logger.info("Webhook MP (payment): %s -> %s", recurso_id[:64], resultado)
+    return {"ok": True, "resultado": resultado}
+
+
 @router.post("/webhook")
 @limiter.limit(LIMIT_CRITICO)
 def webhook_suscripciones(
@@ -154,8 +213,12 @@ def webhook_suscripciones(
 ):
     """Notificación de Planes y suscripciones de Mercado Pago. Público.
 
-    Responde 200 SIEMPRE (ver el docstring del módulo). El body sólo aporta `type`
-    y `data.id`: el estado y el monto salen de MP, nunca de acá.
+    Responde 200 siempre (ver el docstring del módulo) SALVO `type=payment` con
+    firma inválida o sin secreto configurado (401/503, fail-closed): ése se
+    delega en el camino firmado del webhook de cobros y puede activar un plan.
+
+    El body sólo aporta `type` y `data.id`: el estado y el monto salen de MP,
+    nunca de acá.
     """
     cuerpo = cuerpo if isinstance(cuerpo, dict) else {}
     datos = cuerpo.get("data")
@@ -172,14 +235,24 @@ def webhook_suscripciones(
         cuerpo.get("action") or "?",
         request.headers.get("x-request-id") or "?")
 
+    if tipo == TOPICO_PAGO:
+        # Checkout Pro (un plan o el Bazar): firma + relectura en MP + `activar_plan`.
+        # Sin `data.id` válido no hay nada que firmar ni que consultar.
+        if not recurso_id or not _ID_VALIDO.fullmatch(recurso_id):
+            logger.info("Webhook MP (payment): sin data.id válido; se ignora")
+            return {"ok": True, "resultado": "ignorado"}
+        return _procesar_pago(
+            db, request, recurso_id=recurso_id,
+            notificacion_id=str(cuerpo.get("id") or "").strip()[:64])
+
     if tipo in TOPICOS_SIN_LECTURA:
         logger.info("Webhook MP suscripciones: topic %s (plantilla, no una "
                     "suscripción); se ignora", tipo)
         return {"ok": True, "resultado": "ignorado"}
 
     if tipo not in TOPICOS_PREAPPROVAL and tipo != TOPICO_COBRO:
-        # Topic ajeno (p. ej. `payment`, que va por el webhook de cobros) o
-        # desconocido: 200 para que MP no reintente.
+        # Topic ajeno o desconocido: 200 para que MP no reintente. (`payment` ya
+        # se resolvió arriba, por el camino firmado del webhook de cobros.)
         logger.info("Webhook MP suscripciones: topic %s sin nada que leer; se "
                     "ignora", tipo or "?")
         return {"ok": True, "resultado": "ignorado"}

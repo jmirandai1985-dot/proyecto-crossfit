@@ -686,6 +686,77 @@ def registrar_evento(db: Session, *, notificacion_id: str, tipo: Optional[str] =
     return evento
 
 
+def procesar_aviso_pago(db: Session, *, notificacion_id: str,
+                        tipo: Optional[str], recurso_id: Optional[str],
+                        request_id: Optional[str] = None,
+                        ts_header: Optional[str] = None) -> str:
+    """Procesa un aviso de MP **ya autenticado** y devuelve el estado de salida.
+
+    Es el ÚNICO lugar donde se aplica un aviso de cobro: lo llaman los dos
+    caminos que pueden recibirlo (la URL configurada en el panel de MP puede ser
+    cualquiera de las dos) después de validar la firma HMAC con
+    `MERCADOPAGO_WEBHOOK_SECRET`:
+
+    * `POST /api/v1/pagos/webhook/mercadopago` (webhook dedicado de cobros);
+    * `POST /api/v1/mp/webhook` con `type=payment` (el endpoint que el panel de
+      MP comparte con las suscripciones).
+
+    `notificacion_id` es la clave de idempotencia: si MP reintenta el MISMO aviso
+    —o si llega por las dos URLs— `registrar_evento` devuelve `None` y se
+    responde `duplicado` sin tocar el pago.
+
+    Devuelve el texto que el endpoint pone en el 200: `ignorado` (faltan ids),
+    `duplicado`, `desconocido` (el topic no dice si se cobró), `pendiente` (MP no
+    respondió; la reconciliación lo levanta) o el `resultado` de
+    `procesar_notificacion`. Nunca lanza: un 5xx por un pago ya cobrado sólo
+    genera reintentos inútiles.
+    """
+    if not notificacion_id or not recurso_id:
+        logger.info("Webhook de MP sin id de notificación o de recurso; se ignora")
+        return "ignorado"
+
+    evento = registrar_evento(
+        db, notificacion_id=notificacion_id, tipo=tipo, recurso_id=recurso_id,
+        firma_valida=True, request_id=request_id, ts_header=ts_header)
+    if evento is None:
+        # Reintento exacto del mismo aviso: ya se procesó (o se está procesando).
+        return "duplicado"
+
+    if tipo != "payment":
+        # `merchant_order` no dice si se cobró y `chargebacks` se revisa a mano:
+        # se deja la traza y se corta (200 para que MP no reintente).
+        evento.resultado = "desconocido"
+        evento.procesado_en = ahora_santiago()
+        db.commit()
+        return "desconocido"
+
+    # ── Relectura del pago REAL en MP (el body no declara estados) ──
+    try:
+        detalle = mp.leer_pago(recurso_id)
+    except mp.ErrorMercadoPago as error:
+        logger.warning("Webhook: no se pudo leer el pago %s (%s); queda para "
+                       "la reconciliación", recurso_id, error)
+        evento.resultado = "error"
+        # procesado_en = NULL a propósito: la reconciliación lo levanta.
+        db.commit()
+        return "pendiente"
+
+    try:
+        return procesar_notificacion(db, evento, detalle)
+    except Exception:  # noqa: BLE001 - nunca 5xx por un pago que puede estar cobrado
+        db.rollback()
+        logger.exception("Webhook: fallo al aplicar el pago %s", recurso_id)
+        try:
+            evento = db.query(PagoEvento).filter(
+                PagoEvento.id == evento.id).first()
+            if evento is not None:
+                evento.resultado = "error"
+                db.commit()
+        except Exception:  # pragma: no cover - la traza ya está en el log
+            db.rollback()
+        return "error"
+
+
 def buscar_pago(db: Session, detalle: dict) -> Optional[Pago]:
     """Localiza la fila `pagos` del pago de MP (por `external_reference`)."""
     referencia = detalle.get("external_reference")

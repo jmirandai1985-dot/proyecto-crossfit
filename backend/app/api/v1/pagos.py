@@ -300,63 +300,22 @@ def webhook_mercadopago(
         )
 
 
-    # ── Firma OK: ids mínimos, sin confiar en nada más del body ──
-    if not notificacion_id or not recurso_id:
-        logger.info("Webhook de MP sin id de notificación o de recurso; se ignora")
-        return {"status": "ignorado"}
-
-    evento = pagos.registrar_evento(
+    # ── Firma OK: el aviso se aplica en `services/pagos.procesar_aviso_pago` ──
+    # Mismo camino que usa `POST /api/v1/mp/webhook` para `type=payment`: una sola
+    # definición de "aplicar un cobro" (ids mínimos, idempotencia, relectura en MP
+    # y `activar_plan`), aunque el panel de MP tenga UNA sola URL registrada.
+    return {"status": pagos.procesar_aviso_pago(
         db, notificacion_id=notificacion_id, tipo=tipo, recurso_id=recurso_id,
-        firma_valida=True, request_id=x_request_id, ts_header=ts_header)
-    if evento is None:
-        # Reintento exacto del mismo aviso: ya se procesó (o se está procesando).
-        return {"status": "duplicado"}
-
-    if tipo != "payment":
-        # `merchant_order` no dice si se cobró y `chargebacks` se revisa a mano:
-        # se deja la traza y se corta (200 para que MP no reintente).
-        evento.resultado = "desconocido"
-        evento.procesado_en = ahora_santiago()
-        db.commit()
-        return {"status": "desconocido"}
-
-    # ── Relectura del pago REAL en MP (el body no declara estados) ──
-    try:
-        detalle = mp.leer_pago(recurso_id)
-    except mp.ErrorMercadoPago as error:
-        logger.warning("Webhook: no se pudo leer el pago %s (%s); queda para "
-                       "la reconciliación", recurso_id, error)
-        evento.resultado = "error"
-        # procesado_en = NULL a propósito: la reconciliación lo levanta.
-        db.commit()
-        return {"status": "pendiente"}
-
-    try:
-        resultado = pagos.procesar_notificacion(db, evento, detalle)
-    except Exception:  # noqa: BLE001 - nunca 5xx por un pago que puede estar cobrado
-        db.rollback()
-        logger.exception("Webhook: fallo al aplicar el pago %s", recurso_id)
-        try:
-            evento = db.query(PagoEvento).filter(
-                PagoEvento.id == evento.id).first()
-            if evento is not None:
-                evento.resultado = "error"
-                db.commit()
-        except Exception:  # pragma: no cover - la traza ya está en el log
-            db.rollback()
-        return {"status": "error"}
-
-    return {"status": resultado}
+        request_id=x_request_id, ts_header=ts_header)}
 
 
 def _ts_de_firma(x_signature: Optional[str]) -> Optional[str]:
-    """`ts` del header `x-signature` (sólo se guarda en la bitácora)."""
-    if not x_signature:
-        return None
-    for parte in x_signature.split(","):
-        if parte.strip().startswith("ts="):
-            return parte.split("=", 1)[1].strip()[:20]
-    return None
+    """`ts` del header `x-signature` (sólo se guarda en la bitácora).
+
+    La lectura vive en `services/mercadopago_cliente.py` porque el webhook de
+    `/api/v1/mp/webhook` guarda el mismo campo con la misma regla.
+    """
+    return mp.ts_de_firma(x_signature)
 
 
 def _registrar_intento_invalido(db: Session, *, notificacion_id: str,

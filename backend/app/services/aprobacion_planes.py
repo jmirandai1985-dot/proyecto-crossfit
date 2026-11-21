@@ -70,6 +70,13 @@ class PlanNoEncontrado(Exception):
     """La solicitud apunta a un plan que ya no existe (404 en el endpoint)."""
 
 
+class AlumnoNoEncontrado(Exception):
+    """El alumno no existe en el box del admin (404 en el endpoint).
+
+    Se responde 404 (no 403) para no revelar que el id existe en otro tenant.
+    """
+
+
 class PagoOnlineNoConfirmado(Exception):
     """La solicitud es de pago online pero su cobro todavía no está confirmado.
 
@@ -169,7 +176,9 @@ def activar_plan(db: Session, solicitud_id: int, *, tenant_id: Optional[int] = N
                  actor_id: Optional[int] = None,
                  origen: str = ORIGEN_MANUAL,
                  background_tasks=None,
-                 pago_id: Optional[int] = None) -> dict:
+                 pago_id: Optional[int] = None,
+                 forzar: bool = False,
+                 comentario: Optional[str] = None) -> dict:
     """Aprueba la solicitud y activa el plan. Idempotente por el UPDATE condicional.
 
     `tenant_id` es el filtro de seguridad del endpoint del admin (un admin del
@@ -177,10 +186,15 @@ def activar_plan(db: Session, solicitud_id: int, *, tenant_id: Optional[int] = N
     revelar que el id existe). El webhook NO lo pasa: la solicitud se localiza
     por el pago, que ya está atado a un tenant.
 
+    `forzar=True` es la ÚNICA puerta que salta `_validar_aprobacion_manual`: la
+    usa la activación manual del admin (`POST
+    /admin/planes/{plan_id}/activar-manual`) cuando el cobro se verificó por
+    fuera del sistema. Queda auditada (`forzado=True` en el detalle).
+
     Devuelve el mismo dict que respondía el endpoint (status, message y el
     desglose del cobro), para que el wrapper no cambie el contrato.
     """
-    if origen == ORIGEN_MANUAL:
+    if origen == ORIGEN_MANUAL and not forzar:
         _validar_aprobacion_manual(db, solicitud_id, tenant_id)
 
     # ── Decidir ANTES del UPDATE atómico: ¿se activa ya o queda EN COLA? ──
@@ -221,8 +235,9 @@ def activar_plan(db: Session, solicitud_id: int, *, tenant_id: Optional[int] = N
         "aprobado_por": actor_id,
         # Lo que el admin ve en el historial: distingue una aprobación humana de
         # un cobro online (que no tiene comprobante que revisar).
-        "comentario_admin": ("Pagado online" if origen == ORIGEN_MERCADOPAGO
-                             else "Aprobado"),
+        "comentario_admin": (comentario or (
+            "Pagado online" if origen == ORIGEN_MERCADOPAGO else "Aprobado"
+        ))[:500],
         "origen_pago": origen,
     }
     if pago_id is not None:
@@ -412,6 +427,8 @@ def activar_plan(db: Session, solicitud_id: int, *, tenant_id: Optional[int] = N
             "origen": origen,
             "pago_id": pago_id,
             "monto_clp": cobrado,
+            # Sólo aparece cuando el admin se saltó el guard del pago online.
+            **({"forzado": True} if forzar else {}),
         },
     )
 
@@ -459,6 +476,152 @@ def activar_plan(db: Session, solicitud_id: int, *, tenant_id: Optional[int] = N
         "descuento_referido_pct": (descuento_referido["porcentaje"]
                                    if descuento_referido else None),
     }
+
+
+# Estados desde los que se REABRE una solicitud para activarla a mano:
+# `iniciado` (el alumno abrió el checkout y el webhook nunca llegó) y `expirada`
+# (el cron la cerró por vencimiento). Son los dos estados en los que queda una
+# compra ONLINE cuando Mercado Pago cobró pero el aviso no llegó al backend.
+ESTADOS_REABRIBLES = ("iniciado", "expirada")
+
+# Comentario que queda en el historial de la solicitud aprobada a mano.
+COMENTARIO_MANUAL = "Activación manual del admin"
+
+
+def _solicitud_para_activacion_manual(db: Session, *, tenant_id: int,
+                                      alumno_id: int, plan_id: int,
+                                      precio_clp: int) -> SolicitudPlan:
+    """La solicitud que se va a aprobar a mano: la reusa o crea una nueva.
+
+    Cada regla existe para que un humano y el webhook no terminen con DOS
+    planes (o con un plan huérfano en la cola del admin):
+
+    * Si el alumno ya tiene otra solicitud `pending` de un plan DISTINTO, se
+      corta (409): aprobar dos compras a la vez deja la primera huérfana.
+    * `approved` / `en_cola` en esta misma compra ⇒ no se activa nada (409).
+    * `pending` ⇒ se usa tal cual (es la compra de siempre, con su precio).
+    * `iniciado` / `expirada` ⇒ se REABRE a `pending` con un UPDATE condicional
+      (el mismo estado del que parte `activar_plan`): el admin ya verificó el
+      cobro, que es justo lo que el webhook no pudo confirmar.
+    * No existe (o la anterior fue `rejected`) ⇒ se crea una `pending` nueva con
+      el precio de lista: la fila vieja conserva su motivo en el historial.
+
+    La fila nueva NO lleva matrícula ni descuentos online: el cobro lo cerró el
+    admin por fuera del sistema y este endpoint no inventa montos.
+    """
+    otra_pendiente = (
+        db.query(SolicitudPlan)
+        .filter(
+            SolicitudPlan.tenant_id == tenant_id,
+            SolicitudPlan.alumno_id == alumno_id,
+            SolicitudPlan.plan_id != plan_id,
+            SolicitudPlan.estado == "pending",
+        )
+        .first()
+    )
+    if otra_pendiente is not None:
+        raise SolicitudNoProcesable("otra_pendiente")
+
+    ultima = (
+        db.query(SolicitudPlan)
+        .filter(
+            SolicitudPlan.tenant_id == tenant_id,
+            SolicitudPlan.alumno_id == alumno_id,
+            SolicitudPlan.plan_id == plan_id,
+        )
+        .order_by(SolicitudPlan.id.desc())
+        .first()
+    )
+    if ultima is not None:
+        if ultima.estado == "approved":
+            raise SolicitudNoProcesable("ya_activa")
+        if ultima.estado == "en_cola":
+            raise SolicitudNoProcesable("ya_en_cola")
+        if ultima.estado == "pending":
+            return ultima
+        if ultima.estado in ESTADOS_REABRIBLES:
+            reabierta = db.execute(
+                update(SolicitudPlan)
+                .where(SolicitudPlan.id == ultima.id)
+                .where(SolicitudPlan.tenant_id == tenant_id)
+                .where(SolicitudPlan.estado == ultima.estado)
+                .values(estado="pending")
+            )
+            if reabierta.rowcount == 0:
+                # El webhook (u otro admin) la movió mientras decidíamos.
+                raise SolicitudNoProcesable("ya_procesada")
+            ultima.estado = "pending"
+            return ultima
+
+    solicitud = SolicitudPlan(
+        tenant_id=tenant_id,
+        alumno_id=alumno_id,
+        plan_id=plan_id,
+        estado="pending",
+        origen_pago=ORIGEN_MANUAL,
+        precio_clp_snapshot=precio_clp,
+    )
+    db.add(solicitud)
+    return solicitud
+
+
+def activar_plan_manual(db: Session, *, tenant_id: int, alumno_id: int,
+                        plan_id: int, actor_id: Optional[int] = None,
+                        motivo: Optional[str] = None,
+                        background_tasks=None) -> dict:
+    """`POST /api/v1/admin/planes/{plan_id}/activar-manual`: activa sin MP.
+
+    Es el rescate HUMANO para cuando el dinero entró por fuera del flujo online
+    (efectivo, transferencia directa, o un cobro de Mercado Pago que se aprobó
+    pero cuyo webhook nunca llegó al backend). Crea o retoma la solicitud y
+    delega en `activar_plan` con `forzar=True`: el plan, los créditos, la
+    vigencia (inicio AHORA en hora de Chile), la transacción financiera, la
+    auditoría y el correo salen del MISMO código que una aprobación normal.
+
+    `forzar=True` salta el guard que prohíbe aprobar a mano una solicitud con
+    pago online sin confirmar (`_validar_aprobacion_manual`): el admin declara
+    que verificó el cobro fuera del sistema. Queda auditado con
+    `origen='manual'` y `forzado=True`, y si MP notifica después, la solicitud
+    ya está `approved`: el webhook no duplica el plan.
+
+    Seguridad: `tenant_id` sale del token del admin; un plan o un alumno de otro
+    box responden 404 (no se revela que existen).
+    """
+    plan = (db.query(Plan)
+            .filter(Plan.id == plan_id, Plan.tenant_id == tenant_id).first())
+    if plan is None:
+        raise PlanNoEncontrado(plan_id)
+
+    alumno = (db.query(Usuario)
+              .filter(Usuario.id == alumno_id,
+                      Usuario.tenant_id == tenant_id).first())
+    if alumno is None:
+        raise AlumnoNoEncontrado(alumno_id)
+
+    solicitud = _solicitud_para_activacion_manual(
+        db, tenant_id=tenant_id, alumno_id=alumno_id, plan_id=plan_id,
+        precio_clp=int(plan.precio_clp or 0))
+    # La fila nueva necesita id antes de que `activar_plan` la busque.
+    db.flush()
+
+    comentario = COMENTARIO_MANUAL
+    motivo_limpio = str(motivo or "").strip()
+    if motivo_limpio:
+        comentario = f"{COMENTARIO_MANUAL}: {motivo_limpio}"
+
+    resultado = activar_plan(
+        db, solicitud.id,
+        tenant_id=tenant_id,
+        actor_id=actor_id,
+        origen=ORIGEN_MANUAL,
+        background_tasks=background_tasks,
+        forzar=True,
+        comentario=comentario,
+    )
+    resultado["solicitud_id"] = solicitud.id
+    resultado["alumno_id"] = alumno_id
+    resultado["plan_id"] = plan_id
+    return resultado
 
 
 def _registrar_plan_en_cola(db: Session, solicitud, plan, ahora, actor_id,

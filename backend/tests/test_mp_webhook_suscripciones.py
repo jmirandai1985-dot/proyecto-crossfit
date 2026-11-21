@@ -329,7 +329,8 @@ def test_el_endpoint_no_exige_autenticacion(monkeypatch):
 
 # ── Topics y bodies que no se tocan ─────────────────────────────────────────
 @pytest.mark.parametrize("topic", [
-    "payment",                    # va por /pagos/webhook/mercadopago
+    # `payment` NO está acá: desde el incidente de 2026-11 se atiende por el
+    # camino firmado del webhook de cobros (ver el test de abajo).
     "merchant_order",
     "chargebacks",
     "subscription_preapproval_plan",   # es la PLANTILLA del plan, no una suscripción
@@ -346,6 +347,28 @@ def test_topics_sin_suscripcion_se_ignoran_con_200(monkeypatch, topic):
     assert respuesta.status_code == 200, respuesta.text
     assert respuesta.json() == {"ok": True, "resultado": "ignorado"}
     assert llamadas == [], f"{topic!r} no puede consultar nada en MP"
+
+
+def test_payment_va_por_el_camino_firmado_del_webhook_de_cobros(monkeypatch):
+    """`payment` (Checkout Pro) ya NO se ignora: sin firma válida no se procesa.
+
+    El panel de MP tiene UNA sola URL de notificación por aplicación; si quedó
+    registrada acá, un cobro de un plan tiene que activarlo igual. La rama
+    exige la firma HMAC (`MERCADOPAGO_WEBHOOK_SECRET`). El camino completo —firma
+    válida y delegación en `pagos.procesar_aviso_pago`— vive en
+    `tests/test_mp_webhook_pagos.py`.
+    """
+    monkeypatch.setattr(settings, "MERCADOPAGO_WEBHOOK_SECRET",
+                        "secreto-de-prueba", raising=False)
+    llamadas = _mock_mp(monkeypatch, status=404)
+
+    respuesta = _app().post(
+        "/api/v1/mp/webhook",
+        json={"id": "notif-1", "type": "payment", "data": {"id": "123456"}})
+
+    assert respuesta.status_code == 401
+    assert respuesta.json()["detail"] == "Firma inválida"
+    assert llamadas == []
 
 
 @pytest.mark.parametrize("body", [
