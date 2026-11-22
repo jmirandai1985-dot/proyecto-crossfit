@@ -89,8 +89,8 @@ const DESTINOS_TIPO = {
     // `plan_solicitado` y abría la pestaña de vouchers, que para un cobro online
     // está vacía.
     plan_pagado_online: '/admin/pagos-del-dia',
-    aprobado: '/alumno/solicitar-plan',
-    rechazado: '/alumno/solicitar-plan',
+    aprobado: '/alumno/mi-historial?seccion=membresias',
+    rechazado: '/alumno/mi-historial?seccion=membresias',
     // Alta de alumno: los que se registraron solos esperan activación en Registros.
     alumno_nuevo: '/admin/pendientes?tab=registros',
     // Cobertura de emergencia: la grilla de Supervisión (marca "emergencia").
