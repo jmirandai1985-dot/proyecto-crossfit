@@ -27,6 +27,11 @@ export const claves = {
     // si muestra el botón.
     pagoDisponible: ['pagos', 'disponible'],
     pago: (pagoId) => ['pagos', 'detalle', pagoId],
+    // Cobros de planes del DÍA (tarjeta y pantalla "Pagos del día" del admin).
+    // `dia` vacío = hoy en Chile: lo resuelve el backend.
+    pagosDelDia: (dia) => ['admin', 'pagos-del-dia', dia || 'hoy'],
+    // Compras del PROPIO alumno (historial + tarjeta "Pendiente de activar").
+    misPagos: ['alumnos', 'mis-pagos'],
     pendientesActivacion: ['alumnos', 'pendientes-activacion'],
     countPendientesActivacion: ['alumnos', 'pendientes-activacion', 'count'],
     stats: (tenantId) => ['reportes', tenantId],
@@ -979,6 +984,43 @@ export function useMisBeneficios(planIds) {
         // El descuento no cambia mientras el alumno elige plan.
         staleTime: 300_000,
         enabled: Boolean(planIds),
+    });
+}
+
+// ── Pagos del día (dashboard admin) ─────────────────────────────────────────
+/**
+ * Cobros de PLANES del día del box (`GET /admin/pagos-del-dia`).
+ *
+ * `dia` vacío = hoy en hora de Chile (lo decide el backend: el navegador no
+ * tiene por qué acertar con la zona del servidor). Se refresca cada 60 s porque
+ * es la caja del día: el admin la mira mientras atiende el mostrador.
+ */
+export function usePagosDelDia({ dia = null, autoRefrescoMs = 60_000 } = {}) {
+    return useQuery({
+        queryKey: claves.pagosDelDia(dia),
+        queryFn: async () => (await api.get('/api/v1/admin/pagos-del-dia', {
+            params: dia ? { dia } : {},
+        })).data,
+        staleTime: 30_000,
+        refetchInterval: autoRefrescoMs || false,
+    });
+}
+
+// ── Compras del propio alumno ───────────────────────────────────────────────
+/**
+ * Historial de COMPRAS del alumno autenticado (`GET /alumnos/mis-pagos`).
+ *
+ * Distinto de la sección `pagos` del Historial (que lee la caja del box y sólo
+ * ve planes ya activados): acá están TODAS sus compras, incluidas las que
+ * quedaron pendientes de activar. `enabled` lo apaga en la ficha del box, donde
+ * se está mirando a otro alumno.
+ */
+export function useMisPagos({ enabled = true } = {}) {
+    return useQuery({
+        queryKey: claves.misPagos,
+        queryFn: async () => (await api.get('/api/v1/alumnos/mis-pagos')).data,
+        staleTime: 60_000,
+        enabled,
     });
 }
 

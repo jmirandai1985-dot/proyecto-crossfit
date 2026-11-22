@@ -14,6 +14,9 @@ import {
     FILTRO_PLAN_SIN_PRUEBA, FILTRO_PLAN_TODOS, filtrarMembresias, planesDe,
 } from '../../utils/membresiasMes';
 import AdminTarjetaAlumnosPrueba from '../../components/AdminTarjetaAlumnosPrueba';
+// Tarjeta "Pagos del día": los cobros de planes de hoy (misma fuente que la
+// pantalla /admin/pagos-del-dia y que la campana `plan_pagado_online`).
+import PagosDelDia from '../../components/pagos/PagosDelDia';
 // Aviso REUTILIZABLE (secciones + Reintentar) para las tarjetas que pueden fallar.
 import AvisoCarga from '../../components/AvisoCarga';
 // Vista previa/descarga del voucher: la lógica del blob autenticado (y su
@@ -666,6 +669,21 @@ const AdminDashboard = () => {
                         </div>
                     )}
                 </div>
+
+                {/* 1b. PAGOS DEL DÍA: la caja de hoy (Mercado Pago) con el plan y si
+                    ya activó. Es el MISMO dato de la pantalla /admin/pagos-del-dia,
+                    a la que lleva la campana `plan_pagado_online`. */}
+                <section aria-labelledby="dashboard-pagos-hoy" id="pagos-del-dia" className="space-y-3">
+                    <div>
+                        <h2 id="dashboard-pagos-hoy" className="text-lg font-bold text-zinc-100">
+                            Pagos del día
+                        </h2>
+                        <p className="text-xs text-zinc-500">
+                            Cobros de planes de hoy por Mercado Pago — el plan y si ya está activo
+                        </p>
+                    </div>
+                    <PagosDelDia maxFilas={6} mostrarEnlace />
+                </section>
 
                 {/* 2. FINANCIERA Y DE NEGOCIO */}
                 {stats && (

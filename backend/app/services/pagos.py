@@ -261,26 +261,57 @@ def _marcar_beneficio_usado(db: Session, alumno_id: int, beneficio_id: int,
                        beneficio_id, error)
 
 
-def _avisar_solicitud_online(db: Session, *, solicitud: SolicitudPlan,
-                             nombre_plan: str) -> None:
-    """Campana del admin: el PRIMER webhook real hizo visible la solicitud.
+def _avisar_pago_online(db: Session, *, pago: Pago, detalle: dict,
+                        primera_vez: bool) -> None:
+    """Campana del admin: un pago de PLAN cobrado por Mercado Pago.
 
-    No se manda al crear la preferencia (el alumno todavía no hizo nada en MP):
-    se manda cuando `_promover_solicitud_webhook` la pasa de `iniciado` a
-    `pending`. El admin no tiene un voucher que revisar, pero sí un cobro que
-    vigilar.
+    Se llama DESPUÉS de aplicar el aviso (nunca antes: no se avisa de un cobro
+    que terminó en error) y usa UN solo tipo, `plan_pagado_online`, que la
+    campana lleva a "Pagos del día". Antes era `plan_solicitado`, que abría la
+    pestaña de solicitudes con voucher: para un cobro online esa pestaña no
+    tiene nada que revisar.
+
+    Dos textos, porque un mismo pago puede generar dos avisos en su vida:
+
+    * `approved` → "pagó plan X — $N" (el dinero existe);
+    * cualquier otro estado que hizo VISIBLE la solicitud por primera vez →
+      "inició el pago de X — $N (sin confirmar)". Si MP después aprueba, llega
+      el aviso de "pagó" con el monto real.
+
+    `primera_vez` lo decide `_promover_solicitud_webhook`. Best-effort: un aviso
+    no puede tumbar un pago ya aplicado.
     """
+    if pago.concepto != CONCEPTO_MEMBRESIA:
+        return
+    aprobado = mp.activa_beneficio(detalle.get("status"))
+    if not aprobado and not primera_vez:
+        return
     try:
-        alumno = db.query(Usuario).filter(
-            Usuario.id == solicitud.alumno_id).first()
-        nombre = alumno.nombre if alumno else f"Alumno #{solicitud.alumno_id}"
+        alumno = db.query(Usuario).filter(Usuario.id == pago.usuario_id).first()
+        nombre = (alumno.nombre if alumno and alumno.nombre
+                  else f"Alumno #{pago.usuario_id}")
+        solicitud = db.query(SolicitudPlan).filter(
+            SolicitudPlan.id == pago.referencia_id).first()
+        plan = None
+        if solicitud is not None:
+            plan = db.query(Plan.nombre).filter(
+                Plan.id == solicitud.plan_id).first()
+        nombre_plan = plan[0] if plan else "tu plan"
+        # Monto REALMENTE cobrado (incluye matrícula): es el número de MP, no el
+        # precio de lista. Si MP no lo manda, cae al monto del propio pago.
+        monto = mp.monto_clp(detalle.get("transaction_amount")) or pago.monto_clp
+        monto_txt = f"${monto:,}".replace(",", ".")
+        if aprobado:
+            mensaje = (f"💳 {nombre} pagó plan {nombre_plan} — {monto_txt} "
+                       "vía MercadoPago")
+        else:
+            mensaje = (f"💳 {nombre} inició el pago de {nombre_plan} — "
+                       f"{monto_txt} vía MercadoPago (sin confirmar)")
         notificar_admins_del_tenant(
-            db, solicitud.tenant_id, "plan_solicitado",
-            f"💳 Nueva solicitud de plan de {nombre}: {nombre_plan} "
-            f"(solicitud #{solicitud.id}) — pago online")
+            db, pago.tenant_id, "plan_pagado_online", mensaje)
     except Exception as error:  # pragma: no cover - best-effort
-        logger.warning("No se pudo avisar la solicitud online %s: %s",
-                       solicitud.id, error)
+        logger.warning("No se pudo avisar el pago online #%s: %s",
+                       pago.id, error)
 
 
 def _avisar_pedido_online(db: Session, *, tenant_id: int, alumno_id: int,
@@ -1041,16 +1072,14 @@ def procesar_notificacion(db: Session, evento: PagoEvento,
     evento.procesado_en = ahora_santiago()
     db.commit()
 
-    if promocion == "pending":
-        # Best-effort: el aviso de campana no puede tumbar un pago ya aplicado.
-        solicitud = db.query(SolicitudPlan).filter(
-            SolicitudPlan.id == pago.referencia_id).first()
-        if solicitud is not None:
-            plan = db.query(Plan.nombre).filter(
-                Plan.id == solicitud.plan_id).first()
-            _avisar_solicitud_online(
-                db, solicitud=solicitud,
-                nombre_plan=plan[0] if plan else "tu plan")
+    # Aviso de campana: sólo si el estado del pago realmente avanzó (un
+    # reintento exacto o un monto que no coincide no generan ruido) o si el
+    # primer aviso real hizo visible la solicitud. Después del commit: un aviso
+    # no puede dejar el pago a medias.
+    if evento.resultado == "aplicado" or promocion == "pending":
+        _avisar_pago_online(
+            db, pago=pago, detalle=detalle,
+            primera_vez=promocion == "pending")
 
     return evento.resultado
 

@@ -25,6 +25,9 @@ export const DESTINOS = {
     // Premio de referidos (umbral alcanzado): la notificación `promo_referido` de
     // `promociones_referidos_service` no tenía destino y la fila quedaba muerta.
     promo_referido: { path: '/admin/pendientes?tab=premios', label: 'Pendientes · Premios' },
+    // Pago ONLINE de un plan (campana del admin, services/pagos.py): la tabla
+    // de Notificaciones Enviadas también navega al listado de cobros del día.
+    plan_pagado_online: { path: '/admin/pagos-del-dia', label: 'Pagos del día' },
     // Bazar
     confirmacion_pedido: { path: '/admin/bazar', label: 'Bazar' },
     // Pedido nuevo: es el aviso de CAMPANA del admin (pedidos.py). Va a la pestaña
@@ -61,6 +64,7 @@ export const ETIQUETAS = {
     // Premio de referidos (umbral alcanzado). Se listaba en la tabla con el slug crudo
     // porque faltaba acá y en DESTINOS.
     promo_referido: 'Premio de referidos',
+    plan_pagado_online: 'Pago online de plan',
     confirmacion_pedido: 'Confirmación de pedido (bazar)',
     pedido_nuevo: 'Pedido nuevo (bazar)',
     alerta_stock_bajo: 'Alerta de stock bajo (admin)',

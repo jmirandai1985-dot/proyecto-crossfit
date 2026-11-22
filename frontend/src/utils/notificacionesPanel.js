@@ -35,6 +35,9 @@ export const SEVERIDAD_NOTIFICACION = {
     clase_liberada: 0,
     aprobado: 1,
     plan_solicitado: 1,
+    // Cobro online de un plan: importante (hay plata), sin la urgencia de un
+    // rechazo. Mismo nivel que la solicitud con voucher.
+    plan_pagado_online: 1,
     pedido_nuevo: 1,
     config_bancaria: 1,
     clase_asignada: 1,

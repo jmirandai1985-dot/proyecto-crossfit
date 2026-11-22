@@ -51,6 +51,7 @@ const AdminAlumnosPendientes = lazy(() => import('./pages/admin/AdminAlumnosPend
 // premios en UNA sola pantalla con cuatro pestañas. `alumnos-pendientes` queda como
 // redirect por compatibilidad (la campana y los correos apuntaban ahí).
 const AdminPendientes = lazy(() => import('./pages/admin/Pendientes'));
+const AdminPagosDelDia = lazy(() => import('./pages/admin/PagosDelDia'));
 
 const AdminDisciplinas = lazy(() => import('./pages/admin/Disciplinas'));
 const AdminHorarios = lazy(() => import('./pages/admin/Horarios'));
@@ -178,6 +179,8 @@ function App() {
             {/* Pantalla unificada "Pendientes" (Tanda 4). El `?tab=` lo resuelve la
                 propia pantalla; la ruta vieja de arriba redirige acá. */}
             <Route path="pendientes" element={<AdminPendientes />} />
+            {/* Cobros de planes de hoy (destino de la campana `plan_pagado_online`). */}
+            <Route path="pagos-del-dia" element={<AdminPagosDelDia />} />
             <Route path="alumnos-convertidos" element={<AdminAlumnosConvertidos />} />
             <Route path="alumnos-prueba" element={<AdminAlumnosPrueba />} />
             <Route path="coaches" element={<AdminCoaches />} />

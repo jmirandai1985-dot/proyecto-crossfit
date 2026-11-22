@@ -1,8 +1,9 @@
 """Router de endpoints de administración (tarjetas/notificaciones del panel admin)."""
 import calendar
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -41,6 +42,7 @@ from app.services.alertas_email_service import (
 from app.services.auditoria_service import registrar_auditoria
 from app.services import aprobacion_planes
 from app.services import email_service
+from app.services import pagos_del_dia as pagos_dia_svc
 from app.services import referidos_service as svc
 from app.services.email_service import (
     render_con_contacto, render_email_clase_prueba, render_email_contratar_plan,
@@ -920,4 +922,26 @@ def activar_plan_manual(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="La solicitud ya fue procesada (aprobada o rechazada).")
+
+
+# ── Tarjeta "Pagos del día" del dashboard ───────────────────────────────────
+@router.get("/pagos-del-dia")
+def pagos_del_dia(
+    dia: Optional[date] = Query(
+        None, description="Día en hora de Chile (YYYY-MM-DD). Por defecto, hoy."),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Cobros de PLANES del día del box: cantidad, total CLP y lista.
+
+    Filtra `pagos` por el día chileno de `coalesce(pagado_en, created_at)` y por
+    estado `aprobado`/`pendiente` (un `iniciado` es un checkout abandonado: no se
+    muestra). Cada fila dice si el plan ya está ACTIVO o si quedó "pendiente de
+    activar" — el estado del negocio sale de la suscripción del cobro, no del
+    estado de MP.
+
+    🔒 `tenant_id` del token (`get_current_admin`): nunca se ve el día de otro box.
+    """
+    return pagos_dia_svc.resumen_del_dia(
+        db, current_user["tenant_id"], dia=dia)
 

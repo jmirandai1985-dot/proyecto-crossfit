@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import es_usuario_prueba, get_current_user
 from app.db.database import get_db
 from app.services import historial_alumno_service as svc
+from app.services import mis_pagos as mis_pagos_svc
 
 router = APIRouter()
 
@@ -114,6 +115,34 @@ def mi_historial(
     _bloquear_prueba(db, current_user, seccion)
     return _responder(db, current_user["usuario_id"], current_user["tenant_id"], seccion,
                       pagina, por_pagina, incluir_privado=False)
+
+
+@router.get("/mis-pagos")
+def mis_pagos(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Historial de compras del PROPIO alumno (incluye las que no activaron plan).
+
+    Existe aparte de `/me/historial?seccion=pagos` porque esa sección lee la CAJA
+    del box (`transacciones_financieras`) y por eso sólo ve planes YA activados:
+    una compra pagada que quedó en cola —o cuyo webhook se perdió— no aparecía en
+    ningún lado del panel del alumno.
+
+    Devuelve `{pagos, pendientes_activar}`. `alumno_id` y `tenant_id` salen del
+    token: el alumno no puede pedir los pagos de otro (ni de otro box).
+    """
+    if current_user.get("rol") != "alumno":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=("Esta ruta es del alumno; usa /alumnos/{alumno_id}/historial "
+                    "para ver la ficha de otro alumno"),
+        )
+    return mis_pagos_svc.historial(
+        db,
+        alumno_id=current_user["usuario_id"],
+        tenant_id=current_user["tenant_id"],
+    )
 
 
 @router.get("/{alumno_id}/historial")

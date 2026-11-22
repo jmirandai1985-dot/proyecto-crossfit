@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 // Fase 2 (Bloque 1): el panel sale de la caché compartida (`usePanelHistorial`), no de un
 // `useEffect` con axios. Lo montan el alumno (`/alumno/mi-historial`) y la ficha del box.
-import { usePanelHistorial } from '../../hooks/queries';
+import { usePanelHistorial, useMisPagos } from '../../hooks/queries';
 import { fmtFechaChile, fmtFechaCortaChile } from '../../utils/fecha';
 
 /**
@@ -324,7 +324,127 @@ export const SeccionAsistencia = ({ datos, onPagina }) => {
 };
 
 
-export const SeccionPagos = ({ datos, onPagina }) => {
+// ── Compras propias (`GET /alumnos/mis-pagos`) ──────────────────────────────
+// Distinto de la CAJA del box que pinta `SeccionPagos` (transacciones, sólo
+// planes ya activados): acá el alumno ve TODAS sus compras, incluidas las que
+// tienen el pago hecho y el plan sin activar. Llega como prop desde
+// `PanelHistorial` y sólo cuando la vista es la del PROPIO alumno.
+const ESTADOS_COMPRA = {
+    aprobado: { label: 'Aprobado', clase: 'bg-emerald-500/20 text-emerald-300' },
+    pendiente: { label: 'Pendiente', clase: 'bg-yellow-500/20 text-yellow-200' },
+    rechazado: { label: 'Rechazado', clase: 'bg-red-500/20 text-red-300' },
+    cancelado: { label: 'Cancelado', clase: 'bg-zinc-600/40 text-zinc-300' },
+    reembolsado: { label: 'Reembolsado', clase: 'bg-sky-500/20 text-sky-300' },
+    expirado: { label: 'Expirado', clase: 'bg-zinc-600/40 text-zinc-300' },
+};
+
+const METODOS_COMPRA = {
+    mercadopago: 'Mercado Pago',
+    voucher: 'Voucher / transferencia',
+    efectivo: 'Efectivo',
+};
+
+const EstadoCompra = ({ estado }) => {
+    const conf = ESTADOS_COMPRA[estado] || { label: estado, clase: 'bg-zinc-700 text-zinc-200' };
+    return (
+        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${conf.clase}`}>
+            {conf.label}
+        </span>
+    );
+};
+
+const HistorialCompras = ({ misPagos, error }) => {
+    if (error) {
+        return (
+            <Card titulo="Historial de compras">
+                <p className="text-sm text-yellow-200" data-testid="historial-compras-error">
+                    ⚠️ No se pudo cargar el historial de compras.
+                </p>
+            </Card>
+        );
+    }
+    // `null` = cargando o vista del box (ahí no hay endpoint del alumno).
+    if (!misPagos) return null;
+    const compras = Array.isArray(misPagos.pagos) ? misPagos.pagos : [];
+
+    return (
+        <Card titulo="Historial de compras" testid="historial-compras">
+            <p className="mb-3 text-xs text-zinc-500">
+                Todas tus compras, aunque el plan todavía no esté activo. El estado es el del pago.
+            </p>
+            <Tabla columnas={['Fecha', 'Plan', 'Método', 'Estado', 'Monto']}>
+                {compras.map((c) => (
+                    <tr key={c.solicitud_id} data-testid="historial-compra">
+                        <td className="py-2 px-3 border border-zinc-500 text-zinc-200">
+                            {fechaCorta(c.fecha)}
+                        </td>
+                        <td className="py-2 px-3 border border-zinc-500 text-zinc-200">{c.plan}</td>
+                        <td className="py-2 px-3 border border-zinc-500 text-zinc-300">
+                            {METODOS_COMPRA[c.metodo] || c.metodo}
+                        </td>
+                        <td className="py-2 px-3 border border-zinc-500">
+                            <EstadoCompra estado={c.estado} />
+                        </td>
+                        <td className="py-2 px-3 border border-zinc-500 font-semibold text-zinc-100">
+                            {clp(c.monto_clp)}
+                            {c.matricula_clp > 0 && (
+                                <span className="block text-xs font-normal text-zinc-500">
+                                    + {clp(c.matricula_clp)} matrícula
+                                </span>
+                            )}
+                        </td>
+                    </tr>
+                ))}
+                {compras.length === 0 && (
+                    <tr>
+                        <td colSpan="5" className="py-6 text-center text-zinc-500 border border-zinc-500">
+                            Todavía no hay compras registradas
+                        </td>
+                    </tr>
+                )}
+            </Tabla>
+        </Card>
+    );
+};
+
+/**
+ * Tarjeta amarilla "Pendiente de activar": compras ONLINE con el pago APROBADO
+ * y el plan todavía sin activar (en cola, o expirada por el job cuando el
+ * webhook no llegó — ver `services/mis_pagos.py`).
+ */
+const PendientesDeActivar = ({ misPagos }) => {
+    const pendientes = misPagos?.pendientes_activar || [];
+    if (!pendientes.length) return null;
+    return (
+        <div className="space-y-3" data-testid="historial-pendientes-activar">
+            {pendientes.map((p) => (
+                <div
+                    key={p.solicitud_id}
+                    data-testid={`historial-pendiente-activar-${p.solicitud_id}`}
+                    className="rounded-lg border border-yellow-500/40 bg-yellow-500/10 p-4"
+                >
+                    <p className="text-xs font-bold uppercase tracking-wide text-yellow-300">
+                        Pendiente de activar
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-yellow-100">
+                        {p.plan} · {clp(p.monto_clp)}
+                    </p>
+                    <p className="text-xs text-yellow-200/80">
+                        Pagado el {fechaCorta(p.fecha)}
+                    </p>
+                    <p className="mt-2 text-[13px] text-yellow-200">
+                        {p.estado_solicitud === 'en_cola'
+                            ? 'Se activa automáticamente al vencer tu plan actual.'
+                            : 'Pendiente de activación por el administrador.'}
+                    </p>
+                </div>
+            ))}
+        </div>
+    );
+};
+
+
+export const SeccionPagos = ({ datos, onPagina, misPagos, misPagosError }) => {
     const t = datos.totales || {};
     const items = datos.items || [];
     const porAnio = datos.por_anio || [];
@@ -338,6 +458,9 @@ export const SeccionPagos = ({ datos, onPagina }) => {
                 <Dato label="Bazar" valor={clp(t.bazar_clp)} />
                 <Dato label="Último pago" valor={fechaCorta(t.ultimo_pago)} />
             </div>
+
+            <PendientesDeActivar misPagos={misPagos} />
+            <HistorialCompras misPagos={misPagos} error={misPagosError} />
 
             <p className="text-xs text-zinc-500">
                 Las membresías muestran lo que se cobró DE VERDAD (las transacciones del box: el
@@ -414,7 +537,7 @@ export const SeccionPagos = ({ datos, onPagina }) => {
 };
 
 
-export const SeccionMembresias = ({ datos, onPagina }) => {
+export const SeccionMembresias = ({ datos, onPagina, misPagos }) => {
     const r = datos.resumen || {};
     const actual = datos.membresia_actual;
     const items = datos.items || [];
@@ -428,6 +551,10 @@ export const SeccionMembresias = ({ datos, onPagina }) => {
                     testid="historial-meses-con-plan" />
                 <Dato label="Meses sin plan" valor={num(r.meses_sin_plan)} />
             </div>
+
+            {/* Compra pagada que todavía no activó: el alumno tiene que verla en
+                Membresías (es SU plan), no sólo en la pestaña Pagos. */}
+            <PendientesDeActivar misPagos={misPagos} />
 
             <Card titulo="Plan vigente hoy">
                 {!actual ? (
@@ -713,6 +840,11 @@ const PanelHistorial = ({ alumnoId = null }) => {
         data: panel, isPending, isError, error: errorConsulta, refetch,
     } = usePanelHistorial({ alumnoId, seccion, pagina, porPagina: POR_PAGINA });
 
+    // Compras del PROPIO alumno (incluye las pagadas sin plan activo). Sólo en su
+    // vista: la ficha del box ya muestra la caja del alumno y el endpoint es del
+    // token del alumno.
+    const misPagosQ = useMisPagos({ enabled: !alumnoId });
+
     // "Cargando" sólo mientras NO hay nada que mostrar: al cambiar de sección o de página
     // se sigue viendo la anterior hasta que llega la nueva (`placeholderData`), sin
     // parpadeo en blanco. El error se DERIVA de la consulta (antes era un estado aparte
@@ -792,7 +924,12 @@ const PanelHistorial = ({ alumnoId = null }) => {
             )}
 
             {!cargando && !error && panel && (
-                <Render datos={panel.datos || {}} onPagina={setPagina} />
+                <Render
+                    datos={panel.datos || {}}
+                    onPagina={setPagina}
+                    misPagos={alumnoId ? null : misPagosQ.data}
+                    misPagosError={alumnoId ? false : misPagosQ.isError}
+                />
             )}
         </div>
     );

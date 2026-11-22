@@ -47,6 +47,10 @@ const ETIQUETAS_TIPO = {
     // Solicitud de plan con voucher: la pide el alumno y la revisa el ADMIN
     // (solicitudes_planes.py -> notificar_admins_del_tenant).
     plan_solicitado: 'Solicitud de plan (voucher)',
+    // Cobro ONLINE de un plan (services/pagos.py -> admins del box). No es
+    // `plan_solicitado`: acá no hay comprobante que revisar, hay un pago de
+    // Mercado Pago que se mira en "Pagos del día".
+    plan_pagado_online: 'Pago online de plan',
     // Alta de alumno por autoservicio (alumnos.py -> admins del box).
     alumno_nuevo: 'Alumno nuevo',
     // Cobertura de emergencia: un coach cubrió una clase que no era suya
@@ -80,6 +84,11 @@ const DESTINOS_TIPO = {
     // Planes: la solicitud con comprobante se aprueba en la pestaña Solicitudes; el
     // alumno ve el estado de su trámite en su pantalla de solicitar plan.
     plan_solicitado: '/admin/pendientes?tab=solicitudes',
+    // Pago online: la tarjeta/pantalla que muestra los cobros del día con su
+    // estado (Activo / Pendiente de activar). Antes este aviso era
+    // `plan_solicitado` y abría la pestaña de vouchers, que para un cobro online
+    // está vacía.
+    plan_pagado_online: '/admin/pagos-del-dia',
     aprobado: '/alumno/solicitar-plan',
     rechazado: '/alumno/solicitar-plan',
     // Alta de alumno: los que se registraron solos esperan activación en Registros.
@@ -106,6 +115,7 @@ const ROLES_POR_TIPO = {
     pedido_validado: ['alumno'],
     pedido_entregado: ['alumno'],
     plan_solicitado: ['administrador', 'admin'],
+    plan_pagado_online: ['administrador', 'admin'],
     aprobado: ['alumno'],
     rechazado: ['alumno'],
     alumno_nuevo: ['administrador', 'admin'],
