@@ -691,8 +691,8 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
     """), {"tid": tenant_id}).scalar() or 0)
     ltv = round((arpu or 0) * vida_dias / 30, 0)
 
-    _style_section_header(ws, 10, 1, "Cuánto deja cada plan hoy", BLUE_KPI)
-    _style_table_header(ws, 11, ["Plan", "Precio lista", "Suscripciones", "Ticket prom.", "Ingreso total"])
+    _style_section_header(ws, 10, 1, "Ingreso histórico por plan", BLUE_KPI)
+    _style_table_header(ws, 11, ["Plan", "Precio lista", "Suscripciones vigentes", "Ticket prom.", "Ingreso total"])
     r = 12
     for i, fila in enumerate(planes):
         _style_data_row(ws, r, [fila[0], fila[1] or 0, fila[2] or 0, fila[3] or 0, fila[4] or 0],
