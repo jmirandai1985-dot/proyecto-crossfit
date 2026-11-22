@@ -1,0 +1,65 @@
+# syntax=docker/dockerfile:1
+# ============================================================
+# Dockerfile.cola — imagen EXCLUSIVA del Cron Job `box-crossfit-activar-cola`.
+#
+# Por qué una imagen aparte (2026-11-22):
+#   * `activar_planes_en_cola` es el ÚNICO job de mantenimiento que importa la app
+#     (`SessionLocal` + `services/aprobacion_planes`), así que necesita SQLAlchemy,
+#     psycopg2 y el código de `app/`.
+#   * `backend/Dockerfile.cron` es compartido por backups, retención, KPIs, etc. y es
+#     deliberadamente mínimo (sin la app). Extenderlo habría cambiado la imagen de
+#     TODOS esos jobs; esta imagen aísla esa necesidad y deja `Dockerfile.cron` igual.
+#   * No se copian `app/api`, `app/schemas`, `app/static` ni `app/private_uploads`
+#     (documentos de alumnos: no hacen falta y no deben viajar en esta imagen).
+#
+# Base `python:3.12-slim`: ya trae ca-certificates y tzdata (ZoneInfo America/Santiago),
+# así que no hace falta apt-get. Contexto de build = backend/:
+#   docker build -f backend/Dockerfile.cola backend -t box-crossfit-activar-cola:local
+# ============================================================
+FROM python:3.12-slim
+
+# Mismos ENV que el resto de los jobs de mantenimiento: logs en hora de Chile y
+# salida sin buffer para que Render muestre el run en vivo.
+ENV TZ=America/Santiago \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /app
+
+# Dependencias de la app que necesita la cadena de `activar_planes_en_cola`.
+# Versiones IGUALES a backend/requirements.txt. Verificado: no arrastra FastAPI,
+# pandas ni sklearn (por eso no se instala el requirements completo).
+RUN pip install --no-cache-dir \
+    sqlalchemy==2.0.25 \
+    psycopg2-binary==2.9.9 \
+    pydantic==2.5.3 \
+    pydantic-settings==2.1.0 \
+    python-dotenv==1.0.0
+
+# `maintenance/__init__.py` es obligatorio para que resuelva
+# `python -m maintenance.activar_planes_en_cola`.
+COPY maintenance/__init__.py ./maintenance/__init__.py
+COPY maintenance/activar_planes_en_cola.py ./maintenance/activar_planes_en_cola.py
+
+# `shared/` lo importa `app/core/estados.py` (y `app/models/reserva.py`): sin esto
+# el job muere con "No module named 'shared'".
+COPY shared/__init__.py ./shared/__init__.py
+COPY shared/estados.py ./shared/estados.py
+
+# La app: sólo los paquetes de la cadena que importa el job.
+# (`app/utils/` no tiene __init__.py: es un namespace package y se copia igual.)
+COPY app/__init__.py ./app/__init__.py
+COPY app/core/ ./app/core/
+COPY app/db/ ./app/db/
+COPY app/models/ ./app/models/
+COPY app/services/ ./app/services/
+COPY app/utils/ ./app/utils/
+
+# Usuario no-root (mismo patrón que Dockerfile.cron).
+RUN useradd --create-home --uid 1000 boxapp \
+    && chown -R boxapp:boxapp /app
+USER boxapp
+
+# Render ejecuta el job por `dockerCommand`; este CMD es el mismo por si la imagen
+# se corre a mano y para que nunca arranque otra cosa por accidente.
+CMD ["python", "-m", "maintenance.activar_planes_en_cola"]
