@@ -936,23 +936,65 @@ def get_financiero(
     tenant_id = current_user["tenant_id"]
 
     planes = db.execute(sql_text("""
+        WITH tx_plan AS (
+            -- Compras normales: la transacción referencia la suscripción.
+            SELECT s.plan_id,
+                   t.id AS tx_id,
+                   t.monto
+            FROM transacciones_financieras t
+            JOIN suscripciones s
+              ON s.id = t.referencia_id
+             AND s.tenant_id = t.tenant_id
+            WHERE t.tenant_id = :tid
+              AND t.tipo = 'ingreso'
+              AND t.categoria = 'membresia'
+              AND t.referencia_tipo = 'suscripcion'
+
+            UNION ALL
+
+            -- Compras EN COLA: todavía no hay suscripción; la transacción
+            -- referencia la solicitud y `solicitudes_planes.plan_id` da el plan.
+            SELECT sp.plan_id,
+                   t.id AS tx_id,
+                   t.monto
+            FROM transacciones_financieras t
+            JOIN solicitudes_planes sp
+              ON sp.id = t.referencia_id
+             AND sp.tenant_id = t.tenant_id
+            WHERE t.tenant_id = :tid
+              AND t.tipo = 'ingreso'
+              AND t.categoria = 'membresia'
+              AND t.referencia_tipo = 'solicitud_plan'
+        ),
+        tx_agg AS (
+            -- Se agrega ANTES de unir con `planes`: si las transacciones se
+            -- cruzaran con las N suscripciones del plan, cada compra en cola se
+            -- multiplicaría por N y el SUM/AVG quedaría inflado (fan-out).
+            SELECT plan_id,
+                   COUNT(*) AS n_transacciones,
+                   AVG(monto) AS ticket,
+                   SUM(monto) AS ingreso_total
+            FROM tx_plan
+            GROUP BY plan_id
+        ),
+        subs_agg AS (
+            -- Conteo de suscripciones aparte: no se cruza con las transacciones.
+            SELECT plan_id,
+                   COUNT(*) AS suscripciones
+            FROM suscripciones
+            WHERE tenant_id = :tid
+            GROUP BY plan_id
+        )
         SELECT p.nombre,
                p.precio_clp,
-               COUNT(DISTINCT s.id) AS suscripciones,
-               COUNT(t.id) AS n_transacciones,
-               COALESCE(ROUND(AVG(t.monto)), 0) AS ticket,
-               COALESCE(SUM(t.monto), 0) AS ingreso_total
+               COALESCE(sa.suscripciones, 0) AS suscripciones,
+               COALESCE(ta.n_transacciones, 0) AS n_transacciones,
+               COALESCE(ROUND(ta.ticket), 0) AS ticket,
+               COALESCE(ta.ingreso_total, 0) AS ingreso_total
         FROM planes p
-        LEFT JOIN suscripciones s
-               ON s.plan_id = p.id AND s.tenant_id = :tid
-        LEFT JOIN transacciones_financieras t
-               ON t.referencia_id = s.id
-              AND t.referencia_tipo = 'suscripcion'
-              AND t.categoria = 'membresia'
-              AND t.tipo = 'ingreso'
-              AND t.tenant_id = :tid
+        LEFT JOIN tx_agg ta ON ta.plan_id = p.id
+        LEFT JOIN subs_agg sa ON sa.plan_id = p.id
         WHERE p.tenant_id = :tid
-        GROUP BY p.id, p.nombre, p.precio_clp
         ORDER BY ingreso_total DESC, suscripciones DESC
     """), {"tid": tenant_id}).fetchall()
 
