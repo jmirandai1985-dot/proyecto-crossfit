@@ -26,6 +26,10 @@ import { textoHace } from '../../utils/hace';
 import PanelAlumnosPrueba from '../../components/PanelAlumnosPrueba';
 import FichaAlumnoTabs from '../../components/FichaAlumnoTabs';
 import { useAlumnosPrueba } from '../../hooks/useAlumnosPrueba';
+// Tarjeta "Pagos del día": el MISMO componente y la MISMA consulta que el
+// Dashboard de escritorio (≥768px) y la pantalla /admin/pagos-del-dia.
+import PagosDelDia from '../../components/pagos/PagosDelDia';
+import { usePagosDelDia } from '../../hooks/queries';
 import { iniciales } from '../../utils/iniciales';
 // Pedidos listos para entrega (Bazar): qué fila se lista y qué dice cada una.
 // OJO: el CÓDIGO DE RETIRO no se muestra en la tarjeta —es la prueba de que el pedido
@@ -684,6 +688,14 @@ const InicioMobileAdmin = () => {
     // la MISMA implementación la usa la ruta de escritorio `/admin/alumnos-prueba`.
     // Acá sólo se guarda si la capa está abierta y se refresca al abrirla.
     const prueba = useAlumnosPrueba();
+
+    // ── Pagos del día (tarjeta del Inicio móvil) ─────────────────────────────
+    // La MISMA queryKey que el Dashboard de escritorio: React Query comparte la
+    // caché, así que abrir esta pantalla después del dashboard no vuelve a pedir
+    // nada. `pagosDelDia` sólo decide si la tarjeta se muestra (vacío = todavía
+    // no hay cobros hoy, no hay nada que enseñar).
+    const { data: pagosDelDia } = usePagosDelDia();
+
     const [tarjeta, setTarjeta] = useState(false);       // pantalla abierta
 
     const abrirTarjeta = () => {
@@ -990,6 +1002,21 @@ const InicioMobileAdmin = () => {
                         </>
                     )}
                 </section>
+
+                {/* ── Pagos del día ───────────────────────────────────── */}
+                {pagosDelDia && (
+                    <section className="card" aria-labelledby="ub-pagos-dia">
+                        <div className="card-head">
+                            <h2 id="ub-pagos-dia">Pagos del día</h2>
+                            <button type="button" className="link"
+                                onClick={() => navigate('/admin/pagos-del-dia')}>
+                                Ver detalle
+                            </button>
+                        </div>
+                        <PagosDelDia maxFilas={4} />
+                    </section>
+                )}
+
 
                 {/* ── D. "Asistencia": HOY por franja + la semana en curso ─────
                     A1: "Alumnos activos" dejó de ser tarjeta y es el SUBTÍTULO de
