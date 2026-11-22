@@ -126,13 +126,19 @@ const ROLES_POR_TIPO = {
     clase_liberada: ['coach'],
 };
 
-/** Ruta del aviso para el rol actual (null = la fila NO navega). */
+/** Ruta del aviso para el rol actual (null = la fila NO navega).
+ *
+ * Acepta las DOS formas de destino que conviven en el proyecto: el string pelado
+ * (este mapa) y el objeto `{ path }` (el de `kpis/destinoNotificacion.js`, que
+ * además lleva `label`/`conAlumno`). Sin normalizar, una entrada con forma de
+ * objeto llegaría tal cual a `navigate()` y el clic no llevaría a ningún lado.
+ */
 const destinoDe = (tipo, rol) => {
     const destino = DESTINOS_TIPO[tipo];
     if (!destino) return null;
     const roles = ROLES_POR_TIPO[tipo];
     if (roles && !roles.includes(rol)) return null;
-    return destino;
+    return typeof destino === 'string' ? destino : (destino.path || null);
 };
 
 const CampanaNotificaciones = () => {

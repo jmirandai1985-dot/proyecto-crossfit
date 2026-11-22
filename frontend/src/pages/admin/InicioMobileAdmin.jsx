@@ -26,10 +26,10 @@ import { textoHace } from '../../utils/hace';
 import PanelAlumnosPrueba from '../../components/PanelAlumnosPrueba';
 import FichaAlumnoTabs from '../../components/FichaAlumnoTabs';
 import { useAlumnosPrueba } from '../../hooks/useAlumnosPrueba';
-// Tarjeta "Pagos del día": el MISMO componente y la MISMA consulta que el
-// Dashboard de escritorio (≥768px) y la pantalla /admin/pagos-del-dia.
+// Tarjeta "Pagos del día": el MISMO componente que el Dashboard de escritorio
+// (≥768px) y la pantalla /admin/pagos-del-dia. Acá se abre como accordion desde
+// el KPI "Ingresos de hoy" (no navega).
 import PagosDelDia from '../../components/pagos/PagosDelDia';
-import { usePagosDelDia } from '../../hooks/queries';
 import { iniciales } from '../../utils/iniciales';
 // Pedidos listos para entrega (Bazar): qué fila se lista y qué dice cada una.
 // OJO: el CÓDIGO DE RETIRO no se muestra en la tarjeta —es la prueba de que el pedido
@@ -689,12 +689,11 @@ const InicioMobileAdmin = () => {
     // Acá sólo se guarda si la capa está abierta y se refresca al abrirla.
     const prueba = useAlumnosPrueba();
 
-    // ── Pagos del día (tarjeta del Inicio móvil) ─────────────────────────────
-    // La MISMA queryKey que el Dashboard de escritorio: React Query comparte la
-    // caché, así que abrir esta pantalla después del dashboard no vuelve a pedir
-    // nada. `pagosDelDia` sólo decide si la tarjeta se muestra (vacío = todavía
-    // no hay cobros hoy, no hay nada que enseñar).
-    const { data: pagosDelDia } = usePagosDelDia();
+    // ── Pagos del día (accordion del KPI "Ingresos de hoy") ──────────────────
+    // Se abre y se cierra a mano: NO navega fuera del dashboard. El dato lo pide
+    // el propio `PagosDelDia` (misma queryKey que el escritorio), así que acá no
+    // hace falta el hook.
+    const [mostrarPagos, setMostrarPagos] = useState(false);
 
     const [tarjeta, setTarjeta] = useState(false);       // pantalla abierta
 
@@ -828,7 +827,8 @@ const InicioMobileAdmin = () => {
                        no la hoja rápida.
                     2) Vencen en 5 días -> Fidelización (sin cambios).
                     3) Alumnos nuevos y en prueba -> su pantalla (sin cambios).
-                    4) Ingresos de hoy -> INFORMATIVA: ya no navega a Reportes.
+                    4) Ingresos de hoy -> despliega/colapsa "Pagos del día" INLINE
+                       (accordion). NO navega fuera del dashboard ni va a Reportes.
                     "Alumnos activos" dejó de ser tarjeta: es el subtítulo que
                     encabeza la asistencia (ver bloque D). ───────────────────── */}
                 <section className="kpis" aria-label="Resumen del día">
@@ -859,15 +859,16 @@ const InicioMobileAdmin = () => {
                             : 'toca para ver el detalle'}
                         chevron onClick={abrirTarjeta} testid="kpi-prueba"
                     />
-                    {/* Cuarta tarjeta (ancho completo): la caja del día. OJO (A1): es
-                        INFORMATIVA —antes abría Reportes—, así que va como `<div>`
-                        (sin cursor de enlace y sin foco de teclado). */}
+                    {/* Cuarta tarjeta (ancho completo): la caja del día. Tocar
+                        despliega/colapsa el detalle INLINE (la sección de abajo);
+                        NO navega fuera del dashboard. */}
                     <Kpi
                         clase="k-caja wide" icono="caja" label="Ingresos de hoy" dinero
                         valor={kpis.caja} error={errores.caja} cargando={cargando}
                         sub={kpis.pagos != null
                             ? <><em>{kpis.pagos} {kpis.pagos === 1 ? 'pago' : 'pagos'}</em> registrados</>
                             : 'caja del día'}
+                        chevron onClick={() => setMostrarPagos((v) => !v)}
                     />
                 </section>
 
@@ -1003,8 +1004,8 @@ const InicioMobileAdmin = () => {
                     )}
                 </section>
 
-                {/* ── Pagos del día ───────────────────────────────────── */}
-                {pagosDelDia && (
+                {/* ── Pagos del día (accordion) ───────────────── */}
+                {mostrarPagos && (
                     <section className="card" aria-labelledby="ub-pagos-dia">
                         <div className="card-head">
                             <h2 id="ub-pagos-dia">Pagos del día</h2>
@@ -1013,7 +1014,7 @@ const InicioMobileAdmin = () => {
                                 Ver detalle
                             </button>
                         </div>
-                        <PagosDelDia maxFilas={4} />
+                        <PagosDelDia maxFilas={4} mostrarEnlace={false} />
                     </section>
                 )}
 
