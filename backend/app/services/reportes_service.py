@@ -619,16 +619,63 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
     ws.row_dimensions[kpi + 2].height = 20
 
     planes = db.execute(text(f"""
-        SELECT p.nombre, p.precio_clp, COUNT(DISTINCT s.id) AS suscripciones,
-               COALESCE(ROUND(AVG(t.monto)), 0) AS ticket, COALESCE(SUM(t.monto), 0) AS ingreso
+        WITH tx_plan AS (
+            -- Compras normales: la transacción referencia la suscripción.
+            SELECT s.plan_id,
+                   t.id AS tx_id,
+                   t.monto
+            FROM transacciones_financieras t
+            JOIN suscripciones s
+              ON s.id = t.referencia_id
+             AND s.tenant_id = t.tenant_id
+            WHERE t.tenant_id = :tid
+              AND t.tipo = 'ingreso'
+              AND t.categoria = 'membresia'
+              AND t.referencia_tipo = 'suscripcion'
+
+            UNION ALL
+
+            -- Compras EN COLA: todavía no hay suscripción; la transacción
+            -- referencia la solicitud y `solicitudes_planes.plan_id` da el plan.
+            SELECT sp.plan_id,
+                   t.id AS tx_id,
+                   t.monto
+            FROM transacciones_financieras t
+            JOIN solicitudes_planes sp
+              ON sp.id = t.referencia_id
+             AND sp.tenant_id = t.tenant_id
+            WHERE t.tenant_id = :tid
+              AND t.tipo = 'ingreso'
+              AND t.categoria = 'membresia'
+              AND t.referencia_tipo = 'solicitud_plan'
+        ),
+        tx_agg AS (
+            -- Se agrega ANTES de unir con `planes`: si las transacciones se
+            -- cruzaran con las N suscripciones del plan, cada compra en cola se
+            -- multiplicaría por N y el SUM/AVG quedaría inflado (fan-out).
+            SELECT plan_id,
+                   AVG(monto) AS ticket,
+                   SUM(monto) AS ingreso
+            FROM tx_plan
+            GROUP BY plan_id
+        ),
+        subs_agg AS (
+            -- Mismo criterio que antes: sólo suscripciones VIGENTES HOY.
+            SELECT s.plan_id,
+                   COUNT(*) AS suscripciones
+            FROM suscripciones s
+            WHERE s.tenant_id = :tid
+              AND {sql_suscripcion_vigente("s")}
+            GROUP BY s.plan_id
+        )
+        SELECT p.nombre, p.precio_clp,
+               COALESCE(sa.suscripciones, 0) AS suscripciones,
+               COALESCE(ROUND(ta.ticket), 0) AS ticket,
+               COALESCE(ta.ingreso, 0) AS ingreso
         FROM planes p
-        LEFT JOIN suscripciones s ON s.plan_id = p.id AND s.tenant_id = :tid
-            AND {sql_suscripcion_vigente("s")}
-        LEFT JOIN transacciones_financieras t ON t.referencia_id = s.id
-            AND t.referencia_tipo = 'suscripcion' AND t.categoria = 'membresia'
-            AND t.tipo = 'ingreso' AND t.tenant_id = :tid
+        LEFT JOIN tx_agg ta ON ta.plan_id = p.id
+        LEFT JOIN subs_agg sa ON sa.plan_id = p.id
         WHERE p.tenant_id = :tid
-        GROUP BY p.id, p.nombre, p.precio_clp
         ORDER BY ingreso DESC, suscripciones DESC
     """), {"tid": tenant_id}).fetchall()
 

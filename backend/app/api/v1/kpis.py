@@ -925,10 +925,13 @@ def get_financiero(
     """Bloque financiero del BI: ticket promedio por plan + vida promedio.
 
     - `ticket_promedio`: avg(monto) de las transacciones REALES de membresía
-      (`transacciones_financieras`: tipo=ingreso, categoria=membresia,
-      referencia_tipo=suscripcion) agrupadas por el plan de la suscripción, más
-      el global. Se usan las transacciones y no el precio de lista para capturar
-      descuentos/compras de emergencia si algún día existen.
+      (`transacciones_financieras`: tipo=ingreso, categoria=membresia) agrupadas
+      por el plan que la compra solicitó: las compras normales se resuelven por
+      su suscripción (`referencia_tipo='suscripcion'`) y las compras EN COLA por
+      su solicitud (`referencia_tipo='solicitud_plan'`), contando cada
+      transacción UNA sola vez. Más el global. Se usan las transacciones y no el
+      precio de lista para capturar descuentos/compras de emergencia si algún
+      día existen.
     - `vida`: promedio de (fecha_baja o hoy - created_at) de los alumnos del
       tenant, en días y en meses -> insumo del LTV.
     - NO se calcula CAC: la base no tiene costo de adquisición (no se inventa).
@@ -1040,8 +1043,9 @@ def get_financiero(
             "ingreso_total": float(global_tx[2] or 0),
             "criterio": (
                 "avg(monto) de transacciones_financieras (tipo=ingreso, "
-                "categoria=membresia, referencia_tipo=suscripcion) agrupado por "
-                "el plan de la suscripción"),
+                "categoria=membresia) agrupado por el plan de la compra: "
+                "suscripción (referencia_tipo=suscripcion) o solicitud en cola "
+                "(referencia_tipo=solicitud_plan)"),
             "por_plan": [
                 {
                     "plan": r[0],

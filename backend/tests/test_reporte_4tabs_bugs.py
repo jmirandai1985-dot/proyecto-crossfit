@@ -102,10 +102,35 @@ def _crear_transaccion(db, tenant_id, monto, fecha):
     """), {"t": tenant_id, "m": monto, "f": fecha}).scalar()
 
 
+def _crear_solicitud_en_cola(db, tenant_id, alumno_id, plan_id, precio):
+    """Solicitud pagada que quedó EN COLA (el alumno ya tenía un plan vigente)."""
+    return db.execute(text("""
+        INSERT INTO solicitudes_planes
+            (tenant_id, alumno_id, plan_id, estado, precio_clp_snapshot,
+             origen_pago)
+        VALUES (:t, :a, :p, 'en_cola', :precio, 'manual')
+        RETURNING id
+    """), {"t": tenant_id, "a": alumno_id, "p": plan_id,
+           "precio": precio}).scalar()
+
+
+def _crear_transaccion_en_cola(db, tenant_id, solicitud_id, monto, fecha):
+    """Tx de una compra en cola: apunta a la SOLICITUD, no a una suscripción."""
+    return db.execute(text("""
+        INSERT INTO transacciones_financieras
+            (tenant_id, tipo, categoria, monto, fecha, referencia_tipo,
+             referencia_id)
+        VALUES (:t, 'ingreso', 'membresia', :m, :f, 'solicitud_plan', :s)
+        RETURNING id
+    """), {"t": tenant_id, "m": monto, "f": fecha, "s": solicitud_id}).scalar()
+
+
 def _limpiar(db, tenant_id):
     db.rollback()
     try:
         db.execute(text("DELETE FROM transacciones_financieras WHERE tenant_id = :t"),
+                   {"t": tenant_id})
+        db.execute(text("DELETE FROM solicitudes_planes WHERE tenant_id = :t"),
                    {"t": tenant_id})
         db.execute(text("DELETE FROM suscripciones WHERE tenant_id = :t"),
                    {"t": tenant_id})
@@ -205,6 +230,77 @@ def test_bug3_mom_mes_en_curso_compara_dia_contra_dia(db, monkeypatch):
         assert ws.cell(12, 1).value == "Ingresos"
         assert ws.cell(12, 2).value == "$1,000"
         assert ws.cell(12, 3).value == "$500", ws.cell(12, 3).value
+        wb.close()
+    finally:
+        _limpiar(db, tenant)
+
+
+# ── Compras en cola: "Cuánto deja cada plan hoy" debe incluirlas ─────────────
+def test_por_plan_incluye_compra_en_cola(db):
+    """Una compra en cola (tx referencia 'solicitud_plan') cuenta en su plan.
+
+    Antes del fix la hoja sólo unía transacciones con referencia_tipo
+    'suscripcion': la compra en cola quedaba fuera del plan aunque el dinero
+    ya estaba cobrado (y el bloque global sí la sumaba).
+    """
+    hoy = hoy_santiago()
+    tenant = _crear_tenant(db)
+    suf = _sufijo()
+    nombre_a = f"Plan A {suf}"
+    nombre_b = f"Plan B {suf}"
+    precio_a = 40000
+    precio_b = 30000
+    plan_a = _crear_plan(db, tenant, nombre_a, precio_a)
+    plan_b = _crear_plan(db, tenant, nombre_b, precio_b)
+
+    # El alumno ya tiene un plan A pagado y vigente: la compra de B va a cola.
+    alumno = _crear_usuario(db, tenant)
+    _crear_suscripcion(db, tenant, alumno, plan_a,
+                       hoy - timedelta(days=10), hoy + timedelta(days=10))
+    solicitud = _crear_solicitud_en_cola(db, tenant, alumno, plan_b, precio_b)
+    tx = _crear_transaccion_en_cola(db, tenant, solicitud, precio_b, hoy)
+    db.commit()
+
+    try:
+        contenido = rep.crear_reporte_ventas_mensual_bytes(
+            db, tenant, hoy.month, hoy.year)
+        wb = load_workbook(BytesIO(contenido))
+        ws = wb["Por alumno"]
+        # Misma lectura que test_bug2: header en fila 11, data desde 12
+        # (A=Plan, C=Suscripciones, D=Ticket prom., E=Ingreso total).
+        filas = {}
+        for fila in range(12, ws.max_row + 1):
+            nombre = ws.cell(fila, 1).value
+            if not nombre or str(nombre).startswith("Lo que paga"):
+                break
+            filas[str(nombre)] = {
+                "suscripciones": ws.cell(fila, 3).value,
+                "ticket": ws.cell(fila, 4).value,
+                "ingreso": ws.cell(fila, 5).value,
+            }
+
+        # Plan B: la compra en cola aparece como UNA transacción (ticket =
+        # ingreso = monto). No hay suscripción todavía: sigue en cola.
+        fila_b = filas[nombre_b]
+        assert fila_b["suscripciones"] == 0, filas
+        assert float(fila_b["ticket"] or 0) == float(precio_b), filas
+        assert float(fila_b["ingreso"] or 0) == float(precio_b), filas
+
+        # Plan A no cambia: su suscripción vigente cuenta y no tiene ingresos.
+        fila_a = filas[nombre_a]
+        assert fila_a["suscripciones"] == 1, filas
+        assert float(fila_a["ticket"] or 0) == 0.0, filas
+        assert float(fila_a["ingreso"] or 0) == 0.0, filas
+
+        # La transacción existe una sola vez y con la referencia de la solicitud.
+        n = db.execute(text("""
+            SELECT COUNT(*) FROM transacciones_financieras
+            WHERE id = :tx AND tenant_id = :t AND tipo = 'ingreso'
+              AND categoria = 'membresia'
+              AND referencia_tipo = 'solicitud_plan'
+              AND referencia_id = :s
+        """), {"tx": tx, "t": tenant, "s": solicitud}).scalar()
+        assert n == 1, n
         wb.close()
     finally:
         _limpiar(db, tenant)
