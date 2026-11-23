@@ -4,7 +4,9 @@ import {
 } from '../utils/franjasAsistencia';
 // La ocupación por horario se mide con la ASISTENCIA MARCADA (no con las
 // reservas): el mismo contador que usan la pestaña Asistencia y el Historial.
-import { porcentaje, presentesDe } from '../utils/historialAsistencia';
+// `totalesDe` es la cuenta compartida del Historial: la tarjeta de hoy la usa
+// para sumar PERSONAS (asistieron + no show), no clases ni reservas.
+import { porcentaje, presentesDe, totalesDe } from '../utils/historialAsistencia';
 import { etiquetaTipo } from '../utils/avisosMarketing';
 
 /**
@@ -16,7 +18,8 @@ import { etiquetaTipo } from '../utils/avisosMarketing';
  * iguales. El panel se usa MINUTO A MINUTO para marcar asistencia, así que la pantalla ahora
  * se ordena alrededor de UNA pregunta —"¿cómo va la clase que tengo ahora?"—:
  *
- *   1. "Asistencia de hoy" + fecha + cuántas clases hay programadas;
+ *   1. "Asistencia de hoy" + fecha + cuántas clases hay programadas, y la tarjeta de PERSONAS
+ *      con asistencia marcada hoy (asistieron + no show), la misma cuenta que el Historial;
  *   2. la tarjeta grande de la clase EN CURSO (o la próxima): donut marcados/cupo, nombre,
  *      los 3 números (con reserva / ya marcaron / faltan) y el botón "Marcar asistencia",
  *      todo apilado y centrado;
@@ -117,6 +120,18 @@ const ResumenCoach = ({
     // la misma clase. Sin cupo cargado (dato viejo) se cae al cálculo contra las reservas.
     const faltan = Math.max((cupo || conReserva) - yaMarcaron, 0);
 
+    // ── Personas de HOY con asistencia marcada ─────────────────────────────────
+    // La misma cuenta que la tarjeta del Historial, aplicada a las clases del día:
+    // `totalesDe` sólo suma clases CON asistencia (cerradas o con alguna marca), así
+    // que las clases de hoy que todavía no se marcaron no aportan nada. La cifra
+    // principal es gente (asistieron + no show) y el % se mide sobre esa gente, no
+    // sobre los cupos. Sin marcas no hay denominador: la pantalla dice "Sin marcar".
+    const totalesHoy = totalesDe(clasesHoy);
+    const personasMarcadasHoy = totalesHoy.presentes + totalesHoy.ausentes;
+    const pctMarcadasHoy = personasMarcadasHoy === 0
+        ? null
+        : porcentaje(totalesHoy.presentes, personasMarcadasHoy);
+
     const estadoProxima = proximaClase ? estadoFila(proximaClase) : 'pendiente';
     const enCurso = estadoProxima === 'en-curso';
 
@@ -146,6 +161,42 @@ const ResumenCoach = ({
                     programada{clasesHoy.length === 1 ? '' : 's'}
                 </p>
             </div>
+
+            {/* ── 1b. Personas con asistencia marcada HOY (mismo formato que la tarjeta
+                del Historial): la cifra principal es la gente del día que ya tiene marca
+                (asistieron + no show) y el % se mide sobre esa gente. Las clases que
+                todavía no se marcaron no suman; sin marcas el % dice "Sin marcar". ── */}
+            {clasesHoy.length > 0 && (
+                <div className={`${TARJETA} flex flex-wrap items-center justify-between gap-4`}
+                    data-testid="resumen-personas-hoy">
+                    <div>
+                        <p className={ROTULO}>Personas con asistencia marcada hoy</p>
+                        <p className="mt-2 flex items-baseline gap-2">
+                            <span className="text-[34px] font-black leading-none text-white"
+                                data-testid="resumen-personas-hoy-total">
+                                {personasMarcadasHoy}
+                            </span>
+                            <span className="text-[12.5px] font-bold text-zinc-400">
+                                persona{personasMarcadasHoy === 1 ? '' : 's'}
+                            </span>
+                        </p>
+                        <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] font-bold">
+                            <span className="text-[#D7FF4A]">{totalesHoy.presentes} asistieron</span>
+                            <span className="text-amber-200">{totalesHoy.ausentes} no show</span>
+                        </p>
+                    </div>
+                    <div className="text-center">
+                        <span className={`block text-[26px] font-black leading-none ${
+                            pctMarcadasHoy === null ? 'text-zinc-500' : 'text-[#D7FF4A]'}`}
+                            data-testid="resumen-personas-hoy-pct">
+                            {pctMarcadasHoy === null ? 'Sin marcar' : `${pctMarcadasHoy}%`}
+                        </span>
+                        <span className="mt-1 block text-[10px] uppercase tracking-wide text-zinc-500">
+                            de las personas marcadas
+                        </span>
+                    </div>
+                </div>
+            )}
 
             {/* ── 2. La clase EN CURSO (o la próxima): el corazón de la pantalla ──
                 `data-proximo-cambio` (punto 5 del reporte móvil) es el instante en que el panel

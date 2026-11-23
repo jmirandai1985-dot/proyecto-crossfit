@@ -24,6 +24,9 @@
 import { readFileSync } from 'node:fs';
 
 const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+// La cuenta de la tarjeta de hoy se corre DE VERDAD: `totalesDe` y `porcentaje` son el util
+// puro compartido con el Historial (no importa nada, no toca el DOM ni la red).
+import { porcentaje, totalesDe } from '../src/utils/historialAsistencia.js';
 const RESUMEN = leer('../src/components/ResumenCoach.jsx');
 const DASH = leer('../src/pages/coach/DashboardCoach.jsx');
 // Los tipos de aviso (incluido el del aviso rápido) viven en el util compartido.
@@ -229,6 +232,57 @@ ok(/data-testid="resumen-sin-clases"/.test(RESUMEN), 'la lista "Mis clases de ho
 ok(/pídele al admin que te asigne tus disciplinas u horarios/.test(RESUMEN),
     'el estado vacío dice qué hacer (y a quién pedírselo)');
 
+
+console.log('== 8. La tarjeta de hoy cuenta PERSONAS con asistencia marcada ==');
+ok(/const totalesHoy = totalesDe\(clasesHoy\)/.test(RESUMEN),
+    'los totales del día salen de `totalesDe` (la MISMA cuenta del Historial)');
+ok(/const personasMarcadasHoy = totalesHoy\.presentes \+ totalesHoy\.ausentes/.test(RESUMEN),
+    'la cifra principal son personas marcadas: asistieron + no show');
+ok(/const pctMarcadasHoy = personasMarcadasHoy === 0[\s\S]{0,80}\? null[\s\S]{0,80}porcentaje\(totalesHoy\.presentes, personasMarcadasHoy\)/.test(RESUMEN),
+    'el % es asistieron / personas marcadas y es null sin marcas (nunca 0%)');
+ok(RESUMEN.includes('Personas con asistencia marcada hoy'),
+    'el encabezado dice "hoy" (y habla de personas, no de clases)');
+ok(/data-testid="resumen-personas-hoy-total"[\s\S]{0,60}\{personasMarcadasHoy\}/.test(RESUMEN),
+    'el número grande de la tarjeta es `personasMarcadasHoy` (no la cantidad de clases)');
+ok(/\{totalesHoy\.presentes\} asistieron/.test(RESUMEN)
+    && /\{totalesHoy\.ausentes\} no show/.test(RESUMEN),
+    'debajo se lee "X asistieron" y "Y no show"');
+ok(/pctMarcadasHoy === null \? 'Sin marcar'/.test(RESUMEN),
+    'sin asistencia marcada hoy el % dice "Sin marcar" (no 0%)');
+ok(/\{clasesHoy\.length\} clase\{clasesHoy\.length === 1 \? '' : 's'\}/.test(RESUMEN),
+    'la cantidad de clases sigue en el subtítulo, como dato, no como cifra principal');
+
+// La aritmética se corre DE VERDAD: 3 presentes + 1 no show hoy, más una clase sin marcar.
+const claseDeHoy = (extra = {}) => ({
+    id: 1, hora_inicio: '07:00', disciplina_nombre: 'CrossFit', cupo_maximo: 16,
+    reservas_count: 4, marcados_count: 3, marcada: true, ...extra,
+});
+const diaDeHoy = [
+    claseDeHoy(),
+    claseDeHoy({ id: 2, reservas_count: 8, marcados_count: 0, marcada: false }),
+];
+const totalesDelDia = totalesDe(diaDeHoy);
+eq(totalesDelDia.presentes, 3, '3 asistieron hoy');
+eq(totalesDelDia.ausentes, 1, '1 no show hoy');
+eq(totalesDelDia.presentes + totalesDelDia.ausentes, 4,
+    'la cifra principal es 4: la clase de hoy SIN marcar no suma');
+eq(porcentaje(totalesDelDia.presentes, totalesDelDia.presentes + totalesDelDia.ausentes), 75,
+    'el % es asistieron / personas marcadas: 3 de 4 = 75%');
+const diaSinMarcar = [claseDeHoy({ reservas_count: 8, marcados_count: 0, marcada: false })];
+const totalesSinMarcar = totalesDe(diaSinMarcar);
+eq(totalesSinMarcar.presentes + totalesSinMarcar.ausentes, 0,
+    'un día sin asistencia marcada tiene 0 personas');
+const pctDelDia = (t) => (t.presentes + t.ausentes === 0
+    ? 'Sin marcar'
+    : `${porcentaje(t.presentes, t.presentes + t.ausentes)}%`);
+eq(pctDelDia(totalesSinMarcar), 'Sin marcar', 'y el % dice "Sin marcar", no "0%"');
+
+// Y "Ocupación por horario" sigue midiendo la asistencia marcada de cada clase.
+ok(/const marcados = presentesDe\(clase\)/.test(RESUMEN)
+    && /porcentaje\(marcados, clase\.cupo_maximo\)/.test(RESUMEN),
+    'las barras usan la asistencia marcada de cada clase');
+ok(!/porcentaje\(reservasDe\(clase\)/.test(RESUMEN),
+    'las barras no usan las reservas como medida de asistencia');
 
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);
