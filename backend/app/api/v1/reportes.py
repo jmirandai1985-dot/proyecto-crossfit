@@ -80,7 +80,7 @@ def _ocupacion_por_disciplina(db: Session, tenant_id: int, inicio_mes, fin_mes):
             WHERE c.tenant_id = :tid
               AND c.fecha >= :inicio_d
               AND c.fecha <= :fin_d
-              AND """ + sql_clase_realizada("c") +  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+              AND """ + sql_clase_realizada("c") +  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
               """
             GROUP BY d.id, d.nombre
         ),
@@ -226,7 +226,7 @@ def _historico_ingresos_6m(db: Session, tenant_id: int):
           AND fecha <= :hasta
           AND {metricas.sql_transaccion_real("transacciones_financieras")}
         GROUP BY 1
-    """), {  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
         "tid": tenant_id,
         "desde": desde.date(),
         "hasta": hasta.date(),
@@ -331,7 +331,7 @@ def obtener_reportes_analytics(
               AND {metricas.sql_usuario_real("u")}
               AND s.estado = 'activo'
               AND s.fecha_expiracion >= (now() AT TIME ZONE 'America/Santiago')::date
-        """), {"tid": tenant_id}).scalar() or 0  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+        """), {"tid": tenant_id}).scalar() or 0  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
         # --- 2. NUEVOS ALUMNOS ESTE MES ---
         # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
@@ -342,7 +342,7 @@ def obtener_reportes_analytics(
               AND {metricas.sql_usuario_real("u")}
               AND u.created_at >= :inicio
               AND u.created_at <= :fin
-        """), {"tid": tenant_id, "inicio": inicio_mes, "fin": fin_mes}).scalar() or 0  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+        """), {"tid": tenant_id, "inicio": inicio_mes, "fin": fin_mes}).scalar() or 0  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
         # --- 3. CANCELACIONES ESTE MES ---
         # Suscripciones que expiraron o se cancelaron este mes
@@ -369,7 +369,7 @@ def obtener_reportes_analytics(
               AND (s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date >= :inicio_d
               AND (s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date <= :fin_d
             ORDER BY s.fecha_expiracion DESC, u.nombre ASC
-        """), {"tid": tenant_id, "inicio_d": inicio_mes.date(),  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+        """), {"tid": tenant_id, "inicio_d": inicio_mes.date(),  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
                "fin_d": fin_mes.date()}).fetchall()
         planes_vencidos_mes = [{
             "alumno_nombre": r.alumno_nombre,
@@ -462,7 +462,7 @@ def obtener_reportes_analytics(
             WHERE tenant_id = :tid
               AND fecha >= :inicio_d
               AND fecha <= :fin_d
-              AND """ + sql_clase_realizada("clases") +  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+              AND """ + sql_clase_realizada("clases") +  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
               """
         """), {"tid": tenant_id, "inicio_d": inicio_mes.date(), "fin_d": fin_mes.date()}).scalar() or 0
 

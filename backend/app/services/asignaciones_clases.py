@@ -229,7 +229,7 @@ def conflicto_futuro_en_horario(db: Session, tenant_id: int, horario_id: int,
           {excluir}
         ORDER BY c.fecha, c.id
         LIMIT 1
-    """), params).first()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), params).first()  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
     if not fila:
         return None
     return {
@@ -321,7 +321,7 @@ def liberar_clases_futuras_de_horario(db: Session, tenant_id: int, horario_id: i
           AND fecha >= :desde
           AND coach_id IS NOT NULL
           {solo_suyas}
-    """), params)  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), params)  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
     return res.rowcount
 
 

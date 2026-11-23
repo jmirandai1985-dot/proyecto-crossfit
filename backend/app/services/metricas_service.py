@@ -90,7 +90,7 @@ def sql_transaccion_real(alias_tx: str = "t") -> str:
         f"     AND p.tenant_id = {t}.tenant_id"
         f"     AND u.tenant_id = p.tenant_id"
         f"     AND u.es_prueba = true))"
-        f")"  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+        f")"  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
     )
 
 
@@ -116,7 +116,7 @@ def _vigente_sql(param_fecha):
         " u.tenant_id = :tid"
         " AND u.rol = 'alumno'"
         " AND u.estado = 'activo'"
-        " AND " + sql_usuario_real("u") +  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+        " AND " + sql_usuario_real("u") +  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
         " AND EXISTS ("
         "   SELECT 1 FROM suscripciones s"
         "   JOIN planes p ON p.id = s.plan_id"
@@ -158,7 +158,7 @@ def mrr(db: Session, tenant_id: int, hasta: date) -> float:
         JOIN usuarios u ON u.id = s.usuario_id AND u.tenant_id = s.tenant_id
         WHERE s.tenant_id = :tid
           AND u.rol = 'alumno'
-          AND """ + sql_usuario_real("u") +  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+          AND """ + sql_usuario_real("u") +  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
           """
           AND u.estado NOT IN (""" + lista_sql(ESTADOS_USUARIO_SIN_MRR) + """)
           AND """ + sql_suscripcion_vigente("s", ":hasta") + """
@@ -181,14 +181,14 @@ def ingresos_netos(db: Session, tenant_id: int, inicio: date, fin: date) -> floa
         WHERE tenant_id = :tid AND tipo = 'ingreso'
           AND fecha >= :ini AND fecha <= :fin
           AND {sql_transaccion_real("transacciones_financieras")}
-    """), params).scalar() or 0  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), params).scalar() or 0  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
     # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     egr = db.execute(text(f"""
         SELECT COALESCE(SUM(monto), 0) FROM transacciones_financieras
         WHERE tenant_id = :tid AND tipo = 'egreso'
           AND fecha >= :ini AND fecha <= :fin
           AND {sql_transaccion_real("transacciones_financieras")}
-    """), params).scalar() or 0  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), params).scalar() or 0  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
     return float(ing) - float(egr)
 
 
@@ -238,7 +238,7 @@ def ventas_bazar_detalle(db: Session, tenant_id: int, inicio: date, fin: date) -
     fila = db.execute(text(
         "SELECT COALESCE(SUM(p.total), 0), COUNT(*) FROM pedidos p"
         " WHERE p.tenant_id = :tid"
-        "   AND " + sql_fecha_en_chile("p.fecha_pedido") + " >= :desde"  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+        "   AND " + sql_fecha_en_chile("p.fecha_pedido") + " >= :desde"  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
         "   AND " + sql_fecha_en_chile("p.fecha_pedido") + " <= :hasta"
         "   AND p.estado IN (" + lista_sql_pago_bazar() + ")"
         "   AND NOT EXISTS ("
@@ -319,7 +319,7 @@ def ocupacion_promedio(db: Session, tenant_id: int, inicio: date, fin: date):
               AND {sql_clase_realizada("c")}
             GROUP BY c.id, c.cupo_maximo
         ) AS asis
-    """), {"tid": tenant_id, "ini": inicio, "fin": fin}).first()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {"tid": tenant_id, "ini": inicio, "fin": fin}).first()  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
     asistentes, cupo = int(fila[0] or 0), int(fila[1] or 0)
     return round(asistentes / cupo * 100, 2) if cupo > 0 else None
 
@@ -359,7 +359,7 @@ def reservas_sin_tope(db: Session, tenant_id: int, inicio: date, fin: date) -> i
         "WHERE c.tenant_id = :tid "
         "  AND c.fecha >= :ini AND c.fecha <= :fin "
         "  AND c.cupo_maximo IS NULL "
-        "  AND r.estado NOT IN (" + estados.lista_sql() + ")"  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+        "  AND r.estado NOT IN (" + estados.lista_sql() + ")"  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
     ), {"tid": tenant_id, "ini": inicio, "fin": fin}).scalar() or 0)
 
 
@@ -388,7 +388,7 @@ def alumnos_vigentes(db: Session, tenant_id: int, fecha: date) -> int:
     """
     return int(db.execute(
         # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
-        text("SELECT COUNT(*) FROM usuarios u WHERE " + _vigente_sql(":desde")),  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+        text("SELECT COUNT(*) FROM usuarios u WHERE " + _vigente_sql(":desde")),  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
         {"tid": tenant_id, "desde": fecha}).scalar() or 0)
 
 
@@ -409,7 +409,7 @@ def retencion_cohorte(db: Session, tenant_id: int, desde: date, hasta: date):
     if base < MIN_BASE_RETENCION:
         return None, base
     sql_siguen = (
-        "SELECT COUNT(*) FROM usuarios u WHERE " + _vigente_sql(":desde") +  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+        "SELECT COUNT(*) FROM usuarios u WHERE " + _vigente_sql(":desde") +  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
         " AND EXISTS ("
         "   SELECT 1 FROM suscripciones s2"
         "   JOIN planes p2 ON p2.id = s2.plan_id"

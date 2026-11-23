@@ -220,7 +220,7 @@ def listar_clases(
         {where_clause}
         ORDER BY c.fecha DESC, c.hora_inicio ASC
         LIMIT :limit OFFSET :skip
-    """)  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """)  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
     rows = db.execute(query, query_params).fetchall()
 
     # ── Fix N+1: precomputar en UNA sola query el coach unico activo por

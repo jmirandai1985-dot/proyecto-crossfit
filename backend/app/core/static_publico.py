@@ -66,7 +66,7 @@ def _referenciado(db, sufijo: str, columnas) -> bool:
         fila = db.execute(
             # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
             text(f"SELECT 1 FROM {tabla} "
-                 f"WHERE right({columna}, :largo) = :sufijo LIMIT 1"),  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+                 f"WHERE right({columna}, :largo) = :sufijo LIMIT 1"),  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
             {"largo": len(sufijo), "sufijo": sufijo},
         ).first()
         if fila:

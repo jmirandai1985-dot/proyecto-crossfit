@@ -250,7 +250,7 @@ def _build_historico_mensual(db, tenant_id):
             SELECT COALESCE(SUM(monto), 0) FROM transacciones_financieras
             WHERE tenant_id = :tid AND tipo = 'ingreso' AND fecha >= :ini AND fecha <= :fin
               AND {metricas.sql_transaccion_real("transacciones_financieras")}
-        """), {"tid": tenant_id, "ini": inicio, "fin": fin}).scalar() or 0  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+        """), {"tid": tenant_id, "ini": inicio, "fin": fin}).scalar() or 0  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
         # Egresos
         # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
@@ -258,7 +258,7 @@ def _build_historico_mensual(db, tenant_id):
             SELECT COALESCE(SUM(monto), 0) FROM transacciones_financieras
             WHERE tenant_id = :tid AND tipo = 'egreso' AND fecha >= :ini AND fecha <= :fin
               AND {metricas.sql_transaccion_real("transacciones_financieras")}
-        """), {"tid": tenant_id, "ini": inicio, "fin": fin}).scalar() or 0  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+        """), {"tid": tenant_id, "ini": inicio, "fin": fin}).scalar() or 0  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
         # Corte de las DOS columnas de suscripciones (no es el `fin` de las columnas financieras:
         # ver `_corte_suscripciones`).
@@ -275,7 +275,7 @@ def _build_historico_mensual(db, tenant_id):
               AND {metricas.sql_usuario_real("u")}
               AND {sql_suscripcion_vigente("s", ":corte")}
               AND {sql_plan_comercial("p")}
-        """), {"tid": tenant_id, "corte": corte}).scalar() or 0  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+        """), {"tid": tenant_id, "corte": corte}).scalar() or 0  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
         # Nuevos alumnos del mes
         # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
@@ -284,7 +284,7 @@ def _build_historico_mensual(db, tenant_id):
             WHERE u.tenant_id = :tid AND u.rol = 'alumno'
               AND {metricas.sql_usuario_real("u")}
               AND u.created_at::date >= :ini AND u.created_at::date <= :fin
-        """), {"tid": tenant_id, "ini": inicio, "fin": fin}).scalar() or 0  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+        """), {"tid": tenant_id, "ini": inicio, "fin": fin}).scalar() or 0  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
         # MRR al corte: NO una copia acá, la misma definición del dashboard y del BI
         mrr_val = metricas.mrr(db, tenant_id, corte)
@@ -340,7 +340,7 @@ def _pedidos_bazar_mes(db, tenant_id, inicio, fin):
             WHERE p.tenant_id = :tid
               AND (p.fecha_pedido AT TIME ZONE 'America/Santiago')::date >= :ini
               AND (p.fecha_pedido AT TIME ZONE 'America/Santiago')::date < :fin
-              AND p.estado IN (""" + lista_sql_pago_bazar() +  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+              AND p.estado IN (""" + lista_sql_pago_bazar() +  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
               """)
               AND NOT u.es_prueba
             ORDER BY p.fecha_pedido DESC
@@ -397,13 +397,13 @@ def _neto_rango(db, tenant_id, inicio, fin_exclusive):
         SELECT COALESCE(SUM(monto), 0) FROM transacciones_financieras
         WHERE tenant_id = :tid AND tipo = 'ingreso' AND fecha >= :ini AND fecha < :fin
           AND {metricas.sql_transaccion_real("transacciones_financieras")}
-    """), {"tid": tenant_id, "ini": inicio, "fin": fin_exclusive}).scalar() or 0  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {"tid": tenant_id, "ini": inicio, "fin": fin_exclusive}).scalar() or 0  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
     # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     eg = db.execute(text(f"""
         SELECT COALESCE(SUM(monto), 0) FROM transacciones_financieras
         WHERE tenant_id = :tid AND tipo = 'egreso' AND fecha >= :ini AND fecha < :fin
           AND {metricas.sql_transaccion_real("transacciones_financieras")}
-    """), {"tid": tenant_id, "ini": inicio, "fin": fin_exclusive}).scalar() or 0  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {"tid": tenant_id, "ini": inicio, "fin": fin_exclusive}).scalar() or 0  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
     ing_f, eg_f = float(ing), float(eg)
     return ing_f, eg_f, ing_f - eg_f
 
@@ -435,7 +435,7 @@ def _resumen_mes(db, tenant_id, anio, mes, limite_dia=None):
         WHERE u.tenant_id = :tid AND u.rol = 'alumno'
           AND {metricas.sql_usuario_real("u")}
           AND u.created_at::date >= :ini AND u.created_at::date < :fin
-    """), {"tid": tenant_id, "ini": inicio, "fin": fin_ex}).scalar() or 0  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {"tid": tenant_id, "ini": inicio, "fin": fin_ex}).scalar() or 0  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
     return {
         "anio": anio, "mes": mes, "corte": corte,
         "ingresos": ing, "egresos": eg, "neto": neto,
@@ -460,7 +460,7 @@ def _meses_de_historia(db, tenant_id):
             WHERE u.tenant_id = :tid AND u.rol = 'alumno'
               AND {metricas.sql_usuario_real("u")}
         ) t WHERE f IS NOT NULL
-    """), {"tid": tenant_id}).scalar()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {"tid": tenant_id}).scalar()  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
     if primera is None:
         return 0
     return (hoy.year - primera.year) * 12 + (hoy.month - primera.month) + 1
@@ -612,7 +612,7 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
             WHERE u.tenant_id = :tid AND u.rol = 'alumno'
               AND {metricas.sql_usuario_real("u")}
               AND u.created_at::date >= :ini AND u.created_at::date < :fin
-        """), {"tid": tenant_id, "ini": ini, "fin": fin}).scalar() or 0)  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+        """), {"tid": tenant_id, "ini": ini, "fin": fin}).scalar() or 0)  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
     nuevos_ytd = _nuevos_rango(date(anio, 1, 1), tope + timedelta(days=1))
     nuevos_ytd_a = _nuevos_rango(date(anio - 1, 1, 1), tope_ant + timedelta(days=1))
@@ -714,7 +714,7 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
         LEFT JOIN subs_agg sa ON sa.plan_id = p.id
         WHERE p.tenant_id = :tid
         ORDER BY ingreso DESC, suscripciones DESC
-    """), {"tid": tenant_id}).fetchall()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {"tid": tenant_id}).fetchall()  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
     # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     gt = db.execute(text(f"""
@@ -722,7 +722,7 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
         FROM transacciones_financieras
         WHERE tenant_id = :tid AND tipo = 'ingreso' AND categoria = 'membresia'
           AND {metricas.sql_transaccion_real("transacciones_financieras")}
-    """), {"tid": tenant_id}).first()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {"tid": tenant_id}).first()  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
     # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     vida_dias = int(db.execute(text(f"""
         SELECT COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (
@@ -730,7 +730,7 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
         FROM usuarios u WHERE u.tenant_id = :tid AND u.rol = 'alumno'
           AND u.estado = 'activo'
           AND {metricas.sql_usuario_real("u")}
-    """), {"tid": tenant_id}).scalar() or 0)  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {"tid": tenant_id}).scalar() or 0)  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
     ltv = round((arpu or 0) * vida_dias / 30, 0)
 
     _style_section_header(ws, 10, 1, "Ingreso histórico por plan", BLUE_KPI)

@@ -226,7 +226,7 @@ def supervision_grid_semanal(
           AND c.fecha >= :lunes
           AND c.fecha <= :domingo
         ORDER BY c.fecha, c.hora_inicio, d.nombre
-    """), {  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
         "tid": tenant_id,
         "lunes": lunes,
         "domingo": domingo
@@ -355,7 +355,7 @@ def supervision_grilla(
           AND d.requiere_coach = true
           {filtro_disc_plantillas}
         ORDER BY h.dia_semana, h.hora_inicio, d.nombre
-    """), params).fetchall()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), params).fetchall()  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
     plantillas = []
     for r in plantillas_rows:
@@ -404,7 +404,7 @@ def supervision_grilla(
           )
           {filtro_disc_clases}
         ORDER BY c.fecha, c.hora_inicio, d.nombre, c.id
-    """), params).fetchall()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), params).fetchall()  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
     from collections import defaultdict
 

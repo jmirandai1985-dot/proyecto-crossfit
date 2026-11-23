@@ -931,7 +931,7 @@ def _cancelar_reserva(
     cambio = db.execute(
         text(  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
             f"UPDATE reservas SET estado = '{ESTADO_CANCELADO}', updated_at = now() "
-            f"WHERE id = :rid AND tenant_id = :tid AND estado NOT IN ({lista_sql()})"  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+            f"WHERE id = :rid AND tenant_id = :tid AND estado NOT IN ({lista_sql()})"  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
         ),
         {"rid": reserva_id, "tid": tenant_id},
     ).rowcount

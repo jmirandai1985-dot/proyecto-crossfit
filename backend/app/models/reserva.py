@@ -94,7 +94,7 @@ class Reserva(Base):
             'clase_id', 'alumno_id',
             unique=True,
             # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
-            postgresql_where=text(f"estado NOT IN ({_estados.lista_sql()})"),  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+            postgresql_where=text(f"estado NOT IN ({_estados.lista_sql()})"),  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
         ),
     )
 

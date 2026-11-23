@@ -1017,7 +1017,7 @@ def get_financiero(
         LEFT JOIN subs_agg sa ON sa.plan_id = p.id
         WHERE p.tenant_id = :tid
         ORDER BY ingreso_total DESC, suscripciones DESC
-    """), {"tid": tenant_id}).fetchall()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {"tid": tenant_id}).fetchall()  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
     # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     global_tx = db.execute(sql_text(f"""
@@ -1027,7 +1027,7 @@ def get_financiero(
         FROM transacciones_financieras
         WHERE tenant_id = :tid AND tipo = 'ingreso' AND categoria = 'membresia'
           AND {sql_transaccion_real("transacciones_financieras")}
-    """), {"tid": tenant_id}).first()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {"tid": tenant_id}).first()  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
     # ── Matrícula: MISMA forma que `ticket_promedio`, filtrada a su categoría ──
     # Es un ingreso APARTE de la membresía (`transacciones_financieras` con
@@ -1042,7 +1042,7 @@ def get_financiero(
         FROM transacciones_financieras
         WHERE tenant_id = :tid AND tipo = 'ingreso' AND categoria = 'matricula'
           AND {sql_transaccion_real("transacciones_financieras")}
-    """), {"tid": tenant_id}).first()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {"tid": tenant_id}).first()  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
     # Vida del alumno para el LTV: sólo alumnos ACTIVOS del box. Se excluyen
     # los estados 'rechazado' (no son clientes) y 'baja' (ya no están en la
@@ -1059,7 +1059,7 @@ def get_financiero(
         WHERE u.tenant_id = :tid AND u.rol = 'alumno'
           AND u.estado = 'activo'
           AND {sql_usuario_real("u")}
-    """), {"tid": tenant_id}).first()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {"tid": tenant_id}).first()  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
     vida_dias = int(vida[2] or 0)
     return {
@@ -1154,14 +1154,14 @@ def get_bloques_horarios(
               AND a.tenant_id = c.tenant_id
         WHERE c.tenant_id = :tid AND c.cancelada = false
         GROUP BY 1 ORDER BY 1
-    """), {"tid": tenant_id}).fetchall()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {"tid": tenant_id}).fetchall()  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
     # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     cobertura = db.execute(sql_text(f"""
         WITH {sql_cte_asistencias()}
         SELECT COUNT(*) AS total, COUNT(clase_id) AS con_clase
         FROM asistencias WHERE tenant_id = :tid
-    """), {"tid": tenant_id}).first()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {"tid": tenant_id}).first()  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
     por_hora = [
         {
@@ -1262,7 +1262,7 @@ def get_cohortes(
                      AND a.fecha BETWEEN altas.alta AND altas.alta + 90)) AS act_90
         FROM altas
         GROUP BY 1 ORDER BY 1
-    """), {"tid": tenant_id}).fetchall()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+    """), {"tid": tenant_id}).fetchall()  # nosec B608  # SQL fijo: solo helpers/constantes, valores como parámetros
 
     def _h(evaluables, activos):
         evaluables, activos = int(evaluables or 0), int(activos or 0)
