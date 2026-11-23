@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import {
-    FRANJAS, estadoFila, etiquetaEstado, franjaDe, horaCorta, ocupacion, reservasDe, textoProgreso,
+    FRANJAS, estadoFila, etiquetaEstado, franjaDe, horaCorta, reservasDe, textoProgreso,
 } from '../utils/franjasAsistencia';
+// La ocupación por horario se mide con la ASISTENCIA MARCADA (no con las
+// reservas): el mismo contador que usan la pestaña Asistencia y el Historial.
+import { porcentaje, presentesDe } from '../utils/historialAsistencia';
 import { etiquetaTipo } from '../utils/avisosMarketing';
 
 /**
@@ -316,6 +319,11 @@ const ResumenCoach = ({
                             const estado = estadoFila(clase);
                             const esperados = reservasDe(clase);
                             const sinTope = clase.cupo_maximo === null || clase.cupo_maximo === undefined;
+                            // Inscriptos (reservas) y asistencias marcadas son DOS datos:
+                            // el badge "Pendiente" no debe convertir los inscriptos en
+                            // "confirmados" ni esconder que todavía no hay marcas.
+                            const marcados = presentesDe(clase);
+                            const hayAsistencia = Boolean(clase.marcada) || marcados > 0;
                             return (
                                 <button key={clase.id} type="button"
                                     onClick={() => onAbrirClase && onAbrirClase(clase)}
@@ -330,8 +338,10 @@ const ResumenCoach = ({
                                         </span>
                                         <span className="block text-[11px] text-zinc-500">
                                             {sinTope
-                                                ? 'Acceso libre'
-                                                : `${esperados}/${Number(clase.cupo_maximo) || 0} reservas`}
+                                                ? `${esperados} inscriptos (acceso libre)`
+                                                : `${esperados}/${Number(clase.cupo_maximo) || 0} inscriptos`}
+                                            {' · '}
+                                            {hayAsistencia ? `${marcados} asistencias marcadas` : 'sin marcar'}
                                         </span>
                                     </span>
                                     <span className={`flex-none rounded-[8px] px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wide ${BADGE_ESTADO[estado]}`}>
@@ -350,7 +360,14 @@ const ResumenCoach = ({
                     <p className={`mb-2 ${ROTULO}`}>Ocupación por horario — hoy</p>
                     <div className="space-y-3.5 rounded-[20px] bg-[#18181B] p-5" data-testid="resumen-ocupacion">
                         {clasesHoy.map((clase) => {
-                            const { pct, sinTope } = ocupacion(reservasDe(clase), clase.cupo_maximo);
+                            const sinTope = clase.cupo_maximo === null || clase.cupo_maximo === undefined;
+                            // La barra mide ASISTENCIA MARCADA, no reservas. Una clase
+                            // futura (o una pasada sin marcar) no tiene %: "Sin marcar".
+                            const marcados = presentesDe(clase);
+                            const hayAsistencia = Boolean(clase.marcada) || marcados > 0;
+                            const pctAsistencia = hayAsistencia && !sinTope
+                                ? porcentaje(marcados, clase.cupo_maximo)
+                                : null;
                             return (
                                 <div key={clase.id} className="flex items-center gap-3">
                                     <span className="w-[132px] flex-none text-[12px] font-bold text-zinc-400">
@@ -359,17 +376,19 @@ const ResumenCoach = ({
                                     <span className="h-[18px] flex-1 overflow-hidden rounded-[9px] bg-[#242428]">
                                         {/* Sin cupo (migración 066): no hay barra que llenar. */}
                                         <span className="block h-full rounded-[9px] bg-[linear-gradient(90deg,#D7FF4A,#8CFF6E)]"
-                                            style={{ width: `${sinTope ? 0 : pct}%` }} />
+                                            style={{ width: `${pctAsistencia === null ? 0 : pctAsistencia}%` }} />
                                     </span>
-                                    <span className="w-[44px] flex-none text-right text-[12px] font-bold text-zinc-400"
-                                        title={sinTope ? 'Acceso libre: sin cupo máximo' : undefined}>
-                                        {sinTope ? 'libre' : `${pct}%`}
+                                    <span className="w-[72px] flex-none text-right text-[12px] font-bold text-zinc-400"
+                                        title={sinTope
+                                            ? 'Acceso libre: sin cupo máximo'
+                                            : (pctAsistencia === null ? 'Todavía no hay asistencia marcada en esta clase' : undefined)}>
+                                        {sinTope ? 'libre' : (pctAsistencia === null ? 'Sin marcar' : `${pctAsistencia}%`)}
                                     </span>
                                 </div>
                             );
                         })}
                         <p className="pt-1 text-[11.5px] text-zinc-600">
-                            Se va llenando a medida que se marca asistencia en cada clase.
+                            La barra se completa con la asistencia marcada en cada clase (no con las reservas).
                         </p>
                     </div>
                 </div>

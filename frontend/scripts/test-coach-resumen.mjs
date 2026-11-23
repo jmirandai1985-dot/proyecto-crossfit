@@ -73,8 +73,10 @@ ok(/restoDelDiaFiltrado\.map/.test(RESUMEN) && /data-testid="resumen-clases-hoy"
     'el resto del día va en UNA fila por clase (lista vertical, no tarjetas en scroll)');
 ok(/resumen-selector-franja/.test(RESUMEN) && /FRANJAS\.map/.test(RESUMEN),
     'el "Resto de hoy" tiene filtro Mañana/Tarde/Noche (mismo corte de franjas que Asistencia)');
-ok(/Ocupación por horario/.test(RESUMEN) && /ocupacion\(reservasDe\(clase\), clase\.cupo_maximo\)/.test(RESUMEN),
-    'el gráfico de barras reusa el helper de ocupación compartido');
+ok(/Ocupación por horario/.test(RESUMEN)
+    && /const marcados = presentesDe\(clase\)/.test(RESUMEN)
+    && /'Sin marcar'/.test(RESUMEN),
+    'el gráfico de barras usa la asistencia marcada (no las reservas) y dice "Sin marcar"');
 eq(/kpi-clases-hoy|kpi-alumnos|kpi-riesgo/.test(RESUMEN), false,
     'sin el grid 2x2 de KPIs sueltos que reemplaza el rediseño');
 

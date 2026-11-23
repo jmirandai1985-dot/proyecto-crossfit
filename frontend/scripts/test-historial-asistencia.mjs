@@ -20,7 +20,7 @@ import { COACH_SUBTABS, MENU_BY_ROL } from '../src/config/menu.js';
 import {
     DIAS_SEMANA, MESES, aniosDisponibles, calendarioDelMes, clasesOcurridas,
     filtrarPorHorario, horariosDe, mesesDelAnio, porcentaje, presentesDe, resumenDia,
-    resumenPorDiaSemana, totalesDe,
+    resumenPorDiaSemana, tieneAsistenciaMarcada, totalesDe,
 } from '../src/utils/historialAsistencia.js';
 
 const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
@@ -228,6 +228,47 @@ eq(totalesDe(clasesOcurridas([CLASE, FUTURA], '2026-10-05')).cupos, 16,
 const anillosCorte = resumenPorDiaSemana(clasesOcurridas([CLASE, PASADA, FUTURA], '2026-10-20'));
 eq(anillosCorte[0].totales.clases, 2, 'el anillo del lunes cuenta sólo los lunes ya ocurridos');
 eq(anillosCorte[0].totales.cupos, 32, 'y su denominador tampoco incluye la clase futura');
+// ── Denominador: SÓLO clases con asistencia cerrada o marcada ───────────────
+// 7 presentes + 8 no shows en una clase de 15 cupos; 8 clases futuras con 292
+// cupos cada una (2336 cupos por venir). Las futuras no pueden hundir el %.
+const MEDIDA = {
+    ...CLASE, id: 21, fecha: '2026-10-05', cupo_maximo: 15, reservas_count: 15,
+    marcados_count: 7, marcada: true, estado: 'realizada',
+    alumnos: [
+        ...Array.from({ length: 7 }, (_, i) => ({ alumno_id: 100 + i, nombre: `P${i}`, asistio: true })),
+        ...Array.from({ length: 8 }, (_, i) => ({ alumno_id: 200 + i, nombre: `A${i}`, asistio: false })),
+    ],
+};
+const FECHAS_FUTURAS = [
+    '2026-10-26', '2026-11-02', '2026-11-09', '2026-11-16',
+    '2026-11-23', '2026-11-30', '2026-12-07', '2026-12-14',
+];
+const FUTURAS = FECHAS_FUTURAS.map((fecha, i) => ({
+    ...CLASE, id: 100 + i, fecha, cupo_maximo: 292, reservas_count: 5,
+    marcados_count: 0, marcada: false, alumnos: [], estado: 'proxima',
+}));
+eq(FUTURAS.reduce((a, c) => a + c.cupo_maximo, 0), 2336,
+    'el escenario tiene 2336 cupos futuros');
+eq(tieneAsistenciaMarcada(FUTURAS[0]), false,
+    'una futura CON reservas y SIN marcar no tiene asistencia que medir');
+eq(tieneAsistenciaMarcada({ ...FUTURAS[0], marcada: true }), true,
+    'una clase cerrada sí entra aunque no tenga presentes');
+eq(tieneAsistenciaMarcada(MEDIDA), true, 'una clase con marcas entra');
+
+const mezcla = totalesDe([MEDIDA, ...FUTURAS]);
+eq(mezcla.clasesConAsistencia, 1, 'de 9 clases, sólo 1 tiene asistencia');
+eq(mezcla.cupos, 15, 'los 2336 cupos futuros NO inflan el denominador');
+eq(mezcla.presentes, 7, 'los presentes son los de la clase medida');
+eq(mezcla.ausentes, 8, 'los 8 no shows de la clase medida');
+eq(mezcla.pct, 47, '7 de 15 cupos = 47% (no 0%)');
+eq(totalesDe(FUTURAS).cupos, 0, 'un conjunto sólo de futuras no aporta cupos');
+eq(totalesDe(FUTURAS).pct, 0, '... y no divide por cero');
+eq(clasesOcurridas([MEDIDA, ...FUTURAS], '2026-10-20').length, 1,
+    'el corte por fecha del encabezado deja fuera las futuras');
+const anilloMedido = resumenPorDiaSemana([MEDIDA, ...FUTURAS])[0];
+eq(anilloMedido.totales.cupos, 15, 'el anillo del día tampoco suma cupos futuros');
+eq(anilloMedido.pct, 47, 'y su % es 47%');
+
 const diasCorte = calendarioDelMes(2026, 10, [CLASE, PASADA, FUTURA], '2026-10-20').flat().filter(Boolean);
 eq(diasCorte.find((c) => c.dia === 26).totales.clases, 1,
     'el calendario SÍ sigue mostrando las clases futuras del mes');
@@ -345,6 +386,26 @@ ok(/textoProgreso\(proximaClase, cupo \|\| undefined\)/.test(RESUMEN),
     'el pie de la tarjeta usa ese MISMO cupo: el texto y el número no pueden contar distinto');
 ok(/aria-label=\{`\$\{marcados\} de \$\{cupo\} cupos`\}/.test(RESUMEN),
     'y el donut también (los tres comparten el cupo de la clase)');
+
+console.log('== 9. Ocupación y contadores con ASISTENCIA MARCADA (no reservas) ==');
+const RESUMEN_CODIGO = sinComentarios(RESUMEN);
+const DASH_CODIGO = sinComentarios(DASH);
+ok(/const marcados = presentesDe\(clase\)/.test(RESUMEN_CODIGO),
+    'la ocupación por horario cuenta asistencias marcadas');
+ok(!/ocupacion\(reservasDe\(clase\)/.test(RESUMEN_CODIGO),
+    'ya no mide la ocupación con las reservas');
+ok(RESUMEN_CODIGO.includes("'Sin marcar'"),
+    'sin asistencia marcada muestra "Sin marcar" en vez de un % de reservas');
+ok(/inscriptos/.test(RESUMEN_CODIGO) && /asistencias marcadas/.test(RESUMEN_CODIGO),
+    'separar inscriptos de asistencias marcadas (sin "confirmados")');
+ok(!/confirmados/.test(RESUMEN_CODIGO),
+    'la fila de hoy ya no usa la palabra "confirmados" para inscriptos');
+ok(/cuentaProgreso\(op\.key\)/.test(DASH_CODIGO),
+    'los chips de Progreso cuentan con la función del padrón completo');
+ok(/alumnosProgresoBuscados\.length/.test(DASH_CODIGO),
+    'el contador "Todos" es el mismo Z del paginador');
+ok(/asistencias marcadas/.test(DASH_CODIGO) && /inscriptos/.test(DASH_CODIGO),
+    'Mis clases muestra inscriptos y asistencias marcadas por separado');
 
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);

@@ -14,11 +14,14 @@
  *     (backend viejo), se cuenta con la lista de `alumnos`. Nunca NaN.
  *   · "no show" (ausente) = reservas VIGENTES menos presentes: el que reservó y no llegó. Una
  *     cancelación no es un ausente (el backend ya no la manda).
- *   · porcentaje = presentes ÷ CUPOS de las clases, redondeado. Con cupo 0 (dato viejo) el
- *     porcentaje es 0, no una división por cero.
- *   · ANILLOS y TOTALES: se calculan con `clasesOcurridas` (fecha <= hoy). Una clase futura
- *     todavía no tiene asistencia que medir y no debe inflar el denominador. El calendario y
- *     el detalle diario sí muestran el mes completo.
+ *   · porcentaje = presentes ÷ CUPOS de las clases CON ASISTENCIA (cerrada o con
+ *     marcas), redondeado. Con cupo 0 (dato viejo) el porcentaje es 0, no una
+ *     división por cero. Una clase FUTURA con reservas y sin marcar no entra en
+ *     el denominador: no tiene asistencia que medir.
+ *   · ANILLOS y TOTALES: se calculan con `clasesOcurridas` (fecha <= hoy) y el
+ *     denominador de `totalesDe` (sólo clases con asistencia marcada). Una clase
+ *     futura todavía no tiene asistencia que medir y no debe inflar el denominador.
+ *     El calendario y el detalle diario sí muestran el mes completo.
  *   · las fechas son las del backend en hora de Chile ('YYYY-MM-DD'): acá NO se convierte nada
  *     (sólo se leen los componentes del string, igual que `franjasAsistencia` con las horas).
  *   · la semana empieza el LUNES (misma regla que la grilla del coach y `utils/fecha.semanaEnCurso`).
@@ -137,6 +140,15 @@ export const presentesDe = (clase) => {
     return (clase?.alumnos || []).filter((a) => a?.asistio).length;
 };
 
+/**
+ * ¿La clase tiene asistencia que medir? Cerrada (`marcada`) o con al menos una
+ * marca (`marcados_count > 0`). NO se usa `ausentesDe > 0`: una clase futura CON
+ * reservas y SIN marcar daría ausentes = reservas y contaría como si hubiera
+ * asistencia, que es justo el denominador inflado que hay que evitar.
+ */
+export const tieneAsistenciaMarcada = (clase) => Boolean(clase?.marcada)
+    || presentesDe(clase) > 0;
+
 /** Reservas vigentes de la clase (`reservas_count` del backend; si falta, la lista de alumnos). */
 export const reservasDe = (clase) => {
     const n = clase?.reservas_count;
@@ -242,16 +254,21 @@ export const filtrarPorHorario = (clases, horario) => (
  */
 export const totalesDe = (clases) => {
     const lista = clases || [];
-    const conTope = lista.filter((c) => !sinTopeDe(c));
-    const sinTope = lista.filter(sinTopeDe);
-    const presentes = lista.reduce((a, c) => a + presentesDe(c), 0);
-    const ausentes = lista.reduce((a, c) => a + ausentesDe(c), 0);
-    const reservas = lista.reduce((a, c) => a + reservasDe(c), 0);
+    // Sólo las clases con asistencia medida aportan al % y a los cupos. Una
+    // futura con reservas y sin marcar NO cuenta (ver `tieneAsistenciaMarcada`).
+    const medibles = lista.filter(tieneAsistenciaMarcada);
+    const conTope = medibles.filter((c) => !sinTopeDe(c));
+    const sinTope = medibles.filter(sinTopeDe);
+    const presentes = medibles.reduce((a, c) => a + presentesDe(c), 0);
+    const ausentes = medibles.reduce((a, c) => a + ausentesDe(c), 0);
+    const reservas = medibles.reduce((a, c) => a + reservasDe(c), 0);
     const cupos = conTope.reduce((a, c) => a + cuposDe(c), 0);
     const presentesConTope = conTope.reduce((a, c) => a + presentesDe(c), 0);
     const reservasSinTope = sinTope.reduce((a, c) => a + reservasDe(c), 0);
     return {
         clases: lista.length,
+        // Clases que de verdad entran en la cuenta de asistencia (no las futuras).
+        clasesConAsistencia: medibles.length,
         presentes,
         ausentes,
         reservas,
@@ -260,10 +277,10 @@ export const totalesDe = (clases) => {
         clasesSinTope: sinTope.length,
         reservasSinTope,
         presentesConTope,
-        // `null` = hay clases pero NINGUNA tiene cupo -> no hay % que calcular.
-        // Un conjunto VACÍO sigue dando 0 (no hay nada que medir, y así lo
-        // esperan las pantallas y `scripts/test-historial-asistencia.mjs`).
-        pct: lista.length === 0
+        // `null` = hay clases medibles pero NINGUNA tiene cupo -> no hay % que
+        // calcular. Sin clases medibles el % es 0 (no hay asistencia que medir,
+        // y así lo esperan las pantallas y `scripts/test-historial-asistencia.mjs`).
+        pct: medibles.length === 0
             ? 0
             : (conTope.length === 0 ? null : porcentaje(presentesConTope, cupos)),
         libres: Math.max(cupos - (reservas - reservasSinTope), 0),

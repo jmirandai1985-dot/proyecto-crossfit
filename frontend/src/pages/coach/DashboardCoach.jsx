@@ -1,8 +1,11 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useDeferredValue } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
+// Cliente HTTP: el lote de progreso del padrón COMPLETO (contadores de los chips)
+// se pide en trozos de 100, el tope del endpoint `/historial-rm/progreso-lote`.
+import api from '../../services/api';
 import {
     SIN_DATOS, useAccionClase, useAlumnosDeCoach, useAlumnosEnPrueba,
     useAvisosMarketingVigentes,
@@ -64,6 +67,15 @@ import {
 // Alumnos que se enriquecen por página en el tab Progreso (RMs + nivel: dos consultas por
 // alumno). 25 = el mismo tamaño de página que usa el padrón del admin.
 const POR_PAGINA_PROGRESO = 25;
+
+// Filtro del padrón del tab Progreso (nombre o correo). Lo comparten la tabla
+// (inmediato) y el lote de contadores (diferido), para que ambos cuenten lo mismo.
+const filtrarAlumnosProgreso = (lista, termino) => {
+    const t = String(termino || '').trim().toLowerCase();
+    if (!t) return lista || [];
+    return (lista || []).filter((a) => (a.nombre || '').toLowerCase().includes(t)
+        || (a.correo || '').toLowerCase().includes(t));
+};
 
 // ── PUNTO 5 · pestaña Clases ───────────────────────────────────────────────────────────
 // Atajos de la fila de días de "Tomar clases": los MISMOS tres del mockup. `cuantos` es la
@@ -324,18 +336,53 @@ const DashboardCoach = () => {
     // en el cliente sobre ESA lista, y el enriquecimiento (RMs + nivel, una consulta por
     // alumno) se pide SOLO para la página visible: antes se enriquecían siempre los primeros
     // 50 y el resto no existía para la pantalla.
-    const alumnosProgresoBuscados = useMemo(() => {
-        const lista = alumnosQ.data || SIN_DATOS;
-        const termino = busquedaProgreso.trim().toLowerCase();
-        if (!termino) return lista;
-        return lista.filter((a) => (a.nombre || '').toLowerCase().includes(termino)
-            || (a.correo || '').toLowerCase().includes(termino));
-    }, [alumnosQ.data, busquedaProgreso]);
+    const alumnosProgresoBuscados = useMemo(
+        () => filtrarAlumnosProgreso(alumnosQ.data || SIN_DATOS, busquedaProgreso),
+        [alumnosQ.data, busquedaProgreso],
+    );
+    // El lote de contadores usa el término DIFERIDO: escribir en el buscador no
+    // dispara tres requests por tecla; la tabla sigue filtrando al instante.
+    const busquedaProgresoConteo = useDeferredValue(busquedaProgreso);
     const progresoPagina = useMemo(() => {
         const desde = (paginaProgreso - 1) * POR_PAGINA_PROGRESO;
         return alumnosProgresoBuscados.slice(desde, desde + POR_PAGINA_PROGRESO);
     }, [alumnosProgresoBuscados, paginaProgreso]);
     const progresoQ = useProgresoAlumnosCoach(progresoPagina);
+    // ── Contadores de los chips de estado: PADRÓN COMPLETO, no la página ──────
+    // `useProgresoAlumnosCoach` trae el enriquecimiento de los 25 visibles. Los
+    // chips "Todos/Progresando/Iniciando/Sin datos" tienen que reflejar los 253
+    // del padrón (y el "Todos" coincidir con el Z de "Mostrando X–Y de Z"), así
+    // que se piden lotes de 100 (tope del endpoint) SÓLO al abrir Progreso.
+    // El estado se deriva con la MISMA regla que el hook: rms >= 5 → activo;
+    // > 0 → iniciando; 0 → sin_datos.
+    const idsProgreso = useMemo(
+        () => filtrarAlumnosProgreso(alumnosQ.data || SIN_DATOS, busquedaProgresoConteo)
+            .map((a) => a.id),
+        [alumnosQ.data, busquedaProgresoConteo],
+    );
+    const estadosProgresoQ = useQuery({
+        queryKey: ['coach', 'progreso-estados', usuario_id, idsProgreso],
+        enabled: activeTab === 'progreso' && idsProgreso.length > 0,
+        staleTime: 60_000,
+        queryFn: async () => {
+            const lotes = [];
+            for (let i = 0; i < idsProgreso.length; i += 100) {
+                lotes.push(idsProgreso.slice(i, i + 100));
+            }
+            const filas = (await Promise.all(lotes.map((lote) => api.get(
+                '/api/v1/historial-rm/progreso-lote',
+                { params: { alumno_ids: lote.join(',') } },
+            ).then((r) => r.data?.alumnos || []).catch(() => [])))).flat();
+            const porId = new Map(filas.map((f) => [f.alumno_id, f]));
+            return idsProgreso.map((id) => {
+                const rms = porId.get(id)?.rms || [];
+                return {
+                    id,
+                    estado: rms.length >= 5 ? 'activo' : rms.length > 0 ? 'iniciando' : 'sin_datos',
+                };
+            });
+        },
+    });
     const rmsRecientesQ = useHistorialRmTodos(5);
     const alumnoRmsQ = useRmsAlumno(selectedAlumno?.id);
     // Clases de HOY con lo que sabe el módulo de Asistencia (estado, marcada y
@@ -445,15 +492,26 @@ const DashboardCoach = () => {
         return plan;
     }, [diasSeleccionados, horariosTomar, clasesLibresSemana]);
 
+    // Clases de HOY cruzadas con lo que sabe Asistencia (estado, `marcada`,
+    // `marcados_count` y `reservas_count`). Se usa en el Resumen y en "Mis clases"
+    // para que una fila no diga una cosa y la pestaña Asistencia otra.
+    const asistenciaHoyPorId = useMemo(() => {
+        const mapa = new Map();
+        for (const c of (asistenciaHoyQ.data || SIN_DATOS)) mapa.set(c.id, c);
+        return mapa;
+    }, [asistenciaHoyQ.data]);
     // Mis clases agrupadas por DÍA REAL (Lun→Dom de la semana en curso).
     const misClasesPorDia = useMemo(() => dayDates.map((fecha) => ({
         fecha,
         clases: misClasesSemana
             .filter((c) => fechaISOde(c) === fecha)
-            .sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || '')),
+            .sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || ''))
+            // Enriquecer con Asistencia: hoy trae `marcados_count`/`marcada`; los
+            // otros días no tienen ese dato y la fila dice "sin marcar".
+            .map((c) => ({ ...c, ...(asistenciaHoyPorId.get(c.id) || {}) })),
     // `dayDates` se deriva de `weekRange.start` (no hace falta en las dependencias).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    })), [misClasesSemana, weekRange.start]);
+    })), [misClasesSemana, weekRange.start, asistenciaHoyPorId]);
     // "Publicar WOD": sólo los días con clases tomadas y de HOY en adelante.
     const diasConClasesParaWod = useMemo(
         () => misClasesPorDia.filter((d) => d.clases.length > 0 && d.fecha >= today),
@@ -601,13 +659,6 @@ const DashboardCoach = () => {
     const cargandoRmsAlumno = alumnoRmsQ.isPending;
     const cargandoProgreso = progresoQ.isPending;
 
-    // Las clases de hoy cruzadas con lo que sabe Asistencia (estado, `marcada`,
-    // `reservas_count`): el Resumen muestra el MISMO dato que la pestaña Asistencia.
-    const asistenciaHoyPorId = useMemo(() => {
-        const mapa = new Map();
-        for (const c of (asistenciaHoyQ.data || SIN_DATOS)) mapa.set(c.id, c);
-        return mapa;
-    }, [asistenciaHoyQ.data]);
     const clasesHoyConAsistencia = useMemo(
         () => clasesHoy.map((c) => ({ ...c, ...(asistenciaHoyPorId.get(c.id) || {}) })),
         [clasesHoy, asistenciaHoyPorId],
@@ -686,6 +737,16 @@ const DashboardCoach = () => {
     const progresoFiltrado = progresoAlumnos
         .filter((a) => filtroProgreso === 'todos' || a.estado === filtroProgreso)
         .filter((a) => pasaFiltroNivel(a.nivel, filtroNivel));
+    // Contadores de los chips: padrón COMPLETO (mismo Z del paginador). Mientras
+    // el lote llega se muestra "…" (nunca un número de la página que mienta).
+    const estadosProgreso = estadosProgresoQ.data || null;
+    const cuentaProgreso = (clave) => {
+        if (clave === 'todos') return alumnosProgresoBuscados.length;
+        if (estadosProgreso) {
+            return estadosProgreso.filter((a) => a.estado === clave).length;
+        }
+        return null;
+    };
     const rangoProgreso = rangoMostrado({
         total: alumnosProgresoBuscados.length,
         porPagina: POR_PAGINA_PROGRESO,
@@ -1267,11 +1328,15 @@ const DashboardCoach = () => {
                                                                 <span className="text-sm text-zinc-300">
                                                                     {clase.disciplina_nombre || 'Clase'}
                                                                 </span>
-                                                                <span className="text-[11px] text-zinc-500">
+                                                                <span className="text-[11px] text-zinc-500"
+                                                                    data-testid={`mis-clase-conteos-${clase.id}`}>
                                                                     {clase.asistentes_confirmados || 0}
                                                                     {clase.cupo_maximo === null || clase.cupo_maximo === undefined
                                                                         ? ' inscriptos (acceso libre)'
                                                                         : `/${clase.cupo_maximo} inscriptos`}
+                                                                    {clase.marcados_count !== null && clase.marcados_count !== undefined && (
+                                                                        <> · {clase.marcados_count} asistencias marcadas</>
+                                                                    )}
                                                                 </span>
                                                                 {clase.wod_id && (
                                                                     <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-300">
@@ -1458,9 +1523,10 @@ const DashboardCoach = () => {
                                     aria-label="Buscar alumno"
                                     className="w-full sm:max-w-xs px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-orange-500 focus:outline-none"
                                 />
-                                {/* Filtro por estado (Progresando / Iniciando / Sin datos), 100% frontend:
-                                    la lista viene completa de GET /fidelizacion/coach/{id}/alumnos y el
-                                    enriquecimiento (RMs + nivel, una consulta por alumno) es por PÁGINA. */}
+                                {/* Filtro por estado (Progresando / Iniciando / Sin datos).
+                                    Los contadores salen del padrón COMPLETO (`idsProgreso`, en
+                                    lotes de 100 al abrir esta pestaña), no de la página: el
+                                    "Todos" coincide con el Z de "Mostrando X–Y de Z". */}
                                 <div className="flex flex-wrap gap-2">
                                     {[
                                         { key: 'todos', label: 'Todos', dot: 'bg-zinc-300' },
@@ -1468,9 +1534,10 @@ const DashboardCoach = () => {
                                         { key: 'iniciando', label: 'Iniciando', dot: 'bg-orange-500' },
                                         { key: 'sin_datos', label: 'Sin datos', dot: 'bg-zinc-500' },
                                     ].map((op) => {
-                                        const cuenta = op.key === 'todos'
-                                            ? progresoAlumnos.length
-                                            : progresoAlumnos.filter(a => a.estado === op.key).length;
+                                        const cuenta = cuentaProgreso(op.key);
+                                        const cuentaTxt = cuenta === null
+                                            ? (estadosProgresoQ.isError ? '—' : '…')
+                                            : cuenta;
                                         const activo = filtroProgreso === op.key;
                                         return (
                                             <button
@@ -1482,7 +1549,7 @@ const DashboardCoach = () => {
                                             >
                                                 <span className={`w-3 h-3 rounded-full ${op.dot}`}></span>
                                                 {op.label}
-                                                <span className={`text-xs ${activo ? 'text-white/80' : 'text-gray-400'}`}>({cuenta})</span>
+                                                <span className={`text-xs ${activo ? 'text-white/80' : 'text-gray-400'}`}>({cuentaTxt})</span>
                                             </button>
                                         );
                                     })}
