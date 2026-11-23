@@ -42,6 +42,11 @@ class Usuario(Base):
     # ── Flujo de registro/activación de alumno nuevo ──
     estado = Column(String(20), nullable=False, default="activo")
     # 'pendiente_activacion' | 'activo' | 'rechazado'
+    # ── Cuentas que NO son alumnas reales (administradores, testers, demo) ──
+    # Las métricas de KPIs (MRR, alumnos activos, ARPU, LTV, cohortes, Excel)
+    # excluyen `es_prueba = true`. Default false: ninguna fila existente cambia.
+    es_prueba = Column(Boolean, nullable=False, default=False,
+                       server_default=text("false"))
     # ── Reactivación (correo "sin plan") ──
     # Opt-out específico de ESTE tipo de notificación (no de todas): si False,
     # no se le envían correos de reactivación aunque siga sin plan.
