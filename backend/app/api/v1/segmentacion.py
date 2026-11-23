@@ -22,6 +22,8 @@ from app.api.v1.ml import _clasificar_error, _verificar_api_key_n8n
 from app.core.dependencies import get_current_user
 from app.db.database import get_db
 from app.models.segmentacion_alumno import SegmentacionAlumno
+from app.models.usuario import RolUsuario, Usuario
+from shared.estados import ESTADOS_USUARIO_SIN_MRR
 
 router = APIRouter(prefix="/api/v1/segmentacion", tags=["Segmentación"])
 
@@ -114,14 +116,27 @@ def resumen_segmentacion(
 
     filas = db.query(
         SegmentacionAlumno.arquetipo, func.count(SegmentacionAlumno.id),
+    ).join(
+        Usuario, Usuario.id == SegmentacionAlumno.usuario_id,
     ).filter(
         SegmentacionAlumno.tenant_id == tenant_id,
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == RolUsuario.alumno,
+        Usuario.es_prueba.is_(False),
+        Usuario.estado.notin_(ESTADOS_USUARIO_SIN_MRR),
     ).group_by(SegmentacionAlumno.arquetipo).all()
     conteos = {arq: int(n) for arq, n in filas}
     total = sum(conteos.values())
 
-    modelo_fecha = db.query(func.max(SegmentacionAlumno.modelo_fecha)).filter(
-        SegmentacionAlumno.tenant_id == tenant_id).scalar()
+    modelo_fecha = db.query(func.max(SegmentacionAlumno.modelo_fecha)).join(
+        Usuario, Usuario.id == SegmentacionAlumno.usuario_id,
+    ).filter(
+        SegmentacionAlumno.tenant_id == tenant_id,
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == RolUsuario.alumno,
+        Usuario.es_prueba.is_(False),
+        Usuario.estado.notin_(ESTADOS_USUARIO_SIN_MRR),
+    ).scalar()
 
     return {
         "total": total,

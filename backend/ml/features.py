@@ -24,6 +24,7 @@ from app.core.estados import (   # los MISMOS criterios que el mantenimiento
     dia_chile,
     plan_comercial,
 )
+from shared.estados import ESTADOS_USUARIO_SIN_MRR
 from app.models.plan import Plan
 from app.services.plan_vencimiento import dias_hasta   # días de Chile, UNA sola definición
 # La asistencia REAL del panel (`reservas.asistio` sobre la fecha de la clase): el modelo tiene que
@@ -150,10 +151,18 @@ def features_alumno(db, tenant_id, alumno, fecha_ref) -> dict:
 
 
 def cargar_alumnos(db, tenant_id):
-    """Todos los alumnos (rol=alumno) del tenant, sin filtrar por `estado`."""
+    """Alumnos segmentables: reales, sin prueba y sin estados sin MRR.
+
+    La segmentación se calcula sobre la misma población que el resto del BI:
+    `es_prueba = false` y fuera los estados de `ESTADOS_USUARIO_SIN_MRR`
+    (`rechazado`). No se filtra por `estado='activo'`: las bajas también son
+    parte del universo de retención/arquetipos.
+    """
     return db.query(Usuario).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
+        Usuario.es_prueba.is_(False),
+        Usuario.estado.notin_(ESTADOS_USUARIO_SIN_MRR),
     ).order_by(Usuario.id).all()
 
 
