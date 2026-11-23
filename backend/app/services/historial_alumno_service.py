@@ -254,6 +254,19 @@ def _como_fecha(valor):
     return valor
 
 
+def _dia_chile(valor):
+    """Día del calendario CHILENO de un `date` o de un instante (`timestamptz`).
+
+    Para un instante se usa `fecha_chile` y NUNCA `.date()`: `.date()` de un
+    `timestamptz` es el día UTC, que entre las 21:00 y las 24:00 de Chile ya es
+    el día siguiente (y antes de las 03:00 todavía es el anterior). `None` entra,
+    `None` sale.
+    """
+    if valor is None:
+        return None
+    return fecha_chile(valor) if isinstance(valor, datetime) else valor
+
+
 def _fecha_inicio_suscripcion(s):
     """Inicio REAL de una suscripción: su `fecha_inicio` y, si es NULL, su `created_at`.
 
@@ -292,17 +305,27 @@ def inicio_actividad(created_at=None, primera_suscripcion=None, primera_asistenc
 
 
 def dias_de_antiguedad(desde, hoy: date = None):
-    """Días calendario desde `desde` hasta HOY en Chile (o el `hoy` inyectado).
+    """Días de calendario desde `desde` hasta HOY, en el calendario de CHILE.
 
-    Única definición de la antigüedad que muestran "Mi historial" y la ficha:
-    usa `hoy_santiago()` (nunca `date.today()` del proceso, que en UTC cambia de
-    día a las 21:00 de Chile) y lee un `timestamptz` en hora de Chile antes de
-    restar. 19-07-2026 → 23-11-2026 = 127 días. Puro: se testea sin BD.
+    ÚNICA definición de la antigüedad ("alumno desde ... (N días)"): la usan el
+    resumen/asistencia del historial, la ficha del alumno (`ficha_alumno`) y la
+    ficha del coach (`api/v1/fidelizacion.ficha_alumno_coach`).
+
+    Regla (la MISMA de "Vence en X días", `santiago.dias_para_vencer`): se restan
+    DÍAS de calendario, sin contar el día inicial (0 = empezó hoy), sobre el día
+    chileno de cada punta. Por eso 19-07-2026 → 23-11-2026 = 127 días.
+
+    Las dos puntas se leen en hora de Chile y NUNCA con `.date()` del proceso:
+    un `timestamptz` (o un `hoy` que llegue como instante) se convierte con
+    `fecha_chile`, así que 02:00 UTC del 20-jul sigue siendo el 19-jul en Chile y
+    01:00 UTC del 24-nov sigue siendo el 23-nov. Ese era el off-by-one que
+    mostraba 126 en vez de 127. Puro: se testea sin BD.
     """
     fecha = _como_fecha(desde)
     if fecha is None:
         return None
-    return ((hoy or hoy_santiago()) - fecha).days
+    hasta = _dia_chile(hoy) if hoy is not None else hoy_santiago()
+    return (hasta - fecha).days
 
 
 def promedio_semanal(asistidas: int, inicio, hoy: date) -> float:

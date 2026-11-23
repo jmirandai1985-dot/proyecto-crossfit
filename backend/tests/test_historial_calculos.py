@@ -221,3 +221,29 @@ def test_f2_sin_hoy_usa_el_dia_de_chile(monkeypatch):
     """Sin `hoy` inyectado la cuenta se ancla a `hoy_santiago()` (no `date.today()`)."""
     monkeypatch.setattr(svc, "hoy_santiago", lambda: date(2026, 11, 23))
     assert svc.dias_de_antiguedad(date(2026, 7, 19)) == 127
+
+
+def test_f3_hoy_como_instante_se_lee_en_el_dia_de_chile():
+    """Si `hoy` llega como instante NO se usa su día UTC (`.date()`), sino el chileno.
+
+    01:00 UTC del 24-nov es 22:00 del 23-nov en Chile → 127 días (con `.date()`
+    serían 128: el off-by-one de un día que mostraba la pantalla).
+    """
+    assert svc.dias_de_antiguedad(
+        date(2026, 7, 19),
+        datetime(2026, 11, 24, 1, 0, tzinfo=timezone.utc)) == 127
+    # Y al revés: 02:00 UTC del 23-nov todavía es el 22-nov en Chile → 126.
+    assert svc.dias_de_antiguedad(
+        date(2026, 7, 19),
+        datetime(2026, 11, 23, 2, 0, tzinfo=timezone.utc)) == 126
+
+
+def test_f4_la_regla_es_la_misma_que_vence_en_x_dias():
+    """Sin contar el día inicial (0 = hoy), igual que `dias_para_vencer`.
+
+    El día de inicio no suma: 19-07 → 19-07 son 0 días, y el 127 sale de sumar los
+    días de calendario hasta el 23-11 (no 126 ni 128).
+    """
+    assert svc.dias_de_antiguedad(date(2026, 7, 19), date(2026, 7, 19)) == 0
+    assert svc.dias_de_antiguedad(date(2026, 7, 19), date(2026, 7, 20)) == 1
+    assert svc.dias_de_antiguedad(date(2026, 7, 19), date(2026, 11, 23)) == 127

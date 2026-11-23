@@ -34,10 +34,25 @@ export function horaChileStr(fecha = new Date()) {
     }).format(d);
 }
 
-/** Fecha corta en formato chileno (dd-mm-aaaa) del día chileno de `fecha`. */
+/**
+ * Fecha corta en formato chileno (dd-mm-aaaa) del día chileno de `fecha`.
+ *
+ * Una fecha SOLA ('YYYY-MM-DD', típico de `alumno_desde`, `Clase.fecha`) se ancla a
+ * MEDIODÍA UTC —misma regla que `fmtFechaCortaChile` y `fechaSolaAInstante`— antes de
+ * leerla en America/Santiago. Sin eso, `new Date('2026-07-19')` es 00:00 UTC, que en
+ * Chile (UTC-3/-4) todavía es el 18-07: el encabezado de "Mi historial" mostraba un
+ * día menos que la antigüedad calculada por el backend (dos relojes, un día de
+ * diferencia). Un instante ISO completo se convierte tal cual.
+ */
 export function fmtFechaChile(fecha) {
     if (!fecha) return '';
-    const d = fecha instanceof Date ? fecha : new Date(fecha);
+    let d;
+    if (fecha instanceof Date) {
+        d = fecha;
+    } else {
+        const s = String(fecha);
+        d = s.length === 10 ? new Date(`${s}T12:00:00Z`) : new Date(fecha);
+    }
     if (isNaN(d.getTime())) return '';
     return new Intl.DateTimeFormat('es-CL', {
         timeZone: TZ_CHILE, day: '2-digit', month: '2-digit', year: 'numeric',

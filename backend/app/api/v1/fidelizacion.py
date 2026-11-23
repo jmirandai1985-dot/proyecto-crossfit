@@ -697,7 +697,10 @@ def ficha_alumno_coach(
         }
 
     # Antigüedad y fecha de alta, en días de CHILE (el `created_at` es `timestamptz`: su `.date()`
-    # crudo es el día UTC, que de noche ya es mañana).
+    # crudo es el día UTC, que de noche ya es mañana). La cuenta NO se repite acá: es la MISMA
+    # `dias_de_antiguedad` del Historial, así la ficha y "Mi historial" no pueden divergir.
+    from app.services.historial_alumno_service import dias_de_antiguedad
+
     alta = fecha_chile(alumno.created_at)
     return {
         "id": alumno.id,
@@ -711,7 +714,7 @@ def ficha_alumno_coach(
         "genero": alumno.genero,
         "perfil_completo": bool(alumno.peso_kg and alumno.genero in ("M", "F")),
         "created_at": alumno.created_at.isoformat() if alumno.created_at else None,
-        "antiguedad_dias": (hoy_santiago() - alta).days if alta else None,
+        "antiguedad_dias": dias_de_antiguedad(alta),
         "plan": plan_data,
     }
 
