@@ -11,7 +11,7 @@
  * hueco (semana sin datos) corta la racha. Para poder reutilizarla, acá se agrupan
  * las reservas con estado "asistio" por semana ISO ('YYYY-Sww').
  */
-import { esActiva, estadoVisible } from './estadoReserva.js';
+import { estadoVisible } from './estadoReserva.js';
 import { calcularRachaAsistencia } from './asistenciaEvolucion.js';
 
 const MESES = [
@@ -37,6 +37,22 @@ export function semanaISO(fechaStr) {
  * asistencia del historial (asistió / total del historial) y racha actual de semanas
  * con al menos 1 asistencia.
  */
+// Estados que CUENTAN para el % de asistencia: espejo de `ESTADOS_QUE_CUENTAN`
+// del backend (`historial_alumno_service`). Cancelar a tiempo NO ensucia el
+// número; una cancelación tardía sí cuenta como falta. `reservada` (activa) no
+// entra porque todavía no ocurrió.
+const ESTADOS_QUE_CUENTAN_PCT = ['asistio', 'falto', 'cancelada_tarde'];
+
+/** % de asistencia redondeado (mismo `Math.round` que el resto de la app). */
+export function porcentajeAsistencia(reservas) {
+    const cuentan = (reservas || []).filter(
+        (r) => ESTADOS_QUE_CUENTAN_PCT.includes(estadoVisible(r)),
+    );
+    if (!cuentan.length) return 0;
+    const asistidas = cuentan.filter((r) => estadoVisible(r) === 'asistio').length;
+    return Math.round((asistidas / cuentan.length) * 100);
+}
+
 export function calcularEstadisticasReservas(reservas, hoyStr) {
     const lista = reservas || [];
     const mesActual = String(hoyStr || '').slice(0, 7); // 'YYYY-MM'
@@ -49,9 +65,7 @@ export function calcularEstadisticasReservas(reservas, hoyStr) {
         (r) => String(r?.clase_fecha || '').slice(0, 7) === mesActual && estadoVisible(r) === 'asistio',
     ).length;
 
-    const historial = lista.filter((r) => !esActiva(r));
-    const asistidas = historial.filter((r) => estadoVisible(r) === 'asistio').length;
-    const pctAsistencia = historial.length ? Math.round((asistidas / historial.length) * 100) : 0;
+    const pctAsistencia = porcentajeAsistencia(lista);
 
     // Racha: agrupar las asistencias por semana ISO y delegar el cálculo (no se duplica).
     const porSemana = new Map();

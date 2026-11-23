@@ -14,7 +14,7 @@
 //      con los filtros de disciplina y estado
 import {
     semanaISO, etiquetaMes, agruparReservasPorMes, calcularEstadisticasReservas,
-    filtrarGruposPorMes, TODOS_LOS_MESES,
+    filtrarGruposPorMes, TODOS_LOS_MESES, porcentajeAsistencia,
 } from '../src/utils/reservasEstadisticas.js';
 import { filtrarPorEstado } from '../src/utils/estadoReserva.js';
 import { filtrarPorDisciplina } from '../src/utils/filtroDisciplina.js';
@@ -32,6 +32,10 @@ const ok = (cond, msg) => eq(Boolean(cond), true, msg);
 
 // Una reserva tal como la devuelve GET /reservas (solo interesan clase_fecha y estado_visible).
 const r = (id, clase_fecha, estado_visible) => ({ id, clase_fecha, estado_visible });
+// N reservas del mismo estado (ids consecutivos para que sean filas distintas).
+const repetir = (estado, n, base = 0) => Array.from(
+    { length: n }, (_, i) => r(base + i + 1, '2026-11-05', estado),
+);
 
 // ── 1. Agrupación por mes ────────────────────────────────────────────────────
 const historial = [
@@ -65,6 +69,31 @@ const stats = calcularEstadisticasReservas(reservas, HOY);
 eq(stats.clasesEsteMes, 3, '3 reservas en noviembre (el mes de HOY)');
 eq(stats.asistidasEsteMes, 2, '2 de las 3 reservas de noviembre son asistidas');
 eq(stats.pctAsistencia, 75, 'asistió 3 de 4 en historial = 75%');
+
+// ── 2b. 4 asistidas de 12 reservadas = 33 % (redondeo estándar, no 32) ──────
+// Se usa `Math.round`, el mismo criterio que `franjasAsistencia.js`, `planes.js`
+// y el backend. La base son las reservas que CUENTAN: se descarta la cancelación
+// a tiempo (regla espejo de `ESTADOS_QUE_CUENTAN`), nunca la asistencia.
+{
+    const cuatroDeDoce = [...repetir('asistio', 4, 100), ...repetir('falto', 8, 200)];
+    eq(porcentajeAsistencia(cuatroDeDoce), 33, '4 de 12 = 33% (Math.round)');
+    eq(calcularEstadisticasReservas(cuatroDeDoce, HOY).pctAsistencia, 33,
+        '... y la tarjeta usa el mismo cálculo');
+
+    const conCancelada = [
+        ...repetir('asistio', 4, 300), ...repetir('falto', 7, 400),
+        r(500, '2026-11-05', 'cancelada'),          // a tiempo: NO cuenta
+        r(501, '2026-11-05', 'cancelada_tarde'),    // tarde: cuenta como falta
+    ];
+    eq(porcentajeAsistencia(conCancelada), 33,
+        'cancelada a tiempo no entra en la base; 4 de 12 que cuentan = 33%');
+
+    eq(porcentajeAsistencia([]), 0, 'sin reservas -> 0% (no divide por cero)');
+    eq(porcentajeAsistencia([r(600, '2026-11-05', 'cancelada')]), 0,
+        'solo cancelaciones a tiempo -> 0% (nada que contar)');
+    eq(porcentajeAsistencia([r(601, '2026-11-05', 'reservada')]), 0,
+        'solo reservas activas -> 0% (todavía no ocurrieron)');
+}
 
 // Una cancelada del mes cuenta como "reservada" pero NO como asistida: la tarjeta
 // ahora distingue las dos cosas (el bug que se corrige acá).
