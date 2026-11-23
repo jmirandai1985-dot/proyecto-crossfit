@@ -53,6 +53,15 @@ const numOrNull = (valor) => {
     return Number.isFinite(numero) ? numero : null;
 };
 
+// Regla ÚNICA de la conversión prueba→plan: la base es la cantidad de alumnos
+// en prueba y el porcentaje sólo se publica desde 5. La usan el embudo de BI y
+// la tarjeta de la pestaña Mensual; no se duplica el umbral en cada bloque.
+const MIN_BASE_CONVERSION = 5;
+const baseConversionSuficiente = (base) => {
+    const numero = numOrNull(base);
+    return numero !== null && numero >= MIN_BASE_CONVERSION;
+};
+
 
 // ─── Helpers de fecha (hora local del navegador) ──────────────────────────
 const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -420,7 +429,14 @@ const AdminKpis = () => {
             : numOrNull(churn.criticos) + numOrNull(churn.altos))
         : null;
     const baseFunnelBi = numOrNull(mesBi?.alumnos_prueba);
-    const funnelSuficiente = baseFunnelBi !== null && baseFunnelBi >= 5;
+    const funnelSuficiente = baseConversionSuficiente(baseFunnelBi);
+    const baseConversionMes = numOrNull(mes?.alumnos_prueba);
+    const conversionMes = baseConversionSuficiente(baseConversionMes)
+        ? numOrNull(mes?.conversion_rate)
+        : null;
+    const hintConversionMes = conversionMes === null
+        ? `n/d · base de ${baseConversionMes ?? 'n/d'}, mínimo ${MIN_BASE_CONVERSION}`
+        : `Base de ${baseConversionMes} alumnos`;
     const pasosFunnelBi = mesBi ? [
         {
             label: 'Alumnos en prueba',
@@ -832,8 +848,15 @@ const AdminKpis = () => {
                             {/* Ventas del Bazar: tarjeta APARTE del MRR y del ingreso del mes. */}
                             <KpiCard label="Ventas Bazar" value={numOrNull(mes.ingresos_bazar)} unit="CLP" icon={ShoppingCart} color="border-teal-500"
                                 onDetalle={verKpiMensual('mensual:ingresos_bazar', numOrNull(mes.ingresos_bazar), 'CLP')} />
-                            <KpiCard label="Conversión prueba→plan" value={numOrNull(mes.conversion_rate)} unit="%" icon={TrendingUp} color="border-green-500"
-                                onDetalle={verKpiMensual('mensual:conversion_rate', numOrNull(mes.conversion_rate), '%')} />
+                            <KpiCard
+                                label="Conversión prueba→plan"
+                                value={conversionMes}
+                                unit={conversionMes === null ? '' : '%'}
+                                icon={TrendingUp}
+                                color="border-green-500"
+                                hint={hintConversionMes}
+                                onDetalle={verKpiMensual('mensual:conversion_rate', conversionMes, conversionMes === null ? '' : '%')}
+                            />
                             <KpiCard label="Riesgo de abandono" value={numOrNull(mes.churn_rate)} unit="%" icon={TriangleAlert} color="border-red-500"
                                 onDetalle={verKpiMensual('mensual:churn_rate', numOrNull(mes.churn_rate), '%')} />
                         </div>
@@ -923,7 +946,7 @@ const AdminKpis = () => {
                                     </p>
                                 </div>
                                 <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[11px] font-medium text-zinc-400">
-                                    Base mínima: 5 alumnos
+                                    Base mínima: {MIN_BASE_CONVERSION} alumnos
                                 </span>
                             </div>
 
@@ -963,7 +986,7 @@ const AdminKpis = () => {
                                     </div>
                                     {!funnelSuficiente && (
                                         <p className="text-[11px] leading-relaxed text-zinc-500">
-                                            El porcentaje se publica sólo con una base de 5 alumnos o más.
+                                            El porcentaje se publica sólo con una base de {MIN_BASE_CONVERSION} alumnos o más.
                                             Con {baseFunnelBi === null ? 'n/d' : baseFunnelBi} alumnos en prueba,
                                             la conversión queda en n/d.
                                         </p>
