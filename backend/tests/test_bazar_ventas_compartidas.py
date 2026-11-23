@@ -291,8 +291,13 @@ def test_b5_el_excel_lista_y_suma_los_mismos_pedidos_que_la_metrica(db, caso):
     assert reportes_service._pedidos_bazar_pendientes_mes(db, TENANT_ID, inicio, fin) == 1
 
 
-def test_b6_el_archivo_del_excel_se_genera_con_la_pestana_del_bazar(db):
-    """El Excel completo (del mes en curso) se arma y trae la pestaña "Bazar y Servicios"."""
+def test_b6_el_excel_del_mes_trae_el_bazar_en_la_pestana_este_mes(db):
+    """El Excel completo (del mes en curso) trae 4 pestañas y el Bazar en "Este mes".
+
+    La pestaña "Bazar y Servicios" se eliminó en 391cd97: el detalle del Bazar se
+    absorbió en la pestaña "Este mes" (igual que el Resumen Ejecutivo y el Flujo de
+    Caja). Lo que importa es que el total de ventas del Bazar siga publicado ahí.
+    """
     from io import BytesIO
 
     from openpyxl import load_workbook
@@ -305,7 +310,33 @@ def test_b6_el_archivo_del_excel_se_genera_con_la_pestana_del_bazar(db):
 
     assert isinstance(datos, bytes) and len(datos) > 5000
     wb = load_workbook(BytesIO(datos))
-    assert "Bazar y Servicios" in wb.sheetnames
+
+    # El Excel actual: 4 pestañas comparativas (antes eran 5, con "Bazar y Servicios").
+    assert wb.sheetnames == ["Este mes", "Vs año pasado", "Lo que va del año",
+                             "Por alumno"]
+    assert "Bazar y Servicios" not in wb.sheetnames
+
+    ws = wb["Este mes"]
+    # La fila del Bazar: rótulo del concepto y, a su derecha, el total del mes en
+    # curso (formateado como "$20,000" por `_style_data_row`). Se busca el rótulo
+    # en cualquier columna para no atarse a la posición exacta de la tabla.
+    etiqueta, valor = next(
+        ((celda.value, fila[i + 1].value)
+         for fila in ws.iter_rows()
+         for i, celda in enumerate(fila[:-1])
+         if str(celda.value or "").strip().lower().startswith("ventas bazar")),
+        (None, None),
+    )
+    assert etiqueta is not None, "la pestaña 'Este mes' debe traer la fila del Bazar"
+    assert str(etiqueta).strip() == "Ventas Bazar (cobradas)"
+
+    publicado = float(str(valor).replace("$", "").replace(",", "").strip())
+    # El Excel pasa `fin_ex` = primer día del mes siguiente a `_resumen_mes` y
+    # `ventas_bazar` suma el rango [inicio, fin] inclusive, igual que el BI.
+    inicio = date(hoy.year, hoy.month, 1)
+    fin_ex = date(hoy.year + 1, 1, 1) if hoy.month == 12 else date(
+        hoy.year, hoy.month + 1, 1)
+    assert publicado == metricas.ventas_bazar(db, TENANT_ID, inicio, fin_ex)
 
 
 def test_b7_la_pestana_bazar_del_historial_muestra_el_retiro(db, caso):
