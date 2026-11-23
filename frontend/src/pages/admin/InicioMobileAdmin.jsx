@@ -856,6 +856,23 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                     />
                 </section>
 
+                {/* ── Pagos del día (accordion DEBAJO de la fila Hoy) ─────────
+                    La tarjeta "Pagos de hoy" (y "Ingresos de hoy") alterna este
+                    panel en el mismo lugar, sin navegar. El enlace "Ver detalle"
+                    conserva la pantalla completa /admin/pagos-del-dia. ─────── */}
+                {mostrarPagos && (
+                    <section className="card" aria-labelledby="ub-pagos-dia">
+                        <div className="card-head">
+                            <h2 id="ub-pagos-dia">Pagos del día</h2>
+                            <button type="button" className="link"
+                                onClick={() => navigate('/admin/pagos-del-dia')}>
+                                Ver detalle
+                            </button>
+                        </div>
+                        <PagosDelDia maxFilas={4} mostrarEnlace={false} />
+                    </section>
+                )}
+
                 {/* ── B. Accesos rápidos ──────────────────────────────────── */}
                 <nav className="apps" aria-label="Accesos rápidos">
                     <button type="button" className="app a-search" onClick={abrirBuscador}>
@@ -1125,19 +1142,7 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                     )}
                 </section>
 
-                {/* ── Pagos del día (accordion) ───────────────── */}
-                {mostrarPagos && (
-                    <section className="card" aria-labelledby="ub-pagos-dia">
-                        <div className="card-head">
-                            <h2 id="ub-pagos-dia">Pagos del día</h2>
-                            <button type="button" className="link"
-                                onClick={() => navigate('/admin/pagos-del-dia')}>
-                                Ver detalle
-                            </button>
-                        </div>
-                        <PagosDelDia maxFilas={4} mostrarEnlace={false} />
-                    </section>
-                )}
+                {/* ── Pagos del día: el panel vive arriba, debajo de la fila Hoy ── */}
 
 
                 {/* ── D. "Asistencia": HOY por franja + la semana en curso ─────

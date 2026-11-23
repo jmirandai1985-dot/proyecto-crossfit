@@ -12,6 +12,8 @@ import React from 'react';
  *                             clickear (y con Enter/Espacio) y muestra el aviso "Ver detalle":
  *                             es el MISMO patrón de las otras tarjetas del BI.
  * @param {string}   hint      Período o contexto corto debajo del valor (ej. "Hoy · ..." / "Mes cerrado · ...").
+ * @param {boolean}  chevron   Muestra el chevron "›" de las tarjetas que abren un panel/pantalla
+ *                             (mismo indicador que el Inicio móvil del admin).
  */
 export const KpiCard = ({
     label,
@@ -22,6 +24,7 @@ export const KpiCard = ({
     icon: Icon = null,
     onDetalle = null,
     hint = null,
+    chevron = false,
 }) => {
     const isPositive = delta !== null ? delta >= 0 : null;
     const display = typeof value === 'number'
@@ -66,7 +69,12 @@ export const KpiCard = ({
                         <p className="text-[11px] text-zinc-500 mt-1">{hint}</p>
                     )}
                 </div>
-                {Icon && <Icon className="w-6 h-6 text-gray-600" />}
+                <div className="flex items-center gap-1">
+                    {Icon && <Icon className="w-6 h-6 text-gray-600" />}
+                    {interactiva && chevron && (
+                        <span className="text-lg leading-none text-gray-500" aria-hidden="true">›</span>
+                    )}
+                </div>
             </div>
             {interactiva && (
                 <p className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">

@@ -134,6 +134,9 @@ const AdminDashboard = () => {
     const [claseDetalle, setClaseDetalle] = useState(null);
     const [detalleReservas, setDetalleReservas] = useState([]);
     const [detalleLoading, setDetalleLoading] = useState(false);
+    // "Pagos de hoy": panel debajo de la fila Hoy (mismo PagosDelDia, misma queryKey).
+    // Arranca cerrado; la tarjeta lo alterna y un segundo clic lo cierra.
+    const [pagosAbierto, setPagosAbierto] = useState(false);
     // Fidelización — modal membresías del mes
     const [fidelizacionModal, setFidelizacionModal] = useState(null); // 'membresias'
     // Filtros del listado de membresías: un mes normal trae 263 filas y sin buscador
@@ -445,9 +448,36 @@ const AdminDashboard = () => {
                             value={resumenAdmin.caja?.pagos ?? null}
                             icon={Banknote}
                             color="border-teal-500"
-                            hint="Hoy · pagos registrados"
+                            hint={pagosAbierto ? 'Hoy · pagos registrados — Clic para cerrar' : 'Hoy · pagos registrados — Clic para ver el detalle'}
+                            onDetalle={() => setPagosAbierto((v) => !v)}
+                            chevron
                         />
                     </div>
+
+                    {/* Panel del detalle de pagos: se abre DEBAJO de la fila Hoy, en el
+                        mismo lugar (sin scroll a otra sección). Reutiliza PagosDelDia y su
+                        queryKey; por defecto está cerrado. */}
+                    {pagosAbierto && (
+                        <section aria-labelledby="dashboard-pagos-hoy" id="pagos-del-dia"
+                            className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <h2 id="dashboard-pagos-hoy" className="text-lg font-bold text-zinc-100">
+                                        Pagos del día
+                                    </h2>
+                                    <p className="text-xs text-zinc-500">
+                                        Cobros de planes de hoy por Mercado Pago — el plan y si ya está activo
+                                    </p>
+                                </div>
+                                <button type="button" onClick={() => setPagosAbierto(false)}
+                                    className="shrink-0 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold transition-colors"
+                                    aria-label="Cerrar el detalle de pagos del día">
+                                    Cerrar
+                                </button>
+                            </div>
+                            <PagosDelDia maxFilas={6} mostrarEnlace />
+                        </section>
+                    )}
                 </section>
 
                 <section aria-labelledby="dashboard-negocio-mes" className="space-y-3">
@@ -821,20 +851,9 @@ const AdminDashboard = () => {
                     )}
                 </div>
 
-                {/* 1b. PAGOS DEL DÍA: la caja de hoy (Mercado Pago) con el plan y si
-                    ya activó. Es el MISMO dato de la pantalla /admin/pagos-del-dia,
-                    a la que lleva la campana `plan_pagado_online`. */}
-                <section aria-labelledby="dashboard-pagos-hoy" id="pagos-del-dia" className="space-y-3">
-                    <div>
-                        <h2 id="dashboard-pagos-hoy" className="text-lg font-bold text-zinc-100">
-                            Pagos del día
-                        </h2>
-                        <p className="text-xs text-zinc-500">
-                            Cobros de planes de hoy por Mercado Pago — el plan y si ya está activo
-                        </p>
-                    </div>
-                    <PagosDelDia maxFilas={6} mostrarEnlace />
-                </section>
+                {/* 1b. El detalle de PAGOS DEL DÍA se movió arriba: se despliega justo
+                    debajo de la fila Hoy con la tarjeta "Pagos de hoy" (bloque 9), para
+                    no duplicar la sección ni obligar a bajar hasta el final. */}
 
                 {/* 2. FINANCIERA Y DE NEGOCIO */}
                 {stats && (
