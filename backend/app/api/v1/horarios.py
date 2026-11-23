@@ -128,7 +128,8 @@ def _validar_cruce_coach(db, tenant_id, coach_id, disciplina, dia_semana,
 
     `excluir_horario_id` evita que una clase choque consigo misma cuando se crea
     o edita a partir de su propia plantilla. Quedan fuera las disciplinas sin
-    coach y Levantamiento Olímpico (exclusión TEMPORAL, ver el set).
+    coach y Levantamiento Olímpico: tiene coach, pero puede solaparse con
+    cualquier otra clase, incluidas las que tienen coach (ver el set).
     """
     if coach_id is None or _disciplina_sin_cruce_coach(disciplina):
         return
