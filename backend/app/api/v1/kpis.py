@@ -31,6 +31,7 @@ from app.services import churn_service
 from app.services import plan_vencimiento
 from app.services.metricas_service import (MIN_BASE_RETENCION, sql_usuario_real,
                                            sql_transaccion_real)
+from shared.estados import ESTADOS_USUARIO_SIN_MRR
 # La asistencia REAL del panel (`reservas.asistio` sobre la fecha de la clase): UNA sola definición
 # para el churn servido en vivo y para las dos consultas crudas de BI (`sql_cte_asistencias()`).
 from app.services.asistencia_real import (asistencias_entre_por_alumno, sql_cte_asistencias,
@@ -718,6 +719,10 @@ def get_predictions_churn(
         Usuario, Usuario.id == PredictionsChurn.usuario_id,
     ).filter(
         PredictionsChurn.tenant_id == tenant_id,
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == "alumno",
+        Usuario.es_prueba.is_(False),
+        Usuario.estado.notin_(ESTADOS_USUARIO_SIN_MRR),
     )
 
     # Contadores de las tarjetas: SIEMPRE del box COMPLETO (todas las predicciones),

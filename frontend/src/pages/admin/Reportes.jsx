@@ -174,16 +174,22 @@ const Reportes = () => {
     const savingMov = guardarMovimiento.isPending;
     const descargarVentas = useDescargarReporteVentas();
 
-    // Datos de los últimos 6 meses para los gráficos (desde BD real)
-    const membresiaData = (reportData?.historicoMembresias || []).map(item => ({
-        mes: item.mes,
-        membresias: item.membresias,
-    }));
+    // Datos de los últimos 6 meses para los gráficos (desde BD real).
+    // El mes en curso viene con `parcial=true`: se excluye para no dibujar como
+    // mes completo una caída que sólo refleja que el mes no terminó.
+    const membresiaData = (reportData?.historicoMembresias || [])
+        .filter((item) => !item.parcial)
+        .map(item => ({
+            mes: item.mes,
+            membresias: item.membresias,
+        }));
 
-    const ingresosData = (reportData?.historicoIngresos || []).map(item => ({
-        mes: item.mes,
-        ingresos: item.ingresos,
-    }));
+    const ingresosData = (reportData?.historicoIngresos || [])
+        .filter((item) => !item.parcial)
+        .map(item => ({
+            mes: item.mes,
+            ingresos: item.ingresos,
+        }));
 
     // Ranking de planes del mes: lo entrega `/reportes/` ya agrupado y con el
     // MISMO criterio de compra que Convertidos (plan con precio > 0), así no
@@ -430,6 +436,9 @@ const Reportes = () => {
                     <div className="cursor-zoom-in" onClick={() => setDetalleGrafico('membresias')}
                         title="Ver el detalle ampliado">
                         {chartMembresias(250)}
+                        <p className="mt-1 text-[11px] text-zinc-500">
+                            El mes en curso (parcial) no se grafica.
+                        </p>
                     </div>
                     </div>
 
@@ -449,6 +458,9 @@ const Reportes = () => {
                     <div className="cursor-zoom-in" onClick={() => setDetalleGrafico('ingresos')}
                         title="Ver el detalle ampliado">
                         {chartIngresos(250)}
+                        <p className="mt-1 text-[11px] text-zinc-500">
+                            El mes en curso (parcial) no se grafica.
+                        </p>
                     </div>
                     </div>
                 </div>
@@ -510,8 +522,9 @@ const Reportes = () => {
                         {/* `null` = el mes anterior no vendió nada: no hay base comparable,
                             así que no se muestra un 0% que parezca una caída. */}
                         {reportData?.ventasBazarVariacion == null ? (
-                            <p className="text-xs text-zinc-500 mt-1">
-                                Sin base del mes anterior ({formatCLP(reportData?.ventasBazarMesAnterior || 0)})
+                            <p className="text-xs text-zinc-500 mt-1"
+                                title={`Mes anterior: ${formatCLP(reportData?.ventasBazarMesAnterior || 0)} · ${reportData?.ventasBazarMesAnteriorPedidos || 0} pedidos`}>
+                                Datos insuficientes: se necesitan al menos 5 pedidos el mes anterior
                             </p>
                         ) : (
                             <p className={`text-xs font-bold mt-1 ${reportData.ventasBazarVariacion > 0 ? 'text-green-500' : reportData.ventasBazarVariacion < 0 ? 'text-red-500' : 'text-zinc-500'}`}

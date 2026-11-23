@@ -183,6 +183,7 @@ def _historico_membresias_6m(db: Session, tenant_id: int):
         GROUP BY 1
     """), {"tid": tenant_id, "desde": desde, "hasta": hasta}).fetchall()
     por_mes = {r.mes: int(r.membresias or 0) for r in filas}
+    hoy = hoy_santiago()
 
     historico = []
     for i in range(5, -1, -1):
@@ -190,7 +191,12 @@ def _historico_membresias_6m(db: Session, tenant_id: int):
         label = f"{MESES[ini.month - 1]} {ini.year}"
         historico.append({
             "mes": label,
+            "anio": ini.year,
+            "mes_num": ini.month,
             "membresias": por_mes.get(ini.date(), 0),
+            # El mes en curso está a medias: se marca para que el gráfico no lo
+            # dibuje como un mes completo (la caída visual no es real).
+            "parcial": (ini.year, ini.month) == (hoy.year, hoy.month),
         })
     return historico
 
@@ -223,6 +229,7 @@ def _historico_ingresos_6m(db: Session, tenant_id: int):
         "hasta": hasta.date(),
     }).fetchall()
     por_mes = {r.mes: float(r.neto or 0) for r in filas}
+    hoy = hoy_santiago()
 
     historico = []
     for i in range(5, -1, -1):
@@ -230,7 +237,10 @@ def _historico_ingresos_6m(db: Session, tenant_id: int):
         label = f"{MESES[ini.month - 1]} {ini.year}"
         historico.append({
             "mes": label,
+            "anio": ini.year,
+            "mes_num": ini.month,
             "ingresos": por_mes.get(ini.date(), 0.0),
+            "parcial": (ini.year, ini.month) == (hoy.year, hoy.month),
         })
     return historico
 
@@ -414,7 +424,9 @@ def obtener_reportes_analytics(
         # comparable y se publica None ("datos insuficientes").
         bazar_variacion = (
             int(round(((bazar_mes["monto"] - bazar_mes_ant) / bazar_mes_ant) * 100))
-            if bazar_mes_ant_det["pedidos"] >= 5 else None
+            if (bazar_mes["pedidos"] >= 5 and bazar_mes_ant_det["pedidos"] >= 5
+                and bazar_mes_ant > 0)
+            else None
         )
 
         # --- 7. ARPU (MRR / alumnos activos de la MISMA fecha) ---

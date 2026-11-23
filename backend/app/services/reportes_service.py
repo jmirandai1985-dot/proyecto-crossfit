@@ -336,6 +336,7 @@ def _pedidos_bazar_mes(db, tenant_id, inicio, fin):
               AND (p.fecha_pedido AT TIME ZONE 'America/Santiago')::date >= :ini
               AND (p.fecha_pedido AT TIME ZONE 'America/Santiago')::date < :fin
               AND p.estado IN (""" + lista_sql_pago_bazar() + """)
+              AND NOT u.es_prueba
             ORDER BY p.fecha_pedido DESC
         """), {"tid": tenant_id, "ini": inicio, "fin": fin}).fetchall()
         return rows
@@ -357,6 +358,12 @@ def _pedidos_bazar_pendientes_mes(db, tenant_id, inicio, fin) -> int:
               AND (p.fecha_pedido AT TIME ZONE 'America/Santiago')::date >= :ini
               AND (p.fecha_pedido AT TIME ZONE 'America/Santiago')::date < :fin
               AND p.estado = 'pendiente'
+              AND NOT EXISTS (
+                  SELECT 1 FROM usuarios u
+                  WHERE u.id = p.alumno_id
+                    AND u.tenant_id = p.tenant_id
+                    AND u.es_prueba = true)
+
         """), {"tid": tenant_id, "ini": inicio, "fin": fin}).scalar() or 0)
     except Exception:
         return 0

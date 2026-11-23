@@ -691,6 +691,7 @@ const Fidelizacion = () => {
                                                     {/* DOS botones a la vista (antes era un menú "Acción Rápida"):
                                                         una fila = dos acciones, sin abrir nada para verlas. */}
                                                     <div className="flex flex-wrap gap-2">
+                                                        {!p.es_prueba && (
                                                         <button
                                                             type="button"
                                                             onClick={() => enviarCorreoManual(p)}
@@ -700,6 +701,7 @@ const Fidelizacion = () => {
                                                         >
                                                             <Mail className="h-3.5 w-3.5" /> Enviar correo
                                                         </button>
+                                                        )}
                                                         <button
                                                             type="button"
                                                             onClick={() => darBeneficio(p)}
