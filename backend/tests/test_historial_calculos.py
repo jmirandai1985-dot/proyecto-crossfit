@@ -202,3 +202,22 @@ def test_e4_el_orden_de_pagos_aguanta_una_fila_sin_fecha():
     # Del más nuevo al más viejo y, al final, la fila sin fecha (sin inventarle un día).
     assert [i["fecha"] for i in ordenado] == [date(2026, 10, 8), date(2026, 9, 1), None]
     assert svc._orden_pagos([]) == []
+
+
+# ── F. Antigüedad ("alumno desde ... (N días)") ───────────────────────────────
+def test_f_antiguedad_en_dias_con_fecha_fija():
+    """19-07-2026 → 23-11-2026 son 127 días (no 126): sin off-by-one por UTC."""
+    assert svc.dias_de_antiguedad(date(2026, 7, 19), date(2026, 11, 23)) == 127
+    # Un `timestamptz` de la BD se lee en hora de Chile antes de restar: 02:00 UTC
+    # del 20-jul sigue siendo el 19-jul en Chile.
+    assert svc.dias_de_antiguedad(
+        datetime(2026, 7, 20, 2, 0, tzinfo=timezone.utc),
+        date(2026, 11, 23)) == 127
+    assert svc.dias_de_antiguedad(_dt(2026, 7, 19), date(2026, 11, 23)) == 127
+    assert svc.dias_de_antiguedad(None, date(2026, 11, 23)) is None
+
+
+def test_f2_sin_hoy_usa_el_dia_de_chile(monkeypatch):
+    """Sin `hoy` inyectado la cuenta se ancla a `hoy_santiago()` (no `date.today()`)."""
+    monkeypatch.setattr(svc, "hoy_santiago", lambda: date(2026, 11, 23))
+    assert svc.dias_de_antiguedad(date(2026, 7, 19)) == 127

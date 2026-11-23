@@ -291,6 +291,20 @@ def inicio_actividad(created_at=None, primera_suscripcion=None, primera_asistenc
     return (alta, "alta") if alta is not None else (None, None)
 
 
+def dias_de_antiguedad(desde, hoy: date = None):
+    """Días calendario desde `desde` hasta HOY en Chile (o el `hoy` inyectado).
+
+    Única definición de la antigüedad que muestran "Mi historial" y la ficha:
+    usa `hoy_santiago()` (nunca `date.today()` del proceso, que en UTC cambia de
+    día a las 21:00 de Chile) y lee un `timestamptz` en hora de Chile antes de
+    restar. 19-07-2026 → 23-11-2026 = 127 días. Puro: se testea sin BD.
+    """
+    fecha = _como_fecha(desde)
+    if fecha is None:
+        return None
+    return ((hoy or hoy_santiago()) - fecha).days
+
+
 def promedio_semanal(asistidas: int, inicio, hoy: date) -> float:
     """Asistencias por SEMANA REAL del período (`inicio` → `hoy`), con piso de 1 semana.
 
@@ -394,7 +408,7 @@ def _agregados_asistencia(filas: list, alumno, ahora: datetime, hoy: date,
     desde = _como_fecha(inicio[0]) if inicio else None
     if desde is None:
         desde = _como_fecha(getattr(alumno, "created_at", None))
-    dias_como_alumno = (hoy - desde).days if desde is not None else None
+    dias_como_alumno = dias_de_antiguedad(desde, hoy)
     promedio = promedio_semanal(asistidas, desde, hoy)
 
     meses = []
@@ -1090,7 +1104,7 @@ def ficha_alumno(alumno, hoy: date = None, inicio=None, fuente: str = None) -> d
     hoy = hoy or hoy_santiago()
     alta = getattr(alumno, "created_at", None)
     desde = _como_fecha(inicio) or _como_fecha(alta)
-    dias = (hoy - desde).days if desde is not None else None
+    dias = dias_de_antiguedad(desde, hoy)
     return {
         "id": alumno.id,
         "nombre": alumno.nombre,
