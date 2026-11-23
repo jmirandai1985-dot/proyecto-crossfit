@@ -363,22 +363,22 @@ const Planes = () => {
                                 )}
                             </div>
                         </div>
-                        {configMatricula?.activada_en ? (
-                            <span
-                                data-testid="badge-matricula"
-                                className="inline-flex items-center gap-2 rounded-full border border-[#A7F3D0] bg-[#ECFDF5] px-3 py-1 text-xs font-semibold text-[#047857]">
-                                <span aria-hidden="true"
-                                    className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-                                Activa desde el {fmtFechaChile(configMatricula.activada_en)}
-                            </span>
-                        ) : (
-                            <span
-                                data-testid="badge-matricula"
-                                className="inline-flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-800/60 px-3 py-1 text-xs font-semibold text-zinc-300">
-                                <span aria-hidden="true"
-                                    className="h-2 w-2 shrink-0 rounded-full bg-zinc-500" />
-                                Todavía no se activó
-                            </span>
+                        {configMatricula?.activada_en && (
+                            matriculaActiva ? (
+                                <span
+                                    data-testid="badge-matricula"
+                                    className="inline-flex items-center gap-2 rounded-full border border-[#A7F3D0] bg-[#ECFDF5] px-3 py-1 text-xs font-semibold text-[#047857]">
+                                    <span aria-hidden="true"
+                                        className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+                                    Activa desde el {fmtFechaChile(configMatricula.activada_en)}
+                                </span>
+                            ) : (
+                                <span
+                                    data-testid="badge-matricula"
+                                    className="inline-flex items-center rounded-full border border-zinc-700 bg-zinc-800/60 px-3 py-1 text-xs font-semibold text-zinc-300">
+                                    Última activación: {fmtFechaChile(configMatricula.activada_en)}
+                                </span>
+                            )
                         )}
                         <p className="text-sm text-zinc-400" data-testid="contador-matricula">
                             <strong className="text-zinc-200">
