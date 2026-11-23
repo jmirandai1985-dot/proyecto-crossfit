@@ -407,6 +407,46 @@ ok(/alumnosProgresoBuscados\.length/.test(DASH_CODIGO),
 ok(/asistencias marcadas/.test(DASH_CODIGO) && /inscriptos/.test(DASH_CODIGO),
     'Mis clases muestra inscriptos y asistencias marcadas por separado');
 
+console.log('== 10. La tarjeta del mes cuenta PERSONAS, no clases ==');
+// Mismo escenario de arriba: 7 presentes + 8 no show en el mes (y 8 clases futuras).
+eq(mezcla.personasMarcadas, 15, '7 asistieron + 8 no show = 15 personas con asistencia marcada');
+eq(mezcla.pctMarcadas, 47, 'el % de la tarjeta es asistieron / personas marcadas: 7 de 15 = 47%');
+eq(mezcla.presentes, 7, 'la primera cifra de abajo sigue siendo los presentes');
+eq(mezcla.ausentes, 8, 'y la segunda, los no show');
+// La misma clase: 3 de 4 personas marcadas asistieron, aunque el cupo sea de 16.
+const totClase = totalesDe([CLASE]);
+eq(totClase.personasMarcadas, 4, 'una clase con 4 reservas marcadas aporta 4 personas');
+eq(totClase.pct, 19, 'el % del CUPO no cambia (lo siguen usando anillos y calendario)');
+eq(totClase.pctMarcadas, 75, 'la tarjeta mide 3 de 4 personas = 75%, no 3 de 16 cupos = 19%');
+eq(totalesDe([]).personasMarcadas, 0, 'un mes sin asistencias marcadas muestra 0 personas');
+eq(totalesDe([]).pctMarcadas, null, 'y el % queda en null: la pantalla pone "—", no un 0%');
+eq(totalesDe(FUTURAS).personasMarcadas, 0,
+    'un mes con sólo clases por venir no tiene personas marcadas');
+eq(totalesDe(FUTURAS).pctMarcadas, null, '... ni un % que mostrar');
+
+// La tarjeta en el código: cifra principal de personas y las clases sólo como texto.
+const tarjetaMes = PANTALLA.slice(
+    PANTALLA.indexOf('Personas con asistencia marcada en el mes'),
+    PANTALLA.indexOf('{visibles.length === 0 && ('),
+);
+ok(tarjetaMes.length > 0, 'la tarjeta del mes se ubicó en el código');
+ok(tarjetaMes.includes('data-testid="historial-total-personas"'),
+    'la cifra principal tiene su marca (historial-total-personas)');
+ok(/\{totalMes\.personasMarcadas\}/.test(tarjetaMes),
+    'la cifra principal son las personas con asistencia marcada (15 en el ejemplo)');
+ok(!/<Contador/.test(tarjetaMes) && !/valor=\{totalMes\.clases\}/.test(tarjetaMes),
+    'la cantidad de clases ya no es una cifra grande');
+ok(/\{totalMes\.presentes\} asistieron/.test(tarjetaMes), 'debajo se lee "7 asistieron"');
+ok(/\{totalMes\.ausentes\} no show/.test(tarjetaMes), 'y "8 no show"');
+ok(/textoPctMarcadas\(totalMes\)/.test(tarjetaMes),
+    'el porcentaje de la tarjeta es asistieron / personas marcadas');
+ok(PANTALLA.includes("totales?.pctMarcadas === null ? '—'"),
+    'sin personas marcadas el porcentaje es "—", no 0%');
+ok(/en \{totalMes\.clases\} clase/.test(tarjetaMes),
+    'la cantidad de clases queda como texto secundario ("en N clases")');
+ok(!/Totales del mes \(clases ya ocurridas\)/.test(PANTALLA),
+    'el encabezado de la tarjeta ya no dice "clases ya ocurridas"');
+
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);
 

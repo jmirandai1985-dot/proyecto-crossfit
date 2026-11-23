@@ -54,9 +54,10 @@ const COLOR_PCT = (pct) => {
 
 /**
  * Anillo de ocupación (SVG propio, sin librerías — mismo cálculo que el donut del Resumen del
- * coach). `pct` es 0-100; el texto del medio lo pone quien lo usa.
+ * coach). `pct` es 0-100; el texto del medio lo pone quien lo usa y `etiqueta` es el texto
+ * accesible (por defecto, "N% de asistencia").
  */
-const Anillo = ({ pct = 0, tamano = 92, grosor = 10, children }) => {
+const Anillo = ({ pct = 0, tamano = 92, grosor = 10, etiqueta, children }) => {
     const limpio = Math.min(Math.max(Number(pct) || 0, 0), 100);
     const radio = (tamano - grosor) / 2;
     const circunferencia = 2 * Math.PI * radio;
@@ -64,7 +65,7 @@ const Anillo = ({ pct = 0, tamano = 92, grosor = 10, children }) => {
     return (
         <div className="relative" style={{ width: tamano, height: tamano }}>
             <svg width={tamano} height={tamano} className="-rotate-90"
-                role="img" aria-label={`${limpio}% de asistencia`}>
+                role="img" aria-label={etiqueta || `${limpio}% de asistencia`}>
                 <circle cx={centro} cy={centro} r={radio} fill="none"
                     stroke="#2A2A2E" strokeWidth={grosor} />
                 <circle cx={centro} cy={centro} r={radio} fill="none"
@@ -155,6 +156,15 @@ const textoCupos = (totales) => {
         ? `${base} + ${totales.reservasSinTope} sin cupo`
         : base;
 };
+
+/**
+ * El % de la tarjeta del mes: asistieron ÷ personas con asistencia marcada.
+ * Sin nadie marcado no hay denominador y se dice "—": un 0 % se leería como una
+ * asistencia pésima y no como "este mes todavía no tiene marcas".
+ */
+const textoPctMarcadas = (totales) => (
+    totales?.pctMarcadas === null ? '—' : `${totales?.pctMarcadas}%`
+);
 
 const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
     const hoy = fechaSola();
@@ -316,18 +326,33 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
 
                     {pestaña === 'resumen' && (
                     <>
-                    {/* ── 2. Totales del mes elegido (sólo clases ya ocurridas; el % es contra
-                        los CUPOS, igual que los anillos) ── */}
-                    <div className={`${TARJETA} flex flex-wrap items-center justify-between gap-5 p-4`}>
+                    {/* ── 2. Personas con asistencia marcada en el mes elegido (sólo clases ya
+                        ocurridas). La cifra principal son PERSONAS (asistieron + no show); la
+                        cantidad de clases queda como texto secundario. El % es asistieron ÷
+                        personas marcadas: el % del cupo sigue en anillos y calendario. ── */}
+                    <div className={`${TARJETA} flex flex-wrap items-center justify-between gap-5 p-4`}
+                        data-testid="historial-total-mes">
                         <div>
-                            <p className={ROTULO}>Totales del mes (clases ya ocurridas)</p>
-                            <p className="mt-1 text-2xl font-black text-white">
-                                {nombreMes(mes)} {anio}
+                            <p className={ROTULO}>Personas con asistencia marcada en el mes</p>
+                            <p className="mt-1 text-[11.5px] text-zinc-500">
+                                {nombreMes(mes)} {anio} · sólo clases ya ocurridas
+                            </p>
+                            <p className="mt-2 flex items-baseline gap-2">
+                                <span className="text-[34px] font-black leading-none text-white"
+                                    data-testid="historial-total-personas">
+                                    {totalMes.personasMarcadas}
+                                </span>
+                                <span className="text-[12.5px] font-bold text-zinc-400">
+                                    persona{totalMes.personasMarcadas === 1 ? '' : 's'}
+                                </span>
+                            </p>
+                            <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] font-bold">
+                                <span className="text-[#D7FF4A]">{totalMes.presentes} asistieron</span>
+                                <span className="text-amber-200">{totalMes.ausentes} no show</span>
                             </p>
                             <p className="mt-1 text-[11.5px] text-zinc-500">
-                                {totalMes.cupos} cupos ofrecidos en{' '}
-                                {totalMes.clases - totalMes.clasesSinTope} clase
-                                {totalMes.clases - totalMes.clasesSinTope === 1 ? '' : 's'} con cupo
+                                en {totalMes.clases} clase{totalMes.clases === 1 ? '' : 's'} ·{' '}
+                                {totalMes.cupos} cupos ofrecidos
                                 {totalMes.clasesSinTope > 0 && (
                                     <>
                                         {' · '}{totalMes.reservasSinTope} reservas en{' '}
@@ -338,17 +363,24 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                                 {' · '}{totalMes.cerradas} con la asistencia cerrada
                             </p>
                         </div>
-                        <div className="flex flex-wrap items-center gap-6">
-                            <Contador valor={totalMes.clases} label="clases" />
-                            <Contador valor={totalMes.presentes} label="presentes"
-                                color="text-[#D7FF4A]" />
-                            <Contador valor={totalMes.ausentes} label="no shows"
-                                color="text-amber-200" />
-                            <Contador valor={`${textoPct(totalMes)}`} label="asistencia (con cupo)" />
-                            {totalMes.reservasSinTope > 0 && (
-                                <Contador valor={totalMes.reservasSinTope} label="reservas sin cupo"
-                                    color="text-sky-300" />
-                            )}
+                        <div className="text-center">
+                            <Anillo pct={totalMes.pctMarcadas ?? 0} tamano={96} grosor={10}
+                                etiqueta={totalMes.pctMarcadas === null
+                                    ? 'sin asistencias marcadas en el mes'
+                                    : `${totalMes.pctMarcadas}% de las personas marcadas asistieron`}>
+                                <span className={`text-xl font-black ${
+                                    totalMes.pctMarcadas === null
+                                        ? 'text-zinc-600'
+                                        : COLOR_PCT(totalMes.pctMarcadas)}`}>
+                                    {textoPctMarcadas(totalMes)}
+                                </span>
+                                <span className="text-[9px] uppercase tracking-wide text-zinc-500">
+                                    asistieron
+                                </span>
+                            </Anillo>
+                            <p className="mt-1 text-[10.5px] uppercase tracking-wide text-zinc-500">
+                                de las personas marcadas
+                            </p>
                         </div>
                     </div>
 

@@ -251,6 +251,14 @@ export const filtrarPorHorario = (clases, horario) => (
  *     porcentaje honesto que mostrar y la pantalla dice "sin cupo".
  * `presentes`, `reservas`, `ausentes` y `clases` siguen siendo los totales de
  * TODAS las clases (es la gente real que vino / reservó).
+ *
+ * ── La tarjeta "Totales del mes" cuenta PERSONAS, no clases ─────────────────
+ * `personasMarcadas` = presentes + ausentes de las clases CON ASISTENCIA
+ * (`medibles`): la gente que tiene una marca en el mes. Es la cifra principal
+ * de esa tarjeta, y `pctMarcadas` es su porcentaje (asistieron ÷ personas
+ * marcadas, redondeado). Sin nadie marcado no hay denominador honesto:
+ * `pctMarcadas` es `null` y la pantalla muestra "—", no un 0 %. `pct` sigue
+ * siendo el % contra los CUPOS: es el de los anillos y el calendario.
  */
 export const totalesDe = (clases) => {
     const lista = clases || [];
@@ -261,6 +269,8 @@ export const totalesDe = (clases) => {
     const sinTope = medibles.filter(sinTopeDe);
     const presentes = medibles.reduce((a, c) => a + presentesDe(c), 0);
     const ausentes = medibles.reduce((a, c) => a + ausentesDe(c), 0);
+    // Gente con una marca en el mes: el que vino y el que reservó y no llegó.
+    const personasMarcadas = presentes + ausentes;
     const reservas = medibles.reduce((a, c) => a + reservasDe(c), 0);
     const cupos = conTope.reduce((a, c) => a + cuposDe(c), 0);
     const presentesConTope = conTope.reduce((a, c) => a + presentesDe(c), 0);
@@ -283,6 +293,11 @@ export const totalesDe = (clases) => {
         pct: medibles.length === 0
             ? 0
             : (conTope.length === 0 ? null : porcentaje(presentesConTope, cupos)),
+        // Cifra y % de la tarjeta "Totales del mes": PERSONAS con asistencia
+        // marcada (asistieron + no show), no clases ni cupos. `null` sin marcas:
+        // la pantalla dice "—" en vez de un 0 % que se leería como mal asistencia.
+        personasMarcadas,
+        pctMarcadas: personasMarcadas === 0 ? null : porcentaje(presentes, personasMarcadas),
         libres: Math.max(cupos - (reservas - reservasSinTope), 0),
         // Clases con la asistencia ya cerrada (todas sus reservas vigentes marcadas).
         cerradas: lista.filter((c) => c?.marcada).length,
