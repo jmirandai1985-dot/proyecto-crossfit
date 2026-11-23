@@ -26,6 +26,8 @@ import logging
 from datetime import timedelta
 
 from app.core.estados import sql_fecha_en_chile
+from app.services.metricas_service import sql_usuario_real
+from shared.estados import ESTADOS_USUARIO_SIN_MRR, lista_sql
 from app.utils.santiago import hoy_santiago
 
 logger = logging.getLogger("uvicorn.email")
@@ -184,6 +186,8 @@ def enviar_alertas_renovacion(db, tenant_id: int = 1, dias_aviso: int = 3) -> di
           AND s.estado = 'activo'
           AND u.estado = 'activo'
           AND u.rol = 'alumno'
+          AND {sql_usuario_real("u")}
+          AND u.estado NOT IN ({lista_sql(ESTADOS_USUARIO_SIN_MRR)})
           AND {_sql_sin_plan_en_cola()}
           AND {sql_fecha_en_chile("s.fecha_expiracion")} = :target
         ORDER BY u.id, s.fecha_expiracion DESC
@@ -237,6 +241,9 @@ def enviar_alertas_inactividad(db, tenant_id: int = 1, umbral_dias: int = 7) -> 
         WHERE u.tenant_id = :tid
           AND u.rol = 'alumno'
           AND u.estado = 'activo'
+          AND {sql_usuario_real("u")}
+          AND u.estado NOT IN ({lista_sql(ESTADOS_USUARIO_SIN_MRR)})
+
     """), {"tid": tenant_id}).fetchall()
 
     limite = hoy_santiago() - timedelta(days=umbral_dias)
@@ -290,6 +297,9 @@ def enviar_alertas_urgencia(db, tenant_id: int = 1) -> dict:
           AND s.estado = 'activo'
           AND u.estado = 'activo'
           AND u.rol = 'alumno'
+          AND {sql_usuario_real("u")}
+          AND u.estado NOT IN ({lista_sql(ESTADOS_USUARIO_SIN_MRR)})
+
           AND {_sql_sin_plan_en_cola()}
           AND {sql_fecha_en_chile("s.fecha_expiracion")} = :target
         ORDER BY u.id
@@ -355,6 +365,8 @@ def enviar_alertas_ultimo_credito(db, tenant_id: int = 1) -> dict:
           AND u.estado = 'activo'
           AND u.rol = 'alumno'
           AND s.creditos_disponibles = 1
+          AND {sql_usuario_real("u")}
+          AND u.estado NOT IN ({lista_sql(ESTADOS_USUARIO_SIN_MRR)})
           AND {sql_fecha_en_chile("s.fecha_expiracion")} >= :hoy
         ORDER BY u.id
     """), {"tid": tenant_id, "hoy": hoy_santiago()}).fetchall()
@@ -402,6 +414,8 @@ def enviar_alertas_sin_creditos(db, tenant_id: int = 1) -> dict:
           AND u.estado = 'activo'
           AND u.rol = 'alumno'
           AND s.creditos_disponibles = 0
+          AND {sql_usuario_real("u")}
+          AND u.estado NOT IN ({lista_sql(ESTADOS_USUARIO_SIN_MRR)})
           AND {sql_fecha_en_chile("s.fecha_expiracion")} >= :hoy
         ORDER BY u.id
     """), {"tid": tenant_id, "hoy": hoy_santiago()}).fetchall()
