@@ -11,6 +11,7 @@ import React from 'react';
  * @param {Function} onDetalle Abre el detalle del KPI (opcional). Con esto la tarjeta se puede
  *                             clickear (y con Enter/Espacio) y muestra el aviso "Ver detalle":
  *                             es el MISMO patrón de las otras tarjetas del BI.
+ * @param {string}   hint      Período o contexto corto debajo del valor (ej. "Hoy · ..." / "Mes cerrado · ...").
  */
 export const KpiCard = ({
     label,
@@ -20,11 +21,12 @@ export const KpiCard = ({
     color = 'border-blue-500',
     icon: Icon = null,
     onDetalle = null,
+    hint = null,
 }) => {
     const isPositive = delta !== null ? delta >= 0 : null;
     const display = typeof value === 'number'
         ? value.toLocaleString('es-CL')
-        : (value ?? '—');
+        : (value ?? 'n/d');
     const interactiva = typeof onDetalle === 'function';
 
     return (
@@ -59,6 +61,9 @@ export const KpiCard = ({
                         <p className={`text-xs mt-1 ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
                             {isPositive ? '↑' : '↓'} {Math.abs(delta)}%
                         </p>
+                    )}
+                    {hint && (
+                        <p className="text-[11px] text-zinc-500 mt-1">{hint}</p>
                     )}
                 </div>
                 {Icon && <Icon className="w-6 h-6 text-gray-600" />}

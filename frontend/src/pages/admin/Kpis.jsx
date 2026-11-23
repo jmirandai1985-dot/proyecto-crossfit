@@ -23,11 +23,35 @@ import AvisoCarga from '../../components/AvisoCarga';
 const TABS = [
     { id: 'diario', label: 'Diario' },
     { id: 'mensual', label: 'Mensual' },
-    { id: 'bi', label: 'Inteligencia de Negocio' },
+    { id: 'bi', label: 'Inteligencia de negocio' },
 ];
 
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
     'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+const MESES_LARGOS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+const fmtMesLargo = (year, month) => {
+    const texto = `${MESES_LARGOS[Number(month) - 1] || ''} ${year ?? ''}`.trim();
+    return texto ? texto.charAt(0).toUpperCase() + texto.slice(1) : 'n/d';
+};
+
+const fmtFechaCompleta = (iso) => {
+    if (!iso) return 'n/d';
+    const fecha = new Date(`${iso}T12:00:00`);
+    if (Number.isNaN(fecha.getTime())) return String(iso);
+    const texto = fecha.toLocaleDateString('es-CL', {
+        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+    });
+    return texto.charAt(0).toUpperCase() + texto.slice(1);
+};
+
+const numOrNull = (valor) => {
+    if (valor === null || valor === undefined || valor === '') return null;
+    const numero = Number(valor);
+    return Number.isFinite(numero) ? numero : null;
+};
 
 
 // ─── Helpers de fecha (hora local del navegador) ──────────────────────────
@@ -48,7 +72,7 @@ const fmtCLP = (n) => `$${Number(n || 0).toLocaleString('es-CL')}`;
 // Índice estacional: 1,00x = un mes igual al promedio del período; 1,42x = 42%
 // arriba del promedio. `null` = ese mes no tiene dato (se muestra "s/d", nunca 0).
 const fmtIndice = (v) => (v === null || v === undefined)
-    ? 's/d'
+    ? 'n/d'
     : `${Number(v).toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}×`;
 
 // Celda de retención de una cohorte: "activos/evaluables (P%)" o "n/d" si el
@@ -92,7 +116,9 @@ const AdminKpis = () => {
     const [erroresCarga, setErroresCarga] = useState([]);
     const [churn, setChurn] = useState(null);
     const [forecast, setForecast] = useState([]);
-    const [mrrBi, setMrrBi] = useState(null);
+    const [alumnosActivosBi, setAlumnosActivosBi] = useState(null);
+    // Datos del ÚLTIMO MES CERRADO para BI: embudo, asistencia, ocupación y MRR.
+    const [mesBi, setMesBi] = useState(null);
     // Bloque financiero: ticket promedio + vida (GET /kpis/financiero) y ARPU
     // REUSADO de GET /reportes/ (misma fuente que muestra Reportes.jsx).
     const [financiero, setFinanciero] = useState(null);
@@ -211,32 +237,33 @@ const AdminKpis = () => {
     // ─── BI: churn + forecast (+ MRR DE HOY vía /reportes/) ──────────────
     const cargarBi = useCallback(async () => {
         setLoading(true); setError(null); setSinDatos(false); setErroresCarga([]);
+        setMesBi(null); setAlumnosActivosBi(null);
         // Secciones que fallaron: se avisan con AvisoCarga + Reintentar en vez de
         // dejar el bloque vacío como si no hubiera dato (catch mudo).
         const fallos = [];
         try {
             const [churnRes, forecastRes] = await Promise.all([
-                api.get('/api/v1/kpis/churn'),
-                api.get('/api/v1/kpis/forecast', { params: { meses: 3 } }),
+                api.get('/api/v1/kpis/churn').catch(() => null),
+                api.get('/api/v1/kpis/forecast', { params: { meses: 3 } }).catch(() => null),
             ]);
-            setChurn(churnRes.data);
-            setForecast(forecastRes.data?.proyecciones || []);
+            if (!churnRes) {
+                fallos.push('el riesgo de abandono (GET /kpis/churn)');
+            }
+            if (!forecastRes) {
+                fallos.push('el pronóstico de ingresos (GET /kpis/forecast)');
+            }
+            setChurn(churnRes?.data || null);
+            setForecast(forecastRes?.data?.proyecciones || []);
 
-            // MRR: el de HOY —`metricas_service.mrr(db, tenant, hoy)`—, el que ya
-            // devuelve GET /reportes/ y que muestran el dashboard y Reportes.
-            // NO sale de `monthly_kpis`: hasta af77de2 la tarjeta leía la fila del
-            // último mes del data mart mensual, así que cuando esa fila no existía
-            // (o el índice de períodos fallaba) la tarjeta quedaba en "— CLP"
-            // aunque el MRR vivo sí se conocía (regresión reportada en PROD).
-            // El ARPU se REUSA de la MISMA respuesta (ingresos netos del mes /
-            // alumnos activos: la definición que muestra Reportes.jsx).
+            // Alumnos activos de HOY y ARPU: GET /reportes/ es la misma fuente
+            // que usa Reportes.jsx y ya devuelve ambos campos.
             const rRep = tenant_id
                 ? await api.get(`/api/v1/reportes/?tenant_id=${tenant_id}`).catch(() => null)
                 : null;
             if (!rRep) {
-                fallos.push('el MRR y el ARPU de HOY (GET /reportes/)');
+                fallos.push('los alumnos activos y el ARPU de HOY (GET /reportes/)');
             }
-            setMrrBi(rRep?.data?.mrr ?? null);
+            setAlumnosActivosBi(rRep?.data?.alumnosActivos ?? null);
             setArpu(rRep?.data?.arpu ?? null);
 
             // Bloque financiero (opcional, criterio de siempre): el ticket y la vida
@@ -264,6 +291,27 @@ const AdminKpis = () => {
             const rCoh = await api.get('/api/v1/kpis/cohortes')
                 .catch(() => null);
             setCohortes(rCoh?.data || null);
+
+            // Último mes CERRADO para el embudo, asistencia, ocupación y MRR del BI.
+            // Se toma `periodos` y se descarta el mes en curso / parcial.
+            const rPerBi = await api.get('/api/v1/kpis/mensual/periodos')
+                .catch(() => null);
+            const cerrados = (rPerBi?.data?.periodos || []).filter((p) => !p.parcial);
+            const periodoBi = cerrados.length ? cerrados[cerrados.length - 1] : null;
+            if (!periodoBi) {
+                setMesBi(null);
+                fallos.push('los KPIs del último mes cerrado (embudo, asistencia y ocupación)');
+            } else {
+                const rMesBi = await api.get('/api/v1/kpis/mensual', {
+                    params: { year: periodoBi.year, month: periodoBi.month },
+                }).catch(() => null);
+                if (!rMesBi) {
+                    fallos.push(`los KPIs del mes cerrado ${fmtMesLargo(periodoBi.year, periodoBi.month)}`);
+                }
+                setMesBi(rMesBi?.data
+                    ? { ...rMesBi.data, periodo: periodoBi }
+                    : null);
+            }
 
             setErroresCarga(fallos);
         } catch (err) {
@@ -363,6 +411,45 @@ const AdminKpis = () => {
     const ltvEstimado = (arpu != null && financiero?.vida?.vida_promedio_meses)
         ? Math.round(arpu * financiero.vida.vida_promedio_meses)
         : null;
+
+    // ─── BI: períodos y datos derivados (sin inventar cifras) ──────────────
+    const periodoBiTexto = mesBi ? fmtMesLargo(mesBi.year, mesBi.month) : null;
+    const alumnosRiesgoBi = churn
+        ? (numOrNull(churn.criticos) === null || numOrNull(churn.altos) === null
+            ? null
+            : numOrNull(churn.criticos) + numOrNull(churn.altos))
+        : null;
+    const baseFunnelBi = numOrNull(mesBi?.alumnos_prueba);
+    const funnelSuficiente = baseFunnelBi !== null && baseFunnelBi >= 5;
+    const pasosFunnelBi = mesBi ? [
+        {
+            label: 'Alumnos en prueba',
+            valor: numOrNull(mesBi.alumnos_prueba),
+            color: 'bg-zinc-500',
+        },
+        {
+            label: 'Ejecutaron clase de prueba',
+            valor: numOrNull(mesBi.alumnos_clase_prueba_ejecutada),
+            color: 'bg-cyan-500',
+        },
+        {
+            label: 'Compraron plan',
+            valor: numOrNull(mesBi.alumnos_plan_comprado),
+            color: 'bg-emerald-500',
+        },
+    ] : [];
+    const conversionBi = funnelSuficiente
+        ? numOrNull(mesBi?.conversion_rate)
+        : null;
+    const asistenciaBi = numOrNull(mesBi?.asistencia_promedio);
+    const ocupacionBi = numOrNull(mesBi?.ocupacion_promedio);
+    const vida = financiero?.vida || null;
+    const vidaMesesBi = numOrNull(vida?.vida_promedio_meses);
+    const vidaDiasBi = numOrNull(vida?.vida_promedio_dias);
+    const vidaNBi = numOrNull(vida?.n_alumnos);
+    const criticosBi = numOrNull(churn?.criticos);
+    const altosBi = numOrNull(churn?.altos);
+    const mediosBi = numOrNull(churn?.medios);
 
     // ─── Detalle de las tarjetas de KPI ──────────────────────────────────
     // Cada tarjeta se abre al hacer clic (o con Enter/Espacio) y muestra qué mide, cómo se
@@ -604,9 +691,17 @@ const AdminKpis = () => {
                 {/* ══ TAB DIARIO ══ */}
                 {!loading && !error && !sinDatos && activeTab === 'diario' && dia && (
                     <div className="space-y-6">
-                        <p className="text-xs text-gray-500">
-                            Último día con datos: <span className="text-gray-300">{fmtFechaCorta(dia.fecha)}</span>
-                        </p>
+                        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-zinc-800 pb-4">
+                            <div>
+                                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Datos del día</p>
+                                <h2 className="mt-1 text-2xl font-bold text-white" data-testid="fecha-diario">
+                                    {fmtFechaCompleta(dia.fecha)}
+                                </h2>
+                            </div>
+                            <span className="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1 text-[11px] font-medium text-zinc-400">
+                                Último día publicado
+                            </span>
+                        </div>
 
                         <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Alumnos y actividad</h3>
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -693,114 +788,325 @@ const AdminKpis = () => {
                             variante="oscura"
                             onReintentar={() => cargarMensual(mesSel)}
                         />
-                        <div className="space-y-2">
+                        <div className="space-y-3">
                             {selectorMes}
                             {notaMesEnCurso}
-                            <p className="text-xs text-gray-500">
-                                Mostrando <span className="text-gray-300">{MESES[mes.month - 1]} {mes.year}</span>
-                                {mesParcial ? ' (mes en curso: números parciales)' : ' (mes cerrado)'}
-                                {mesCerradoConDatos && !volverAlCerrado
-                                    ? ' · es el último mes cerrado con datos' : ''}
-                            </p>
+                            <div className="flex flex-wrap items-end justify-between gap-3 border-b border-zinc-800 pb-4">
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                        {mesParcial ? 'Mes en curso' : 'Mes cerrado'}
+                                    </p>
+                                    <h2 className="mt-1 text-2xl font-bold text-white" data-testid="mes-mensual-explicito">
+                                        {fmtMesLargo(mes.year, mes.month)}
+                                    </h2>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-400">
+                                    {mesParcial ? (
+                                        <span className="rounded-full bg-amber-900/40 px-2 py-0.5 font-bold uppercase tracking-wide text-amber-300">
+                                            parcial
+                                        </span>
+                                    ) : (
+                                        <span className="rounded-full border border-emerald-800 bg-emerald-900/30 px-2 py-0.5 font-semibold uppercase tracking-wide text-emerald-300">
+                                            cerrado
+                                        </span>
+                                    )}
+                                    {mesCerradoConDatos && !volverAlCerrado ? (
+                                        <span>Último mes cerrado con datos</span>
+                                    ) : null}
+                                </div>
+                            </div>
                         </div>
 
-                        {/* 5 tarjetas (incluye "Ventas Bazar"): 4 columnas hasta `lg` y una sola
-                            fila desde `xl` (mismo criterio responsive que las tarjetas del Dashboard). */}
-                        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Finanzas y conversión</h3>
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                            <KpiCard label="Conversión prueba→plan" value={mes.conversion_rate === null ? null : Number(mes.conversion_rate)} unit="%" icon={TrendingUp} color="border-green-500"
-                                onDetalle={verKpiMensual('mensual:conversion_rate', mes.conversion_rate === null ? null : Number(mes.conversion_rate), '%')} />
-                            <KpiCard label="Riesgo de Abandono"
-                                        value={mes.churn_rate === null ? null : Number(mes.churn_rate)}
-                                        unit="%" icon={TriangleAlert} color="border-red-500"
-                                        onDetalle={verKpiMensual('mensual:churn_rate', mes.churn_rate === null ? null : Number(mes.churn_rate), '%')} />
-                            <KpiCard label="Ingresos Recurrentes Mensuales (MRR)" value={Number(mes.mrr)} unit="CLP" icon={Banknote} color="border-emerald-500"
-                                onDetalle={verKpiMensual('mensual:mrr', Number(mes.mrr), 'CLP')} />
-                            <KpiCard label="Ingresos del mes" value={Number(mes.ingresos_total)} unit="CLP" icon={DollarSign} color="border-blue-500"
-                                onDetalle={verKpiMensual('mensual:ingresos_total', Number(mes.ingresos_total), 'CLP')} />
-                            {/* Ventas del Bazar del mes: tarjeta APARTE del MRR y del ingreso del mes.
-                                No es ingreso recurrente y el Bazar no genera transacción financiera,
-                                así que no está dentro de ninguna de las otras dos. */}
-                            <KpiCard label="Ventas Bazar" value={Number(mes.ingresos_bazar)} unit="CLP" icon={ShoppingCart} color="border-teal-500"
-                                onDetalle={verKpiMensual('mensual:ingresos_bazar', Number(mes.ingresos_bazar), 'CLP')} />
+                        {/* Tarjetas del MES CERRADO: el período está en el encabezado
+                            y en el caption, no repetido en cada tarjeta. */}
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Finanzas del mes</h3>
+                        <p className="text-xs text-zinc-500">
+                            Todos los valores corresponden a {fmtMesLargo(mes.year, mes.month)}
+                            {mesParcial ? ' (mes en curso, parcial)' : ' (mes cerrado)'}.
+                        </p>
+                        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+                            <KpiCard label="Ingresos Recurrentes Mensuales (MRR)" value={numOrNull(mes.mrr)} unit="CLP" icon={Banknote} color="border-emerald-500"
+                                onDetalle={verKpiMensual('mensual:mrr', numOrNull(mes.mrr), 'CLP')} />
+                            <KpiCard label="Ingresos del mes" value={numOrNull(mes.ingresos_total)} unit="CLP" icon={DollarSign} color="border-blue-500"
+                                onDetalle={verKpiMensual('mensual:ingresos_total', numOrNull(mes.ingresos_total), 'CLP')} />
+                            {/* Ventas del Bazar: tarjeta APARTE del MRR y del ingreso del mes. */}
+                            <KpiCard label="Ventas Bazar" value={numOrNull(mes.ingresos_bazar)} unit="CLP" icon={ShoppingCart} color="border-teal-500"
+                                onDetalle={verKpiMensual('mensual:ingresos_bazar', numOrNull(mes.ingresos_bazar), 'CLP')} />
+                            <KpiCard label="Conversión prueba→plan" value={numOrNull(mes.conversion_rate)} unit="%" icon={TrendingUp} color="border-green-500"
+                                onDetalle={verKpiMensual('mensual:conversion_rate', numOrNull(mes.conversion_rate), '%')} />
+                            <KpiCard label="Riesgo de abandono" value={numOrNull(mes.churn_rate)} unit="%" icon={TriangleAlert} color="border-red-500"
+                                onDetalle={verKpiMensual('mensual:churn_rate', numOrNull(mes.churn_rate), '%')} />
                         </div>
 
                         <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Actividad y ocupación</h3>
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                            <KpiCard label="Asistencia promedio" value={Number(mes.asistencia_promedio)} unit="%" icon={Activity} color="border-purple-500"
-                                onDetalle={verKpiMensual('mensual:asistencia_promedio', Number(mes.asistencia_promedio), '%')} />
-                            <KpiCard label="Frecuencia semanal" value={Number(mes.frecuencia_semanal)} unit="clases/sem" icon={Gauge} color="border-cyan-500"
-                                onDetalle={verKpiMensual('mensual:frecuencia_semanal', Number(mes.frecuencia_semanal), 'clases/sem')} />
-                            <KpiCard label="Ocupación promedio" value={Number(mes.ocupacion_promedio)} unit="%" icon={Target} color="border-amber-500"
-                                onDetalle={verKpiMensual('mensual:ocupacion_promedio', Number(mes.ocupacion_promedio), '%')} />
                             <KpiCard label="Alumnos activos (inicio)" value={mes.alumnos_activos_inicio} icon={Users} color="border-sky-500"
                                 onDetalle={verKpiMensual('mensual:alumnos_activos_inicio', mes.alumnos_activos_inicio)} />
+                            <KpiCard label="Asistencia real" value={numOrNull(mes.asistencia_promedio)} unit="%" icon={Activity} color="border-purple-500"
+                                onDetalle={verKpiMensual('mensual:asistencia_promedio', numOrNull(mes.asistencia_promedio), '%')} />
+                            <KpiCard label="Frecuencia semanal" value={numOrNull(mes.frecuencia_semanal)} unit="clases/sem" icon={Gauge} color="border-cyan-500"
+                                onDetalle={verKpiMensual('mensual:frecuencia_semanal', numOrNull(mes.frecuencia_semanal), 'clases/sem')} />
+                            <KpiCard label="Ocupación promedio" value={numOrNull(mes.ocupacion_promedio)} unit="%" icon={Target} color="border-amber-500"
+                                onDetalle={verKpiMensual('mensual:ocupacion_promedio', numOrNull(mes.ocupacion_promedio), '%')} />
                         </div>
 
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            <div className="lg:col-span-2">
-                                <ChartCard title={`Últimos ${serieMensual.length} meses con datos · Ingresos recurrentes e ingresos totales (CLP)`}>
-                                    <AreaChart data={serieMensual}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
-                                        <XAxis dataKey="month" tickFormatter={(mm) => MESES[Number(mm) - 1]} stroke="#a1a1aa" fontSize={12} />
-                                        <YAxis stroke="#a1a1aa" fontSize={12} />
-                                        <Tooltip {...TOOLTIP_STYLE} formatter={(v) => fmtCLP(v)} />
-                                        <Area type="monotone" dataKey="mrr" name="Ingresos recurrentes" stroke="#f97316" fill="#f97316" fillOpacity={0.25} />
-                                        <Area type="monotone" dataKey="ingresos_total" name="Ingresos" stroke="#10b981" fill="#10b981" fillOpacity={0.2} />
-                                    </AreaChart>
-                                </ChartCard>
-                            </div>
-
-                            {/* Embudo prueba → plan (card simple, no es gráfico recharts) */}
-                            <div className="bg-zinc-900 rounded-lg shadow p-6">
-                                <h3 className="text-lg font-semibold text-white mb-4">Proceso de Conversión de Nuevos Clientes</h3>
-                                <div className="space-y-4">
-                                    {[
-                                        { label: 'Alumnos en prueba', valor: mes.alumnos_prueba, color: 'bg-zinc-500' },
-                                        { label: 'Ejecutaron clase de prueba', valor: mes.alumnos_clase_prueba_ejecutada, color: 'bg-cyan-500' },
-                                        { label: 'Compraron plan', valor: mes.alumnos_plan_comprado, color: 'bg-emerald-500' },
-                                    ].map((f) => {
-                                        const base = Math.max(1, Number(mes.alumnos_prueba));
-                                        const pct = Math.min(100, (Number(f.valor) / base) * 100);
-                                        return (
-                                            <div key={f.label}>
-                                                <div className="flex items-center justify-between text-sm mb-1">
-                                                    <span className="text-gray-400">{f.label}</span>
-                                                    <span className="text-white font-semibold">{f.valor}</span>
-                                                </div>
-                                                <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
-                                                    <div className={`h-full ${f.color}`} style={{ width: `${pct}%` }} />
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                    <div className="pt-3 border-t border-zinc-800 flex items-center justify-between">
-                                        <span className="text-sm text-gray-400">Conversión</span>
-                                        <span className="text-xl font-bold text-white">{mes.conversion_rate === null ? '—' : `${Number(mes.conversion_rate)}%`}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                        <ChartCard title={`Últimos ${serieMensual.length} meses con datos · Ingresos recurrentes e ingresos totales (CLP)`}>
+                            <AreaChart data={serieMensual}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
+                                <XAxis dataKey="month" tickFormatter={(mm) => MESES[Number(mm) - 1]} stroke="#a1a1aa" fontSize={12} />
+                                <YAxis stroke="#a1a1aa" fontSize={12} />
+                                <Tooltip {...TOOLTIP_STYLE} formatter={(v) => fmtCLP(v)} />
+                                <Area type="monotone" dataKey="mrr" name="Ingresos recurrentes" stroke="#f97316" fill="#f97316" fillOpacity={0.25} />
+                                <Area type="monotone" dataKey="ingresos_total" name="Ingresos" stroke="#10b981" fill="#10b981" fillOpacity={0.2} />
+                            </AreaChart>
+                        </ChartCard>
                     </div>
                 )}
 
                 {/* ══ TAB BI (Inteligencia de Negocio) ══ */}
                 {!loading && !error && !sinDatos && activeTab === 'bi' && (
                     <div className="space-y-6" data-testid="tab-bi">
-                        {/* Si GET /reportes/ falla, el MRR de HOY no tiene de dónde
-                            salir: se avisa con Reintentar en vez de dejar la tarjeta
-                            en "— CLP" como si el número no existiera. */}
+                        {/* Si GET /reportes/ falla, los alumnos activos y el ARPU de HOY
+                            no tienen de dónde salir: se avisa con Reintentar en vez de
+                            dejar la tarjeta vacía como si el número no existiera. */}
                         <AvisoCarga
                             secciones={erroresCarga}
                             variante="oscura"
                             onReintentar={cargarBi}
                         />
-                        {/* ── Alertas operativas (resumen ejecutivo del backend) ── */}
+                        {/* Las alertas operativas se muestran al final del BI para que
+                            la fila superior sea la del mockup (activos, riesgo y MRR). */}
+
+
+                        {/* ── Fila superior del mockup: activos HOY, riesgo HOY y MRR
+                            del último MES CERRADO, cada uno con su período. ── */}
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Resumen de hoy y del mes cerrado</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <KpiCard
+                                label="Alumnos activos"
+                                value={alumnosActivosBi}
+                                icon={Users}
+                                color="border-sky-500"
+                                hint="Hoy · con suscripción vigente"
+                                onDetalle={verKpiBi('bi:alumnos_activos', alumnosActivosBi, '', 'Hoy · con suscripción vigente')}
+                            />
+                            <KpiCard
+                                label="Alumnos en riesgo"
+                                value={alumnosRiesgoBi}
+                                icon={TriangleAlert}
+                                color="border-red-500"
+                                hint="Hoy · última predicción"
+                                onDetalle={verKpiBi('bi:alumnos_riesgo', alumnosRiesgoBi, '', 'Hoy · última predicción del modelo')}
+                            />
+                            <KpiCard
+                                label="Ingresos Recurrentes Mensuales (MRR)"
+                                value={numOrNull(mesBi?.mrr)}
+                                unit="CLP"
+                                icon={Banknote}
+                                color="border-emerald-500"
+                                hint={periodoBiTexto ? `Mes cerrado · ${periodoBiTexto}` : 'Sin mes cerrado'}
+                                onDetalle={verKpiBi('bi:mrr', numOrNull(mesBi?.mrr), 'CLP',
+                                    periodoBiTexto ? `Mes cerrado · ${periodoBiTexto}` : 'Sin mes cerrado')}
+                            />
+                        </div>
+
+                        {/* ── Embudo por cohorte (último mes cerrado) ── */}
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Conversión prueba → plan por cohorte</h3>
+                        <div className="bg-zinc-900 rounded-lg shadow p-6" data-testid="bi-funnel">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                                <div>
+                                    <h3 className="text-lg font-semibold text-white">Embudo de la cohorte</h3>
+                                    <p className="text-xs text-zinc-500">
+                                        {periodoBiTexto
+                                            ? `Cohorte ${periodoBiTexto} · alumnos que empezaron prueba en el mes`
+                                            : 'Sin mes cerrado con datos'}
+                                    </p>
+                                </div>
+                                <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[11px] font-medium text-zinc-400">
+                                    Base mínima: 5 alumnos
+                                </span>
+                            </div>
+
+                            {mesBi ? (
+                                <div className="mt-4 space-y-4">
+                                    {pasosFunnelBi.map((f) => {
+                                        const pct = funnelSuficiente && baseFunnelBi > 0 && f.valor !== null
+                                            ? Math.min(100, (f.valor / baseFunnelBi) * 100)
+                                            : null;
+                                        return (
+                                            <div key={f.label}>
+                                                <div className="flex items-center justify-between text-sm mb-1">
+                                                    <span className="text-gray-400">{f.label}</span>
+                                                    <span className="text-white font-semibold">
+                                                        {f.valor === null ? 'n/d' : f.valor}
+                                                        {pct !== null && (
+                                                            <span className="ml-2 text-xs font-normal text-zinc-400">
+                                                                {pct.toFixed(1)}%
+                                                            </span>
+                                                        )}
+                                                        {pct === null && (
+                                                            <span className="ml-2 text-xs font-normal text-zinc-500">n/d</span>
+                                                        )}
+                                                    </span>
+                                                </div>
+                                                <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                                                    <div className={`h-full ${f.color}`} style={{ width: `${pct ?? 0}%` }} />
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                    <div className="pt-3 border-t border-zinc-800 flex items-center justify-between">
+                                        <span className="text-sm text-gray-400">Conversión prueba → plan</span>
+                                        <span className="text-xl font-bold text-white">
+                                            {conversionBi === null ? 'n/d' : `${Number(conversionBi)}%`}
+                                        </span>
+                                    </div>
+                                    {!funnelSuficiente && (
+                                        <p className="text-[11px] leading-relaxed text-zinc-500">
+                                            El porcentaje se publica sólo con una base de 5 alumnos o más.
+                                            Con {baseFunnelBi === null ? 'n/d' : baseFunnelBi} alumnos en prueba,
+                                            la conversión queda en n/d.
+                                        </p>
+                                    )}
+                                </div>
+                            ) : (
+                                <p className="mt-4 text-sm text-zinc-400">
+                                    n/d — no hay un mes cerrado con KPIs para calcular el embudo.
+                                </p>
+                            )}
+                        </div>
+
+                        {/* ── Retención por cohorte + vida promedio (sólo activos) ── */}
+                        <div className="flex items-start justify-between gap-3">
+                            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Retención por cohorte y vida promedio</h3>
+                            {cohortes?.cohortes?.length > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={() => setDetalle('cohortes')}
+                                    aria-label="Ampliar: Cohortes de retención"
+                                    className="shrink-0 rounded border border-zinc-600 px-2 py-0.5 text-xs font-medium text-zinc-300 transition hover:bg-zinc-700/60 hover:text-white"
+                                >
+                                    Ampliar
+                                </button>
+                            )}
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="lg:col-span-2">
+                                {cohortes?.cohortes?.length > 0 ? tablaCohortes : (
+                                    <div className="rounded-lg border border-zinc-700 bg-zinc-900 p-6 text-sm text-zinc-400">
+                                        n/d — no hay datos de cohortes de retención.
+                                    </div>
+                                )}
+                            </div>
+                            <div>
+                                <KpiCard
+                                    label="Vida promedio del alumno"
+                                    value={vidaMesesBi}
+                                    unit="meses"
+                                    icon={Users}
+                                    color="border-purple-500"
+                                    hint={vidaNBi !== null
+                                        ? `Sólo alumnos activos · ${vidaNBi} alumnos`
+                                        : 'Sólo alumnos activos'}
+                                    onDetalle={verKpiBi('bi:vida_promedio', vidaMesesBi, 'meses',
+                                        `${vidaDiasBi === null ? 'n/d' : `${vidaDiasBi} días`} · ${vidaNBi === null ? 'n/d' : `${vidaNBi} alumnos activos`}`)}
+                                />
+                                <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                                    {vidaDiasBi === null ? 'n/d' : `${vidaDiasBi} días`} · base: alumnos activos.
+                                    Excluye rechazados, bajas y cuentas de prueba.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* ── Asistencia real + ocupación del último mes cerrado ── */}
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Asistencia real y ocupación</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <KpiCard
+                                label="Asistencia real"
+                                value={asistenciaBi}
+                                unit="%"
+                                icon={Activity}
+                                color="border-purple-500"
+                                hint={periodoBiTexto ? `Mes cerrado · ${periodoBiTexto}` : 'Sin mes cerrado'}
+                                onDetalle={verKpiBi('bi:asistencia_real', asistenciaBi, '%',
+                                    periodoBiTexto ? `Mes cerrado · ${periodoBiTexto}` : 'Sin mes cerrado')}
+                            />
+                            <KpiCard
+                                label="Ocupación"
+                                value={ocupacionBi}
+                                unit="%"
+                                icon={Target}
+                                color="border-amber-500"
+                                hint={periodoBiTexto ? `Mes cerrado · ${periodoBiTexto}` : 'Sin mes cerrado'}
+                                onDetalle={verKpiBi('bi:ocupacion', ocupacionBi, '%',
+                                    periodoBiTexto ? `Mes cerrado · ${periodoBiTexto}` : 'Sin mes cerrado')}
+                            />
+                        </div>
+
+                        {/* ── Forecast y riesgo (modelos reentrenados con datos reales) ── */}
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Forecast y riesgo</h3>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            {forecast.length ? (
+                                <ChartCard title="Pronóstico de ingresos (CLP)"
+                                    onAmpliar={() => setDetalle('forecast')}>
+                                    {chartForecast}
+                                </ChartCard>
+                            ) : (
+                                <div className="flex h-full min-h-64 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 p-6 text-sm text-zinc-400">
+                                    n/d — no hay proyección disponible.
+                                </div>
+                            )}
+
+                            <div className="bg-zinc-900 rounded-lg shadow p-6" data-testid="bi-risk">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <h3 className="text-lg font-semibold text-white">Riesgo de abandono</h3>
+                                        <p className="text-xs text-zinc-500">
+                                            Alumnos con riesgo alto o crítico del modelo.
+                                        </p>
+                                    </div>
+                                    <TriangleAlert className="h-6 w-6 text-red-500" />
+                                </div>
+                                <div className="mt-4 grid grid-cols-3 gap-3 text-center">
+                                    {[
+                                        { label: 'Crítico', valor: criticosBi, color: 'text-red-400' },
+                                        { label: 'Alto', valor: altosBi, color: 'text-orange-400' },
+                                        { label: 'Medio', valor: mediosBi, color: 'text-yellow-400' },
+                                    ].map((r) => (
+                                        <div key={r.label} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+                                            <p className="text-[11px] uppercase tracking-wide text-zinc-500">{r.label}</p>
+                                            <p className={`mt-1 text-2xl font-bold ${r.color}`}>
+                                                {r.valor === null ? 'n/d' : r.valor}
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-800 pt-3">
+                                    <p className="text-sm text-zinc-300">
+                                        Alto + crítico: <span className="font-semibold text-white">{alumnosRiesgoBi === null ? 'n/d' : alumnosRiesgoBi}</span>
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate('/admin/fidelizacion?filtro=total')}
+                                        className="rounded border border-zinc-600 px-2 py-1 text-xs font-medium text-orange-300 transition hover:bg-zinc-700/60 hover:text-orange-200"
+                                    >
+                                        Ver alumnos
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <p className="text-[11px] leading-relaxed text-zinc-500">
+                            El pronóstico y el riesgo son estimaciones de modelos que se reentrenan con datos
+                            reales del box. No son datos cerrados: si la base cambia, la próxima corrida
+                            actualiza ambos modelos.
+                        </p>
+
+                        {/* Análisis complementario: proyección rápida y estacionalidad. */}
                         {churn?.insight?.mensajes?.length > 0 && (
                             <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-5">
-                                <div className="flex items-center gap-2 mb-3">
+                                <div className="mb-3 flex items-center gap-2">
                                     <Sparkles className="w-5 h-5 text-orange-500" />
-                                    <h2 className="font-semibold text-white">Alertas Operativas</h2>
+                                    <h2 className="font-semibold text-white">Alertas operativas</h2>
                                 </div>
                                 <ul className="space-y-2">
                                     {churn.insight.mensajes.map((m, i) => (
@@ -808,9 +1114,6 @@ const AdminKpis = () => {
                                             <span className="text-orange-500 shrink-0">•</span>
                                             <span>
                                                 {m}
-                                                {/* La alerta de "riesgo con plan" da acceso directo a
-                                                    los alumnos que la originan: NAVEGA a Fidelización
-                                                    (la gestión individual vive en esa pantalla). */}
                                                 {churn.insight.reglas?.[i] === 'riesgo_con_plan' && (
                                                     <button
                                                         type="button"
@@ -828,20 +1131,8 @@ const AdminKpis = () => {
                             </div>
                         )}
 
-                        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Resumen ejecutivo</h3>
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                            {/* El MRR de esta tarjeta es el de HOY (precio de lista de los
-                                planes vigentes): no espera a que cierre el mes ni depende
-                                del data mart mensual. El caption lo dice para que nadie lo
-                                lea como "el del último mes cerrado". */}
-                            <div>
-                                <KpiCard label="Ingresos Recurrentes Mensuales" value={mrrBi === null ? null : Number(mrrBi)} unit="CLP" icon={Banknote} color="border-emerald-500"
-                                    onDetalle={verKpiBi('bi:mrr', mrrBi === null ? null : Number(mrrBi), 'CLP',
-                                        'Vigente hoy · precio de lista de los planes activos')} />
-                                <p className="mt-1 text-[11px] text-zinc-500">
-                                    Vigente hoy · precio de lista de los planes activos
-                                </p>
-                            </div>
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Proyección y estacionalidad</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <KpiCard
                                 label="Proyección mes 1"
                                 value={forecast.length ? Number(forecast[0].ingresos_predicho) : null}
@@ -876,7 +1167,7 @@ const AdminKpis = () => {
                                         </p>
                                         <p className="text-3xl font-bold text-white mt-2"
                                             data-testid="estacionalidad-mes-fuerte">
-                                            {mesFuerte ? mesFuerte.label : '—'}
+                                            {mesFuerte ? mesFuerte.label : 'n/d'}
                                             {mesFuerte && (
                                                 <span className="text-lg ml-2 text-gray-500"
                                                     title="1,00× = mes promedio">
@@ -920,7 +1211,7 @@ const AdminKpis = () => {
                             </div>
                         )}
 
-                        {/* ── Bloque financiero: ticket promedio por plan + LTV ──
+                        {/* ── Bloque financiero: ticket, matrícula y LTV ──
                             El ticket y la vida salen de GET /kpis/financiero; el ARPU se
                             REUSA de GET /reportes/ (misma definición que Reportes.jsx). */}
                         <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-5">
@@ -928,7 +1219,7 @@ const AdminKpis = () => {
                                 <Banknote className="w-5 h-5 text-emerald-500" />
                                 <h2 className="font-semibold text-white">Financiero</h2>
                             </div>
-                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                            <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                                 <div>
                                     <KpiCard
                                         label="Ticket promedio"
@@ -938,10 +1229,10 @@ const AdminKpis = () => {
                                         color="border-emerald-500"
                                         onDetalle={verKpiBi('bi:ticket_promedio',
                                             financiero?.ticket_promedio?.global ?? null, 'CLP',
-                                            `Membresías (${financiero?.ticket_promedio?.n_transacciones ?? 0} compras)`)}
+                                            `Membresías (${financiero?.ticket_promedio?.n_transacciones ?? 'n/d'} compras)`)}
                                     />
                                     <p className="mt-1 text-[11px] text-zinc-500">
-                                        Membresías ({financiero?.ticket_promedio?.n_transacciones ?? 0} transacciones)
+                                        Membresías ({financiero?.ticket_promedio?.n_transacciones ?? 'n/d'} transacciones)
                                     </p>
                                 </div>
                                 <div>
@@ -953,11 +1244,13 @@ const AdminKpis = () => {
                                         color="border-orange-500"
                                         onDetalle={verKpiBi('bi:matricula',
                                             financiero?.matricula?.ingreso_total ?? null, 'CLP',
-                                            `Matrículas (${financiero?.matricula?.n_transacciones ?? 0} cobros)`)}
+                                            `Matrículas (${financiero?.matricula?.n_transacciones ?? 'n/d'} cobros)`)}
                                     />
                                     <p className="mt-1 text-[11px] text-zinc-500">
-                                        {financiero?.matricula?.n_transacciones ?? 0} cobros ·
-                                        {' '}ticket {fmtCLP(financiero?.matricula?.global ?? 0)}
+                                        {financiero?.matricula?.n_transacciones ?? 'n/d'} cobros ·
+                                        {' '}ticket {financiero?.matricula?.global != null
+                                            ? fmtCLP(financiero.matricula.global)
+                                            : 'n/d'}
                                     </p>
                                 </div>
                                 <div>
@@ -968,25 +1261,10 @@ const AdminKpis = () => {
                                         icon={TrendingUp}
                                         color="border-sky-500"
                                         onDetalle={verKpiBi('bi:ltv_estimado', ltvEstimado, 'CLP',
-                                            `ARPU ${arpu != null ? fmtCLP(arpu) : '—'} × ${financiero?.vida?.vida_promedio_meses ?? '—'} meses`)}
+                                            `ARPU ${arpu != null ? fmtCLP(arpu) : 'n/d'} × ${financiero?.vida?.vida_promedio_meses ?? 'n/d'} meses`)}
                                     />
                                     <p className="mt-1 text-[11px] text-zinc-500">
-                                        ARPU {arpu != null ? fmtCLP(arpu) : '—'} × {financiero?.vida?.vida_promedio_meses ?? '—'} meses
-                                    </p>
-                                </div>
-                                <div>
-                                    <KpiCard
-                                        label="Vida promedio del alumno"
-                                        value={financiero?.vida?.vida_promedio_meses ?? null}
-                                        unit="meses"
-                                        icon={Users}
-                                        color="border-purple-500"
-                                        onDetalle={verKpiBi('bi:vida_promedio',
-                                            financiero?.vida?.vida_promedio_meses ?? null, 'meses',
-                                            `${financiero?.vida?.vida_promedio_dias ?? 0} días · ${financiero?.vida?.n_con_baja ?? 0} de ${financiero?.vida?.n_alumnos ?? 0} con baja`)}
-                                    />
-                                    <p className="mt-1 text-[11px] text-zinc-500">
-                                        {financiero?.vida?.vida_promedio_dias ?? 0} días · {financiero?.vida?.n_con_baja ?? 0} de {financiero?.vida?.n_alumnos ?? 0} con baja
+                                        ARPU {arpu != null ? fmtCLP(arpu) : 'n/d'} × {financiero?.vida?.vida_promedio_meses ?? 'n/d'} meses
                                     </p>
                                 </div>
                             </div>
@@ -1014,18 +1292,13 @@ const AdminKpis = () => {
                                 <span className="text-zinc-400">LTV = ARPU mensual × vida promedio (meses).</span>
                                 {' '}El ARPU es el de Reportes (ingresos netos del mes ÷ alumnos
                                 activos), para que no haya dos versiones del mismo número. Vida
-                                promedio: {financiero?.vida?.formula ?? '—'}.
+                                promedio: {financiero?.vida?.formula ?? 'n/d'}.
                                 {financiero?.vida?.limitaciones ? ` (${financiero.vida.limitaciones})` : ''}
                                 {' '}No se calcula CAC: {financiero?.nota_cac ?? 'no hay dato de costo de adquisición.'}
                             </p>
                         </div>
 
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            <ChartCard title="Pronóstico de ingresos (CLP)"
-                                onAmpliar={() => setDetalle('forecast')}>
-                                {chartForecast}
-                            </ChartCard>
-
+                        <div className="grid grid-cols-1 gap-6">
                             {/* Pico vs valle: oferta real por turno (clases y cupo) y, cuando
                                 el join asistencias->clase tenga datos, la asistencia promedio
                                 por clase. ChartCard admite UN solo gráfico -> las notas van
@@ -1057,29 +1330,6 @@ const AdminKpis = () => {
                         {/* Desglose mes a mes del pronóstico. "Alumnos proyectados" sólo
                             se muestra si el campo viene en la respuesta (hoy viene). */}
                         {tablaPronostico()}
-
-                        {/* ── Cohortes de retención por mes de alta ──
-                            "n/d" = la cohorte todavía no cumple ese horizonte (no se
-                            inventa un 0%): lo resuelve el backend con `evaluables`. */}
-                        {cohortes?.cohortes?.length > 0 && (
-                            <>
-                            <div className="mb-3 flex items-start justify-between gap-3">
-                                <h3 className="text-lg font-semibold text-white">
-                                    Cohortes de retención por mes de alta
-                                </h3>
-                                <button
-                                    type="button"
-                                    onClick={() => setDetalle('cohortes')}
-                                    aria-label="Ampliar: Cohortes de retención"
-                                    className="shrink-0 rounded border border-zinc-600 px-2 py-0.5 text-xs font-medium text-zinc-300 transition hover:bg-zinc-700/60 hover:text-white"
-                                >
-                                    Ampliar
-                                </button>
-                            </div>
-                            {tablaCohortes}
-                            </>
-                        )}
-
 
                     </div>
                 )}

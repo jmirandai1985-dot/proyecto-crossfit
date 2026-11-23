@@ -141,8 +141,8 @@ export const DETALLES_KPI = {
         'Conversión del mes',
         'De cada 100 alumnos que arrancan con la clase de prueba en el mes, cuántos terminan comprando '
         + 'un plan.',
-        'Alumnos que compraron en el mes dividido por los alumnos que empezaron su prueba ese mismo mes, '
-        + 'en porcentaje. El bloque "Proceso de Conversión de Nuevos Clientes" de esta pantalla muestra '
+        'Alumnos del cohorte de prueba que compraron un plan en el mes dividido por los alumnos que empezaron su prueba ese mismo mes, '
+        + 'en porcentaje. El embudo de la pestaña Inteligencia de negocio muestra '
         + 'los dos números y el escalón del medio (los que efectivamente ejecutaron la prueba).',
         'Es el termómetro comercial: abajo de 30 % hay margen claro para mejorar, arriba de 50 % el '
         + 'cierre está afinado. Comparar el mismo mes de meses anteriores dice más que el número solo.',
@@ -155,9 +155,9 @@ export const DETALLES_KPI = {
         'De los alumnos que tenían plan vigente, qué porcentaje dejó de tenerlo en el mes.',
         'Se toma el grupo de alumnos vigentes y se mira cuántos siguen vigentes al cierre; el resto es lo '
         + 'que se perdió. Si el grupo es muy chico (menos de 5 alumnos) el porcentaje no se publica y se '
-        + 'muestra "—": un porcentaje calculado sobre dos personas no representa al box.',
+        + 'muestra "n/d": un porcentaje calculado sobre dos personas no representa al box.',
         'Más bajo es mejor: hasta 5 % el box retiene bien, arriba de 10 % está perdiendo gente más rápido '
-        + 'de lo que la repone. Un "—" no es bueno ni malo: es "todavía no hay con qué calcularlo".',
+        + 'de lo que la repone. Un "n/d" no es bueno ni malo: es "todavía no hay con qué calcularlo".',
         'Si sube, abrir Fidelización y mirar primero a los alumnos inactivos: son los que están por irse.',
     ),
     'mensual:mrr': kpi(
@@ -244,15 +244,37 @@ export const DETALLES_KPI = {
     ),
 
     // ── Pestaña INTELIGENCIA DE NEGOCIO (BI): números en vivo ────────────────────
+    'bi:alumnos_activos': kpi(
+        'Alumnos activos',
+        'Alumnos con suscripción vigente hoy',
+        'Cuántos alumnos tienen hoy una suscripción de un plan comercial vigente.',
+        'Se cuentan alumnos distintos con al menos una suscripción vigente a HOY y de un plan que se '
+        + 'vende. Quedan fuera las cuentas de prueba, los usuarios rechazados y los que ya están de baja.',
+        'Es el tamaño actual de la base de clientes. Leerlo junto con el riesgo de abandono: una base '
+        + 'grande con mucho riesgo puede estar a punto de encogerse.',
+        'Si baja, revisar las bajas y el riesgo de abandono en Fidelización. Si sube, comprobar que la '
+        + 'vida promedio no esté cayendo por rotación.',
+    ),
+    'bi:alumnos_riesgo': kpi(
+        'Alumnos en riesgo',
+        'Riesgo alto + crítico de abandono',
+        'Cuántos alumnos tienen hoy riesgo ALTO o CRÍTICO según el modelo de abandono.',
+        'Se suman los alumnos clasificados como riesgo alto y crítico en la última predicción del '
+        + 'modelo. No incluye riesgo medio. El modelo se reentrena con datos reales del box.',
+        'Cuanto más alto, más clientes podrían irse. Es una señal de alerta, no una baja confirmada: '
+        + 'el modelo aprende de asistencia, plan y comportamiento histórico.',
+        'Abrir Fidelización y priorizar el contacto de los críticos y altos. Si el número sube varias '
+        + 'semanas, revisar también la asistencia y los planes por vencer.',
+    ),
     'bi:mrr': kpi(
         'Ingresos Recurrentes Mensuales',
-        'Plan al mes a precio de lista, HOY',
-        'Cuánto factura el box al mes por los planes vigentes hoy, a precio de lista.',
-        'Suma del precio de lista de los planes vigentes a HOY. No espera al cierre del mes ni depende '
-        + 'del dato mensual (por eso puede diferir del MRR de la pestaña Mensual) y no cuenta los planes '
-        + 'internos de regalo.',
-        'Es el tamaño del negocio medido en ingreso recurrente. Conviene leerlo junto con la vida '
-        + 'promedio: crecer sin retener sólo infla el número de un mes.',
+        'Plan al mes a precio de lista del MES CERRADO',
+        'Cuánto facturaba el box al mes por los planes vigentes al cierre del último mes con datos.',
+        'Suma del precio de lista de los planes comerciales vigentes al cierre del mes cerrado. No '
+        + 'cuenta las cuentas de prueba ni los usuarios rechazados. El MRR de HOY puede diferir y se '
+        + 'consulta en la pestaña Mensual.',
+        'Es el tamaño del negocio medido en ingreso recurrente del mes cerrado. Conviene leerlo junto '
+        + 'con la vida promedio: crecer sin retener sólo infla el número de un mes.',
         'Si baja, mirar el riesgo de abandono; si sube, revisar que la vida promedio no esté cayendo '
         + '(entra gente nueva y se va la de siempre).',
     ),
@@ -306,14 +328,52 @@ export const DETALLES_KPI = {
     ),
     'bi:vida_promedio': kpi(
         'Vida promedio del alumno',
-        'Meses que se queda un alumno',
-        'Cuántos meses, en promedio, se queda un alumno antes de darse de baja.',
-        'Se promedian los meses que estuvieron los alumnos que YA se dieron de baja: los que siguen '
-        + 'activos no entran en el promedio porque su historia sigue abierta.',
+        'Meses desde el alta de los alumnos ACTIVOS',
+        'Cuántos meses, en promedio, llevan en el box los alumnos que hoy siguen activos.',
+        'Se promedian los días desde el alta hasta HOY de los alumnos ACTIVOS, y se pasan a meses. '
+        + 'Quedan fuera los usuarios rechazados, los que ya están de baja y las cuentas de prueba. '
+        + 'Los activos aportan el tiempo que llevan hasta hoy (censura a la derecha).',
         'Retener rinde más que captar: subir esta cifra mejora el LTV sin vender un peso más. Una vida '
         + 'corta (menos de 6 meses) avisa de un problema de experiencia, precio u horarios.',
         'Si baja, mirar el historial de los alumnos que se fueron y los avisos de riesgo: la baja suele '
         + 'venir anunciada por semanas de inactividad.',
+    ),
+    'bi:conversion_prueba': kpi(
+        'Conversión prueba → plan',
+        'Cohorte del último mes cerrado',
+        'De los alumnos que empezaron una prueba en el mes, cuántos hicieron una clase y cuántos '
+        + 'compraron un plan.',
+        'Se compara la cantidad de alumnos en prueba del mes con los que ejecutaron una clase de '
+        + 'prueba y con los que compraron un plan. El porcentaje se publica sólo si la base es de 5 '
+        + 'alumnos o más; con menos, se muestra n/d para no sacar conclusiones de pocos casos.',
+        'Más alto es mejor: mide si la prueba convence y si el paso a plan es claro. El embudo muestra '
+        + 'en qué paso se cae la gente.',
+        'Si la caída está en la clase, revisar horarios y cupos de prueba; si está en la compra, '
+        + 'revisar precios, seguimiento y la oferta que se entrega al terminar la prueba.',
+    ),
+    'bi:asistencia_real': kpi(
+        'Asistencia real',
+        'Mes cerrado',
+        'Qué porcentaje de las reservas confirmadas de las clases realizadas terminó con asistencia '
+        + 'marcada por el coach.',
+        'Se cuentan las reservas con asistencia real marcada sobre las reservas confirmadas de las '
+        + 'clases ya realizadas del mes. No se usa el contador de cupos reservados. Las cuentas de '
+        + 'prueba quedan fuera.',
+        'Mide si los alumnos que reservan realmente vienen. Una asistencia baja con ocupación alta '
+        + 'puede indicar reservas que no se usan.',
+        'Si baja, revisar recordatorios de reserva, horarios y cancelaciones. Si la ocupación es alta '
+        + 'pero la asistencia baja, puede sobrar cupo reservado y faltar seguimiento.',
+    ),
+    'bi:ocupacion': kpi(
+        'Ocupación',
+        'Mes cerrado',
+        'Qué porcentaje del cupo ofrecido en las clases del mes quedó ocupado por reservas.',
+        'Se comparan las reservas contra el cupo ofrecido en las clases realizadas del mes. Es una '
+        + 'medida de ocupación, no de asistencia real: una reserva puede ocupar cupo y no asistir.',
+        'Más alto es mejor para aprovechar la grilla, pero no debe confundirse con asistencia. Una '
+        + 'ocupación muy alta puede dejar gente afuera; una muy baja puede indicar horarios flojos.',
+        'Si baja, revisar horarios y disciplinas con poca demanda; si sube demasiado, evaluar abrir '
+        + 'más cupos o repetir los bloques que se llenan.',
     ),
 };
 
