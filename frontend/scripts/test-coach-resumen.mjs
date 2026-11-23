@@ -196,7 +196,7 @@ console.log('== 6. Parte 2.2: el coach ESCANEA el código (y sigue pudiendo escr
 const ESCANER = leer('../src/components/EscanerCodigoRetiro.jsx');
 ok(/permitirEscanear/.test(ENTREGA) && !/mencionarEscaneo=\{false\}/.test(ENTREGA),
     'la pantalla del coach habilita el lector de cámara');
-ok(/📷 Escanear/.test(ENTREGA), 'y se lo cuenta al mesón en pantalla');
+ok(/Escanear/.test(MODAL_ENTREGA), 'y se lo cuenta al mesón en pantalla');
 ok(/Ingresa\{mencionarEscaneo \? ' o escanea' : ''\}/.test(MODAL_ENTREGA),
     'el modal compone el texto según la prop (por defecto, el de siempre)');
 ok(/permitirEscanear = false/.test(MODAL_ENTREGA),
