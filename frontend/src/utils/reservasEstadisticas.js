@@ -13,6 +13,12 @@
  */
 import { estadoVisible } from './estadoReserva.js';
 import { calcularRachaAsistencia } from './asistenciaEvolucion.js';
+// % de asistencia: UNA sola definición compartida con "Mi historial"
+// (`utils/porcentajeAsistencia.js`). Acá sólo se re-exporta para no romper a quien ya
+// la importa desde este módulo.
+import { porcentajeAsistencia } from './porcentajeAsistencia.js';
+
+export { porcentajeAsistencia } from './porcentajeAsistencia.js';
 
 const MESES = [
     'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -34,25 +40,13 @@ export function semanaISO(fechaStr) {
 
 /**
  * Estadísticas de la cabecera: clases del mes actual (reservadas y asistidas), % de
- * asistencia del historial (asistió / total del historial) y racha actual de semanas
- * con al menos 1 asistencia.
+ * asistencia del historial y racha actual de semanas con al menos 1 asistencia.
+ *
+ * El % NO se calcula acá: `porcentajeAsistencia` (importada de
+ * `utils/porcentajeAsistencia.js`) es la MISMA función que usa "Mi historial", así las
+ * dos pantallas no pueden mostrar bases distintas. Su base: asistió + faltó + canceló
+ * tarde (cancelar a tiempo y las reservas activas no cuentan).
  */
-// Estados que CUENTAN para el % de asistencia: espejo de `ESTADOS_QUE_CUENTAN`
-// del backend (`historial_alumno_service`). Cancelar a tiempo NO ensucia el
-// número; una cancelación tardía sí cuenta como falta. `reservada` (activa) no
-// entra porque todavía no ocurrió.
-const ESTADOS_QUE_CUENTAN_PCT = ['asistio', 'falto', 'cancelada_tarde'];
-
-/** % de asistencia redondeado (mismo `Math.round` que el resto de la app). */
-export function porcentajeAsistencia(reservas) {
-    const cuentan = (reservas || []).filter(
-        (r) => ESTADOS_QUE_CUENTAN_PCT.includes(estadoVisible(r)),
-    );
-    if (!cuentan.length) return 0;
-    const asistidas = cuentan.filter((r) => estadoVisible(r) === 'asistio').length;
-    return Math.round((asistidas / cuentan.length) * 100);
-}
-
 export function calcularEstadisticasReservas(reservas, hoyStr) {
     const lista = reservas || [];
     const mesActual = String(hoyStr || '').slice(0, 7); // 'YYYY-MM'

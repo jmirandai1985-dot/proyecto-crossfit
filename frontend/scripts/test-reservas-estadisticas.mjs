@@ -6,7 +6,8 @@
 // actual, y agrupa el historial por mes. Se valida acá:
 //   1. agrupación por mes (label "Noviembre 2026", orden descendente)
 //   2. clases del mes actual (anclado al `hoyStr` inyectado)
-//   3. % de asistencia = asistió / total del historial (las activas no cuentan)
+//   3. % de asistencia = asistió / (asistió + faltó + canceló tarde); las cancelaciones
+//      a tiempo y las activas no cuentan (misma base que "Mi historial")
 //   4. racha actual = semanas ISO consecutivas con >= 1 asistencia (mismo criterio
 //      que asistenciaEvolucion); un hueco corta la racha
 //   5. la etiqueta de semana ISO es estable ('YYYY-Sww')
@@ -16,6 +17,10 @@ import {
     semanaISO, etiquetaMes, agruparReservasPorMes, calcularEstadisticasReservas,
     filtrarGruposPorMes, TODOS_LOS_MESES, porcentajeAsistencia,
 } from '../src/utils/reservasEstadisticas.js';
+// La base compartida con "Mi historial" (una sola definición para las dos pantallas).
+import {
+    conteosAsistencia, porcentajeDesdeConteos, porcentajeDesdeResumen, ESTADOS_QUE_CUENTAN,
+} from '../src/utils/porcentajeAsistencia.js';
 import { filtrarPorEstado } from '../src/utils/estadoReserva.js';
 import { filtrarPorDisciplina } from '../src/utils/filtroDisciplina.js';
 
@@ -93,6 +98,43 @@ eq(stats.pctAsistencia, 75, 'asistió 3 de 4 en historial = 75%');
         'solo cancelaciones a tiempo -> 0% (nada que contar)');
     eq(porcentajeAsistencia([r(601, '2026-11-05', 'reservada')]), 0,
         'solo reservas activas -> 0% (todavía no ocurrieron)');
+}
+
+// ── 2c. La MISMA base en "Mis Reservas" y en "Mi historial" ─────────────────
+// El % de las dos pantallas sale de `utils/porcentajeAsistencia.js`: la lista de
+// reservas se convierte en CONTADORES y el backend del historial manda los mismos
+// contadores. Con los mismos datos, las dos tienen que dar 33 %.
+{
+    eq(ESTADOS_QUE_CUENTAN.join(','), 'asistio,falto,cancelada_tarde',
+        'la base es asistió + faltó + canceló tarde (cancelar a tiempo no entra)');
+
+    const doce = [
+        ...repetir('asistio', 4, 700), ...repetir('falto', 7, 800),
+        r(900, '2026-11-05', 'cancelada'),          // a tiempo: NO cuenta
+        r(901, '2026-11-05', 'cancelada_tarde'),    // tarde: cuenta como falta
+        r(902, '2026-11-20', 'reservada'),          // futura: NO cuenta
+    ];
+    const conteos = conteosAsistencia(doce);
+    eq(conteos.asistio, 4, 'contadores: 4 asistió');
+    eq(conteos.falto, 7, 'contadores: 7 faltó');
+    eq(conteos.cancelada_tarde, 1, 'contadores: 1 canceló tarde');
+    eq(conteos.cuentan, 12, '12 que cuentan (la cancelación a tiempo y la futura quedan fuera)');
+    eq(porcentajeDesdeConteos(conteos), 33, 'contadores -> 33 %');
+    eq(porcentajeDesdeConteos(conteos), porcentajeAsistencia(doce),
+        'la lista (Mis Reservas) y los contadores dan EL MISMO número');
+
+    // Las dos formas del payload del historial: `datos.asistencia` (Resumen) y
+    // `datos.totales` (Asistencia).
+    eq(porcentajeDesdeResumen({
+        asistidas: 4, faltadas: 7, canceladas_tardias: 1, canceladas: 2, reservadas: 3,
+    }), 33, 'Mi historial (Resumen) -> 33 %');
+    eq(porcentajeDesdeResumen({
+        asistio: 4, falto: 7, cancelada_tarde: 1, cancelada: 2, reservada: 3,
+    }), 33, 'Mi historial (Asistencia) -> 33 %');
+    eq(porcentajeDesdeResumen(null), null, 'sin bloque en el payload -> null (la pantalla muestra —)');
+    eq(porcentajeDesdeResumen({}), null, 'bloque vacío -> null (no inventa 0 %)');
+    eq(porcentajeDesdeConteos({ asistio: 0, falto: 0, cancelada_tarde: 0 }), 0,
+        'nada que contar -> 0 % (no divide por cero)');
 }
 
 // Una cancelada del mes cuenta como "reservada" pero NO como asistida: la tarjeta

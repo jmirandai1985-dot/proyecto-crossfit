@@ -17,7 +17,7 @@ Correr (aislado):
     cd backend && py -3.12 -m pytest tests/test_historial_calculos.py -q --noconftest
 """
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 _BACKEND = Path(__file__).resolve().parents[1]
@@ -247,3 +247,96 @@ def test_f4_la_regla_es_la_misma_que_vence_en_x_dias():
     assert svc.dias_de_antiguedad(date(2026, 7, 19), date(2026, 7, 19)) == 0
     assert svc.dias_de_antiguedad(date(2026, 7, 19), date(2026, 7, 20)) == 1
     assert svc.dias_de_antiguedad(date(2026, 7, 19), date(2026, 11, 23)) == 127
+
+
+# ── G. % de asistencia (la MISMA base en "Mis Reservas" y en "Mi historial") ──
+def _conteo(**marcados):
+    """Contadores por estado, en 0 salvo los que se indiquen."""
+    base = {estado: 0 for estado in svc.ESTADOS_ASISTENCIA}
+    base.update(marcados)
+    return base
+
+
+def test_g_cuatro_asistidas_de_doce_que_cuentan_son_33():
+    """4 asistidas de 12 que cuentan = 33 % (33.33 redondeado, no 32).
+
+    Es el caso de la tarjeta "% Asistencia" de "Mis Reservas" y del % de "Mi
+    historial": la MISMA función, la MISMA base.
+    """
+    assert svc.porcentaje_asistencia(_conteo(asistio=4, falto=8)) == 33
+
+
+def test_g2_cancelar_a_tiempo_no_entra_en_la_base():
+    """`cancelada` (a tiempo) y `reservada` (futura) no mueven el número."""
+    # 4 asistidas + 7 faltas + 1 cancelación tarde = 12 que cuentan -> 33 %.
+    assert svc.porcentaje_asistencia(
+        _conteo(asistio=4, falto=7, cancelada_tarde=1, cancelada=2, reservada=3)) == 33
+    # Sólo cancelaciones a tiempo y reservas futuras: nada que contar -> 0 %.
+    assert svc.porcentaje_asistencia(_conteo(cancelada=5, reservada=2)) == 0
+    assert svc.porcentaje_asistencia({}) == 0
+
+
+def test_g3_una_cancelacion_tardia_cuenta_como_falta():
+    """La base es asistió + faltó + canceló tarde: 2 de 4 = 50 %."""
+    assert svc.porcentaje_asistencia(
+        _conteo(asistio=2, falto=1, cancelada_tarde=1)) == 50
+
+
+class _Fila:
+    """Stand-in de una fila `(Reserva, Clase, disciplina, coach)` sin tocar la BD."""
+
+    def __init__(self, estado, asistio, fecha, **extra):
+        self.estado = estado
+        self.asistio = asistio
+        self.updated_at = extra.get("updated_at")
+        self.fecha = fecha
+        self.hora_inicio = extra.get("hora_inicio", time(10, 0))
+        self.hora_fin = extra.get("hora_fin", time(11, 0))
+
+
+def _fila(estado, asistio, fecha, **extra):
+    clase = _Fila(estado, asistio, fecha, **extra)
+    return (_Fila(estado, asistio, fecha, **extra), clase, "CrossFit", "Coach")
+
+
+def test_g4_el_total_y_el_mes_salen_de_la_misma_funcion():
+    """4 asistidas + 8 faltas + 1 cancelada a tiempo + 1 futura -> 33 % (total y mes).
+
+    Es el camino REAL de `_agregados_asistencia` (la que alimenta el Resumen y la
+    pestaña Asistencia de "Mi historial"): el total y el `pct` de cada mes tienen que
+    dar lo mismo que la función compartida, y la antigüedad en días tiene que ser 127.
+    """
+    from zoneinfo import ZoneInfo
+
+    santiago = ZoneInfo("America/Santiago")
+    asistidas = [2, 3, 4, 9]
+    faltadas = [10, 11, 12, 13, 16, 17, 18, 19]
+    filas = [_fila("confirmada", True, date(2026, 11, d)) for d in asistidas]
+    filas += [_fila("confirmada", False, date(2026, 11, d)) for d in faltadas]
+    # Cancelada sin `updated_at`: no se puede saber si fue tarde -> `cancelada` (no cuenta).
+    filas.append(_fila("cancelled", False, date(2026, 11, 20)))
+    # Clase futura: todavía no ocurrió -> `reservada` (no cuenta).
+    filas.append(_fila("confirmada", False, date(2026, 12, 1)))
+
+    alumno = _Fila("activo", False, None, updated_at=None)
+    alumno.created_at = datetime(2026, 7, 19, 12, 0, tzinfo=timezone.utc)
+
+    agg = svc._agregados_asistencia(
+        filas, alumno,
+        datetime(2026, 11, 23, 12, 0, tzinfo=santiago),
+        date(2026, 11, 23),
+        inicio=(date(2026, 7, 19), "alta"),
+    )
+
+    assert agg["conteo"]["asistio"] == 4
+    assert agg["conteo"]["falto"] == 8
+    assert agg["conteo"]["cancelada"] == 1
+    assert agg["conteo"]["reservada"] == 1
+    assert agg["pct"] == 33                       # 4 de 12 que cuentan
+    assert agg["pct"] == svc.porcentaje_asistencia(agg["conteo"])
+    # El mes en curso usa la MISMA cuenta: 4 de 12 en noviembre.
+    noviembre = next(m for m in agg["por_mes"] if m["mes"] == 11)
+    assert noviembre["pct"] == 33
+    assert noviembre["cuentan"] == 12
+    # La antigüedad que acompaña al bloque sale de la misma definición.
+    assert agg["dias_como_alumno"] == 127

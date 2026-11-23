@@ -7,7 +7,10 @@
 //    El frontend sólo formatea: si convirtiera la fecha sola como un instante UTC,
 //    el encabezado mostraría el día ANTERIOR (18-07) mientras el backend cuenta
 //    127 días desde el 19-07. Acá se fija que los dos hablen del MISMO día.
+// 2. "% de asistencia": las DOS pantallas (Mi historial y Mis Reservas) usan la MISMA
+//    función/base, así con 4 asistencias de 12 que cuentan las dos dicen 33 %.
 import { fmtFechaChile, fmtFechaCortaChile } from '../src/utils/fecha.js';
+import { porcentajeAsistencia, porcentajeDesdeResumen } from '../src/utils/porcentajeAsistencia.js';
 
 let fallos = 0;
 const eq = (obtenido, esperado, msg) => {
@@ -30,6 +33,35 @@ eq(fmtFechaChile('2026-07-20T02:00:00+00:00'), '19-07-2026',
 eq(fmtFechaChile('2026-07-20T12:00:00+00:00'), '20-07-2026',
     'un instante de mediodía UTC sigue siendo el mismo día en Chile');
 eq(fmtFechaChile(''), '', 'sin fecha -> cadena vacía');
+
+// ── 2. "% de asistencia": la MISMA base en "Mi historial" y "Mis Reservas" ────
+// La lista de "Mis Reservas" y los contadores que manda el backend del historial
+// entran por la MISMA función (`porcentajeAsistencia` / `porcentajeDesdeResumen`).
+const cuatroDeDoce = [
+    ...Array.from({ length: 4 }, (_, i) => ({ id: i + 1, estado_visible: 'asistio' })),
+    ...Array.from({ length: 8 }, (_, i) => ({ id: i + 5, estado_visible: 'falto' })),
+];
+eq(porcentajeAsistencia(cuatroDeDoce), 33,
+    'Mis Reservas: 4 asistidas de 12 que cuentan = 33 %');
+eq(porcentajeDesdeResumen({ asistidas: 4, faltadas: 8 }), 33,
+    'Mi historial (Resumen, datos.asistencia) = 33 %');
+eq(porcentajeDesdeResumen({ asistio: 4, falto: 8 }), 33,
+    'Mi historial (Asistencia, datos.totales) = 33 %');
+eq(porcentajeDesdeResumen({ asistidas: 4, faltadas: 8 }), porcentajeAsistencia(cuatroDeDoce),
+    'las dos pantallas muestran el MISMO número con los mismos datos');
+
+// La cancelación A TIEMPO no entra en la base; la tardía sí (cuenta como falta).
+const conCancelaciones = [
+    ...cuatroDeDoce.slice(0, 11),                       // 4 asistió + 7 faltó
+    { id: 30, estado_visible: 'cancelada' },            // a tiempo: NO cuenta
+    { id: 31, estado_visible: 'cancelada_tarde' },      // tarde: SÍ cuenta
+    { id: 32, estado_visible: 'reservada' },            // futura: NO cuenta
+];
+eq(porcentajeAsistencia(conCancelaciones), 33,
+    'Mis Reservas: 4 de 12 que cuentan = 33 % (cancelación a tiempo fuera)');
+eq(porcentajeDesdeResumen({
+    asistio: 4, falto: 7, cancelada_tarde: 1, cancelada: 2, reservada: 3,
+}), 33, 'Mi historial: misma base -> 33 % (cancelación a tiempo fuera)');
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);

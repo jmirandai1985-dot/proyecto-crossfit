@@ -4,6 +4,10 @@ import { useSearchParams } from 'react-router-dom';
 // `useEffect` con axios. Lo montan el alumno (`/alumno/mi-historial`) y la ficha del box.
 import { usePanelHistorial, useMisPagos } from '../../hooks/queries';
 import { fmtFechaChile, fmtFechaCortaChile } from '../../utils/fecha';
+// % de asistencia: la MISMA función que "Mis Reservas" (`utils/porcentajeAsistencia.js`).
+// Las dos pantallas comparten base (asistió + faltó + canceló tarde), así no pueden
+// mostrar números distintos con los mismos datos.
+import { porcentajeDesdeResumen } from '../../utils/porcentajeAsistencia';
 
 /**
  * Panel del Historial del alumno: la MISMA pantalla para el box y para el alumno.
@@ -11,8 +15,9 @@ import { fmtFechaChile, fmtFechaCortaChile } from '../../utils/fecha';
  * El backend devuelve SIEMPRE la misma envoltura para las 7 secciones
  * (`{alumno, seccion, secciones, incluye_privado, datos}`), así que acá hay un solo
  * cliente: se pide una sección por vez (`?seccion=...`) y se dibuja lo que traiga
- * `datos`. Nada de números calculados en el front (el backend es la única
- * definición de cada métrica).
+ * `datos`. Salvo el % de asistencia —que sale de la función compartida con "Mis
+ * Reservas"— los números vienen calculados del backend, que es la única definición
+ * de cada métrica.
  *
  * Props:
  *   - alumnoId: id del alumno (vista del box). Sin `alumnoId` se usa la puerta del
@@ -178,7 +183,7 @@ export const SeccionResumen = ({ datos }) => {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3" data-testid="historial-resumen">
                 <Dato label="Clases asistidas" valor={num(a.asistidas)} destacado
                     testid="historial-asistidas" />
-                <Dato label="% de asistencia" valor={`${num(a.pct_asistencia)}%`}
+                <Dato label="% de asistencia" valor={`${num(porcentajeDesdeResumen(a))}%`}
                     testid="historial-pct" />
                 <Dato label="Promedio por semana" valor={num(a.promedio_semanal)}
                     testid="historial-promedio" />
@@ -256,7 +261,7 @@ export const SeccionAsistencia = ({ datos, onPagina }) => {
                 <Dato label="Cancelada" valor={num(t.cancelada)} />
                 <Dato label="Cancelada tarde" valor={num(t.cancelada_tarde)} />
                 <Dato label="Reservada" valor={num(t.reservada)} />
-                <Dato label="% de asistencia" valor={`${num(t.pct_asistencia)}%`} destacado
+                <Dato label="% de asistencia" valor={`${num(porcentajeDesdeResumen(t))}%`} destacado
                     testid="historial-asistencia-pct" />
             </div>
 

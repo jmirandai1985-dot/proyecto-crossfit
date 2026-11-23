@@ -198,6 +198,29 @@ def estado_asistencia(reserva, clase, ahora: datetime = None) -> str:
     return ESTADO_RESERVADA if inicio_clase(clase) > ahora else ESTADO_FALTO
 
 
+def porcentaje_asistencia(conteo: dict) -> int:
+    """% de asistencia = asistidas / (asistidas + faltadas + canceladas_tarde).
+
+    ÚNICA definición del número que muestran "Mi historial" (Resumen y Asistencia) y
+    del espejo del frontend (`frontend/src/utils/porcentajeAsistencia.js`, el que usa
+    "Mis Reservas"), así las dos pantallas no pueden dar porcentajes distintos con la
+    misma base. Reglas (ver `ESTADOS_QUE_CUENTAN`):
+
+      * cancelar A TIEMPO no ensucia el número (`cancelada` no entra);
+      * una cancelación tardía sí cuenta como falta (`cancelada_tarde` entra);
+      * una reserva futura (`reservada`) todavía no ocurrió: no entra.
+
+    ``conteo`` es el dict por estado (`{asistio, falto, cancelada, cancelada_tarde,
+    reservada}`), el mismo que arma `_agregados_asistencia` (total y por mes). Sin base
+    (nada que contar) devuelve 0: no divide por cero. Redondeo estándar: 4 de 12 = 33.
+    Puro: se testea sin BD.
+    """
+    cuentan = sum(conteo.get(estado, 0) for estado in ESTADOS_QUE_CUENTAN)
+    if not cuentan:
+        return 0
+    return round(conteo.get(ESTADO_ASISTIO, 0) / cuentan * 100)
+
+
 def suscripcion_del_mes(suscripciones: list, anio: int, mes: int):
     """La suscripción VIGENTE en ese mes calendario, o None.
 
@@ -423,8 +446,7 @@ def _agregados_asistencia(filas: list, alumno, ahora: datetime, hoy: date,
             ultima_asistencia = clase.fecha
 
     asistidas = conteo[ESTADO_ASISTIO]
-    cuentan = sum(conteo[e] for e in ESTADOS_QUE_CUENTAN)
-    pct = round(asistidas / cuentan * 100) if cuentan else 0
+    pct = porcentaje_asistencia(conteo)
 
     # "Alumno desde" = primeras suscripción/asistencia (regla 3): el promedio por semana y
     # los días como alumno se miden sobre ESE período, no desde el alta del usuario.
@@ -439,7 +461,7 @@ def _agregados_asistencia(filas: list, alumno, ahora: datetime, hoy: date,
         fila_mes = por_mes[clave]
         cuentan_mes = sum(fila_mes[e] for e in ESTADOS_QUE_CUENTAN)
         fila_mes["cuentan"] = cuentan_mes
-        fila_mes["pct"] = round(fila_mes[ESTADO_ASISTIO] / cuentan_mes * 100) if cuentan_mes else 0
+        fila_mes["pct"] = porcentaje_asistencia(fila_mes)
         meses.append(fila_mes)
 
     return {
