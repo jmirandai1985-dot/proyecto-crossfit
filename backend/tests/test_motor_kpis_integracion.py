@@ -79,6 +79,12 @@ def test_motor_kpis_valores_esperados():
         assert asistencia["reservas"] == ESPERADO["reservas_mes"]
         assert (asistencia["asistencia_promedio"]
                 == pytest.approx(ESPERADO["asistencia_real_pct"]))
+        # Ocupación = asistencia REAL / cupo, no asistentes_confirmados.
+        assert (metricas.ocupacion_promedio(db, tid, MES_KPI, FIN_KPI)
+                == pytest.approx(ESPERADO["ocupacion_real_pct"]))
+        # ARPU coherente con MRR y alumnos activos de la misma fecha.
+        assert (metricas.arpu_actual(db, tid, hoy)
+                == pytest.approx(ESPERADO["arpu_actual"]))
 
         # ── Ticket global/por plan + vida ─────────────────────────────────
         financiero = kpis.get_financiero(

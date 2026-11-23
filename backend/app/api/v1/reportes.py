@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text as sql_text
 from datetime import datetime, timezone, timedelta
+import calendar
 import io
 
 import logging
@@ -17,6 +18,7 @@ from app.core.dependencies import get_current_admin
 from app.core.estados import lista_sql
 from app.services import metricas_service as metricas
 from app.services.clases_service import sql_clase_realizada
+from app.utils.santiago import hoy_santiago
 
 logger = logging.getLogger(__name__)
 
@@ -70,9 +72,6 @@ def _ocupacion_por_disciplina(db: Session, tenant_id: int, inicio_mes, fin_mes):
             SELECT d.id, d.nombre,
                    COUNT(c.id) as total_clases,
                    COUNT(c.id) FILTER (WHERE c.cupo_maximo IS NULL) as clases_sin_tope,
-                   COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0)), 0) as asistentes,
-                   COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0))
-                            FILTER (WHERE c.cupo_maximo IS NOT NULL), 0) as asistentes_con_tope,
                    COALESCE(SUM(c.cupo_maximo)
                             FILTER (WHERE c.cupo_maximo IS NOT NULL), 0) as cupo
             FROM clases c
@@ -83,12 +82,32 @@ def _ocupacion_por_disciplina(db: Session, tenant_id: int, inicio_mes, fin_mes):
               AND """ + sql_clase_realizada("c") + """
             GROUP BY d.id, d.nombre
         ),
+        asistencias_disc AS (
+            -- Asistencia REAL (`reservas.asistio`), no el contador de reservas.
+            SELECT c.disciplina_id,
+                   COUNT(r.id) as asistentes,
+                   COUNT(r.id) FILTER (WHERE c.cupo_maximo IS NOT NULL) as asistentes_con_tope
+            FROM reservas r
+            JOIN clases c ON r.clase_id = c.id
+            JOIN usuarios u ON u.id = r.alumno_id
+            WHERE c.tenant_id = :tid
+              AND r.asistio = true
+              AND u.tenant_id = :tid
+              AND NOT u.es_prueba
+              AND c.fecha >= :inicio_d
+              AND c.fecha <= :fin_d
+              AND """ + sql_clase_realizada("c") + """
+            GROUP BY c.disciplina_id
+        ),
         alumnos_disc AS (
             SELECT c.disciplina_id, COUNT(DISTINCT r.alumno_id) as alumnos_unicos
             FROM reservas r
             JOIN clases c ON r.clase_id = c.id
+            JOIN usuarios u ON u.id = r.alumno_id
             WHERE c.tenant_id = :tid
               AND r.asistio = true
+              AND u.tenant_id = :tid
+              AND NOT u.es_prueba
               AND c.fecha >= :inicio_d
               AND c.fecha <= :fin_d
             GROUP BY c.disciplina_id
@@ -97,18 +116,24 @@ def _ocupacion_por_disciplina(db: Session, tenant_id: int, inicio_mes, fin_mes):
             SELECT c.disciplina_id, COUNT(r.id) as reservas
             FROM reservas r
             JOIN clases c ON r.clase_id = c.id
+            JOIN usuarios u ON u.id = r.alumno_id
             WHERE c.tenant_id = :tid
+              AND u.tenant_id = :tid
+              AND NOT u.es_prueba
               AND c.fecha >= :inicio_d
               AND c.fecha <= :fin_d
               AND r.estado NOT IN (""" + lista_sql() + """)
             GROUP BY c.disciplina_id
         )
         SELECT cd.id, cd.nombre, cd.total_clases, cd.clases_sin_tope,
-               cd.asistentes, cd.asistentes_con_tope, cd.cupo,
-               COALESCE(ad.alumnos_unicos, 0) as alumnos_unicos,
+               COALESCE(ad.asistentes, 0) as asistentes,
+               COALESCE(ad.asistentes_con_tope, 0) as asistentes_con_tope,
+               cd.cupo,
+               COALESCE(al.alumnos_unicos, 0) as alumnos_unicos,
                COALESCE(rd.reservas, 0) as reservas
         FROM clases_disc cd
-        LEFT JOIN alumnos_disc ad ON ad.disciplina_id = cd.id
+        LEFT JOIN asistencias_disc ad ON ad.disciplina_id = cd.id
+        LEFT JOIN alumnos_disc al ON al.disciplina_id = cd.id
         LEFT JOIN reservas_disc rd ON rd.disciplina_id = cd.id
         ORDER BY cd.id
     """), {
@@ -122,8 +147,8 @@ def _ocupacion_por_disciplina(db: Session, tenant_id: int, inicio_mes, fin_mes):
         cupo = r.cupo or 0
         # Sin tope = sin denominador: % None (el front pinta las reservas).
         sin_tope = (r.total_clases or 0) > 0 and (r.clases_sin_tope or 0) == r.total_clases
-        pct = None if sin_tope else (
-            round(r.asistentes_con_tope / cupo * 100) if cupo > 0 else 0)
+        pct = None if (sin_tope or cupo <= 0) else round(
+            r.asistentes_con_tope / cupo * 100)
         resultado.append({
             "id": r.id,
             "nombre": r.nombre.strip() if r.nombre else "—",
@@ -355,12 +380,23 @@ def obtener_reportes_analytics(
 
         # --- 6. INGRESOS DEL MES (neto) ---
         # Definicion COMPARTIDA con el BI: metricas_service.ingresos_netos.
+        # La comparación MoM usa el MISMO TRAMO: del día 1 al día de hoy del mes
+        # actual, contra del día 1 al mismo día del mes anterior (si el mes
+        # anterior tiene menos días, se corta en su último día).
+        hoy_chile = hoy_santiago()
+        fin_tramo_actual = min(fin_mes.date(), hoy_chile)
+        dia_ant = min(hoy_chile.day, calendar.monthrange(
+            inicio_mes_ant.year, inicio_mes_ant.month)[1])
+        fin_tramo_anterior = min(
+            fin_mes_ant.date(),
+            inicio_mes_ant.replace(day=dia_ant).date(),
+        )
         ingresos_mes = metricas.ingresos_netos(
-            db, tenant_id, inicio_mes.date(), fin_mes.date())
+            db, tenant_id, inicio_mes.date(), fin_tramo_actual)
 
-        # Mes anterior (misma funcion, otro periodo)
+        # Mes anterior, mismo tramo de días (NO el mes completo).
         ingresos_mes_ant = metricas.ingresos_netos(
-            db, tenant_id, inicio_mes_ant.date(), fin_mes_ant.date())
+            db, tenant_id, inicio_mes_ant.date(), fin_tramo_anterior)
 
         # --- 6b. VENTAS DEL BAZAR DEL MES (bruto, NO neto) ---
         # Definicion COMPARTIDA con el BI (`daily/monthly_kpis`) y con el historial del alumno:
@@ -371,18 +407,21 @@ def obtener_reportes_analytics(
         # anterior, para que la tarjeta no muestre sólo un "$225K" sin contexto.
         bazar_mes = metricas.ventas_bazar_detalle(
             db, tenant_id, inicio_mes.date(), fin_mes.date())
-        bazar_mes_ant = metricas.ventas_bazar(
+        bazar_mes_ant_det = metricas.ventas_bazar_detalle(
             db, tenant_id, inicio_mes_ant.date(), fin_mes_ant.date())
+        bazar_mes_ant = bazar_mes_ant_det["monto"]
+        # Base mínima de 5 pedidos cobrados: con 1 pedido el porcentaje no es
+        # comparable y se publica None ("datos insuficientes").
         bazar_variacion = (
             int(round(((bazar_mes["monto"] - bazar_mes_ant) / bazar_mes_ant) * 100))
-            if bazar_mes_ant > 0 else None
+            if bazar_mes_ant_det["pedidos"] >= 5 else None
         )
 
-        # --- 7. ARPU (último mes CERRADO) ---
-        # Antes: ingresos del mes EN CURSO / alumnos activos HOY (mes parcial); el
-        # día 2 del mes daba un ARPU sin sentido. Ahora sale del último mes cerrado
-        # (misma lógica que el MRR histórico).
-        arpu = metricas.arpu_mes_cerrado(db, tenant_id, ahora.date())
+        # --- 7. ARPU (MRR / alumnos activos de la MISMA fecha) ---
+        # Coherente con las tarjetas de MRR y alumnos: mismas definiciones y
+        # mismo filtro de usuarios reales. Usa el día actual (no un mes cerrado
+        # con otra base de alumnos).
+        arpu = metricas.arpu_actual(db, tenant_id, hoy_chile)
 
         # --- 8. COMPARACION MoM ---
         # Si el mes anterior no es comparable (neto <= 0: sin movimientos o mas
@@ -542,6 +581,7 @@ def obtener_reportes_analytics(
             "ventasBazar": bazar_mes["monto"],
             "ventasBazarPedidos": bazar_mes["pedidos"],
             "ventasBazarMesAnterior": bazar_mes_ant,
+            "ventasBazarMesAnteriorPedidos": bazar_mes_ant_det["pedidos"],
             # None si el mes anterior no vendió nada (no hay base comparable).
             "ventasBazarVariacion": bazar_variacion,
             "arpu": arpu,
@@ -550,6 +590,9 @@ def obtener_reportes_analytics(
             # Ocupación
             "clasesImpartidas": clases_impartidas,
             "asistenciaPromedio": ocupacion_promedio,
+            # La UI usa esta bandera para decir "datos insuficientes" cuando no
+            # hay cupos; `asistenciaPromedio` es None en ese caso.
+            "tieneDatosOcupacion": ocupacion_promedio is not None,
             "ocupacionPorDisciplina": ocupacion_por_disciplina,
             # Conteo (no ratio) de las disciplinas sin tope del mes elegido.
             "reservasSinCupo": reservas_sin_cupo,

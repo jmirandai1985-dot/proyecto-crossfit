@@ -503,7 +503,6 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
     # Definicion COMPARTIDA con Reportes (metricas_service.ocupacion_promedio).
     ocupacion_promedio = metricas.ocupacion_promedio(db, tenant_id, inicio, fin)
     asistencia_promedio = asistencia["asistencia_promedio"]
-
     # `frecuencia_semanal` = asistentes por semana por alumno activo. El divisor son las
     # semanas TRANSCURRIDAS del período, NO las del mes completo: en el mes EN CURSO el
     # numerador sólo cubre lo que ya pasó, así que dividir por las 4-5 semanas del mes
@@ -534,7 +533,10 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
     row.ingresos_bazar = ingresos_bazar
     row.asistencia_promedio = asistencia_promedio
     row.frecuencia_semanal = frecuencia_semanal
-    row.ocupacion_promedio = ocupacion_promedio
+    # La columna es NOT NULL: se guarda 0 cuando no hay cupos, pero la respuesta
+    # publica None/`ocupacion_suficiente=false` para que la UI diga "datos
+    # insuficientes" en vez de un 0% falso.
+    row.ocupacion_promedio = ocupacion_promedio if ocupacion_promedio is not None else 0
     db.commit()
 
     return {
@@ -552,6 +554,7 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
             "asistencia_promedio": asistencia_promedio,
             "frecuencia_semanal": frecuencia_semanal,
             "ocupacion_promedio": ocupacion_promedio,
+            "ocupacion_suficiente": ocupacion_promedio is not None,
         },
     }
 

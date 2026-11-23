@@ -277,40 +277,66 @@ def ventas_bazar(db: Session, tenant_id: int, inicio: date, fin: date) -> float:
     return ventas_bazar_detalle(db, tenant_id, inicio, fin)["monto"]
 
 
-def ocupacion_promedio(db: Session, tenant_id: int, inicio: date, fin: date) -> int:
-    """Ocupacion del periodo en porcentaje: asistentes_confirmados sobre cupo.
+def ocupacion_promedio(db: Session, tenant_id: int, inicio: date, fin: date):
+    """Ocupación del período: asistencias REALES sobre cupos disponibles.
 
-    OJO con el nombre: mide OCUPACION (lugares reservados contra cupo ofrecido),
-    no tasa de asistencia; eso requiriria comparar asistencias reales contra
-    reservas confirmadas. Reportes la muestra como Asistencia Promedio y
-    monthly_kpis.ocupacion_promedio guarda el mismo numero.
+    El numerador es la asistencia confirmada (`reservas.asistio = true`) de las
+    clases REALIZADAS con cupo, no el contador de reservas
+    (`clases.asistentes_confirmados`). El denominador es la suma de
+    `clases.cupo_maximo` de esas mismas clases.
 
-    Solo cuenta clases REALIZADAS (`clases_service.sql_clase_realizada`: ya
-    terminadas en hora de Chile y no canceladas). Antes entraban TODAS las clases
-    del periodo, asi que en el mes EN CURSO las clases futuras inflaban el
-    denominador y el % salia artificialmente bajo (bug reportado 2026-10: 2.11%).
-    Para un mes ya cerrado todas las clases terminaron, asi que el numero no cambia.
+    Devuelve `None` cuando no hay cupos disponibles: un 0% sería un dato falso
+    (no hay base para calcular el porcentaje) y la UI debe mostrar "datos
+    insuficientes"/n/d.
 
-    ── Migración 066: SOLO las clases con tope ─────────────────────────────────
-    Musculación y Open Box tienen `cupo_maximo IS NULL` (acceso libre). Si se
-    sumaran sus reservas al numerador, el % podria pasar de 100: no hay butacas
-    que comparar. Las dos partes del cociente salen de las clases CON cupo, y
-    las reservas de las salas libres se informan aparte (`reservas_sin_tope`),
-    como conteo, nunca como porcentaje.
+    Sólo cuentan clases con tope: Musculación / Open Box (`cupo_maximo IS NULL`)
+    no tienen denominador. Las asistencias de cuentas `es_prueba` se excluyen.
     """
-    fila = db.execute(text("""
-        SELECT COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0))
-                        FILTER (WHERE c.cupo_maximo IS NOT NULL), 0),
-               COALESCE(SUM(c.cupo_maximo)
-                        FILTER (WHERE c.cupo_maximo IS NOT NULL), 0)
-        FROM clases c
-        WHERE c.tenant_id = :tid
-          AND c.fecha >= :ini AND c.fecha <= :fin
-          AND """ + sql_clase_realizada("c") + """
-    """), {
-        "tid": tenant_id, "ini": inicio, "fin": fin}).first()
+    fila = db.execute(text(f"""
+        SELECT COALESCE(SUM(asis.asistentes), 0) AS asistentes,
+               COALESCE(SUM(asis.cupo), 0) AS cupo
+        FROM (
+            SELECT c.id,
+                   c.cupo_maximo AS cupo,
+                   COUNT(r.id) FILTER (
+                       WHERE r.asistio IS TRUE AND NOT u.es_prueba
+                   ) AS asistentes
+            FROM clases c
+            LEFT JOIN reservas r
+                   ON r.clase_id = c.id
+                  AND r.tenant_id = c.tenant_id
+            LEFT JOIN usuarios u
+                   ON u.id = r.alumno_id
+                  AND u.tenant_id = c.tenant_id
+            WHERE c.tenant_id = :tid
+              AND c.fecha >= :ini AND c.fecha <= :fin
+              AND c.cupo_maximo IS NOT NULL
+              AND {sql_clase_realizada("c")}
+            GROUP BY c.id, c.cupo_maximo
+        ) AS asis
+    """), {"tid": tenant_id, "ini": inicio, "fin": fin}).first()
     asistentes, cupo = int(fila[0] or 0), int(fila[1] or 0)
-    return round(asistentes / cupo * 100, 2) if cupo > 0 else 0
+    return round(asistentes / cupo * 100, 2) if cupo > 0 else None
+
+
+def arpu_actual(db: Session, tenant_id: int, fecha: date = None) -> float:
+    """ARPU del box en una fecha: MRR / alumnos vigentes EN ESA FECHA.
+
+    Antes el ARPU se calculaba con ingresos netos del último mes cerrado, una
+    base que podía incluir dinero no recurrente y alumnos que ya no estaban.
+    Para que sea coherente con las tarjetas que se muestran juntas (MRR y
+    alumnos activos), usa exactamente las MISMAS dos definiciones compartidas:
+
+        ARPU = metricas_service.mrr(fecha) / alumnos_vigentes(fecha)
+
+    Ambas ya filtran usuarios reales (`sql_usuario_real`) y estados sin MRR.
+    Si no hay alumnos, `calcular_arpu` devuelve 0.
+    """
+    fecha = fecha or hoy_santiago()
+    return calcular_arpu(
+        mrr(db, tenant_id, fecha),
+        alumnos_vigentes(db, tenant_id, fecha),
+    )
 
 
 def reservas_sin_tope(db: Session, tenant_id: int, inicio: date, fin: date) -> int:

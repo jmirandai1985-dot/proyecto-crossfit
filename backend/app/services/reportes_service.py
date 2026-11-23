@@ -493,7 +493,7 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
                              limite_dia=hoy.day if mes_en_curso else None)
     label_ant = f"{_MESES_ES_LARGOS[mes_ant - 1]} {anio_ant}"
 
-    arpu = metricas.arpu_mes_cerrado(db, tenant_id, hoy)
+    arpu = metricas.arpu_actual(db, tenant_id, hoy)
     alumnos_hoy = metricas.alumnos_vigentes(db, tenant_id, hoy)
     generado = f"Generado: {datetime.now():%d/%m/%Y %H:%M}"
 
@@ -707,6 +707,7 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
         SELECT COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (
             COALESCE(u.fecha_baja::timestamptz, NOW()) - u.created_at)) / 86400.0)), 0)
         FROM usuarios u WHERE u.tenant_id = :tid AND u.rol = 'alumno'
+          AND u.estado = 'activo'
           AND {metricas.sql_usuario_real("u")}
     """), {"tid": tenant_id}).scalar() or 0)
     ltv = round((arpu or 0) * vida_dias / 30, 0)

@@ -133,6 +133,10 @@ ESPERADO = {
     "asistentes_mes": 6,
     "reservas_mes": 10,
     "asistencia_real_pct": 60.0,
+    # ocupación: asistencias reales / cupos (clase de 20) = 30 %
+    "ocupacion_real_pct": 30.0,
+    # ARPU coherente con MRR (700.000) / 15 alumnos activos
+    "arpu_actual": 46667.0,
     # vida
     "vida_dias": 86,
     "vida_meses": 2.83,
