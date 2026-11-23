@@ -306,7 +306,7 @@ if not settings.JWT_SECRET_KEY:
 # inválidas NUNCA se registran. En PRODUCCIÓN un problema aborta el arranque
 # (fail-fast: mejor un deploy que no levanta que un frontend mudo); en TEST/dev se
 # loguea un WARNING y se sigue con los orígenes que sí sirven.
-_HOSTS_LOCALES = ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+_HOSTS_LOCALES = ("localhost", "127.0.0.1", "0.0.0.0", "::1")  # nosec B104  -- lista de hosts locales, no un bind
 
 
 def en_produccion(entorno: str = None) -> bool:

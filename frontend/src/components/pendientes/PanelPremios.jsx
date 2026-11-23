@@ -54,7 +54,7 @@ const PanelPremios = () => {
                 : await rechazar.mutateAsync(fila.id);
             setMessage(`${resultado?.mensaje || 'Premio resuelto.'} ${resultado?.premio_texto || ''}`.trim());
         } catch (err) {
-            console.error(`Error al ${accion} la promoción detectada:`, err);
+            console.error('Error al %s la promoción detectada:', accion, err);
             setError(mensajeDeError(
                 err,
                 `No pudimos ${esConfirmar ? 'confirmar' : 'rechazar'} el premio.`,

@@ -929,9 +929,9 @@ def _cancelar_reserva(
     # cancelación hace la transición de estado; las siguientes reciben 409 y no
     # tocan ni el aforo ni los créditos.
     cambio = db.execute(
-        text(
+        text(  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
             f"UPDATE reservas SET estado = '{ESTADO_CANCELADO}', updated_at = now() "
-            f"WHERE id = :rid AND tenant_id = :tid AND estado NOT IN ({lista_sql()})"
+            f"WHERE id = :rid AND tenant_id = :tid AND estado NOT IN ({lista_sql()})"  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
         ),
         {"rid": reserva_id, "tid": tenant_id},
     ).rowcount

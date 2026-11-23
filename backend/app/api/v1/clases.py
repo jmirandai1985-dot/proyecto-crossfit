@@ -187,6 +187,7 @@ def listar_clases(
             "(c.cupo_maximo IS NULL"
             " OR c.asistentes_confirmados < c.cupo_maximo)")
     where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+    # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     query = text(f"""
         SELECT c.id, c.fecha, c.hora_inicio, c.hora_fin, c.disciplina_id, c.coach_id,
                c.wod_id,
@@ -219,7 +220,7 @@ def listar_clases(
         {where_clause}
         ORDER BY c.fecha DESC, c.hora_inicio ASC
         LIMIT :limit OFFSET :skip
-    """)
+    """)  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
     rows = db.execute(query, query_params).fetchall()
 
     # ── Fix N+1: precomputar en UNA sola query el coach unico activo por

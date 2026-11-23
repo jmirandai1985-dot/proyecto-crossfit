@@ -66,7 +66,7 @@ const PendientesPromocionesReferidos = () => {
                 ].filter(Boolean).join(' '),
             });
         } catch (err) {
-            console.error(`Error al ${accion} la promoción detectada:`, err);
+            console.error('Error al %s la promoción detectada:', accion, err);
             setMensaje({
                 tipo: 'error',
                 texto: mensajeDeError(
@@ -242,7 +242,7 @@ const PremiosTramoCiclo = () => {
                 texto: `${resultado.mensaje || 'Listo.'} ${resultado.premio_texto || ''}`.trim(),
             });
         } catch (err) {
-            console.error(`Error al ${accion} el premio de tramo:`, err);
+            console.error('Error al %s el premio de tramo:', accion, err);
             setMensaje({
                 tipo: 'error',
                 texto: mensajeDeError(

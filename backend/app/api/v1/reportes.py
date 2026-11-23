@@ -67,6 +67,7 @@ def _ocupacion_por_disciplina(db: Session, tenant_id: int, inicio_mes, fin_mes):
         `sin_tope` es la bandera que usa el front; `clases_sin_tope` explica
         por qué una disciplina puede tener clases y cupo_total 0.
     """
+    # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     filas = db.execute(sql_text("""
         WITH clases_disc AS (
             SELECT d.id, d.nombre,
@@ -79,7 +80,8 @@ def _ocupacion_por_disciplina(db: Session, tenant_id: int, inicio_mes, fin_mes):
             WHERE c.tenant_id = :tid
               AND c.fecha >= :inicio_d
               AND c.fecha <= :fin_d
-              AND """ + sql_clase_realizada("c") + """
+              AND """ + sql_clase_realizada("c") +  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+              """
             GROUP BY d.id, d.nombre
         ),
         asistencias_disc AS (
@@ -210,6 +212,7 @@ def _historico_ingresos_6m(db: Session, tenant_id: int):
     """
     desde, _ = _inicio_fin_mes(-5)
     _, hasta = _inicio_fin_mes(0)
+    # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     filas = db.execute(sql_text(f"""
         SELECT date_trunc('month', fecha)::date AS mes,
                COALESCE(SUM(CASE
@@ -223,7 +226,7 @@ def _historico_ingresos_6m(db: Session, tenant_id: int):
           AND fecha <= :hasta
           AND {metricas.sql_transaccion_real("transacciones_financieras")}
         GROUP BY 1
-    """), {
+    """), {  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
         "tid": tenant_id,
         "desde": desde.date(),
         "hasta": hasta.date(),
@@ -317,6 +320,7 @@ def obtener_reportes_analytics(
         inicio_mes_ant, fin_mes_ant = _inicio_fin_mes(-1)
         # --- 1. ALUMNOS ACTIVOS ---
         # Alumnos con rol='alumno' Y suscripcion activa vigente (fecha_expiracion >= hoy)
+        # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
         alumnos_activos = db.execute(sql_text(f"""
             SELECT COUNT(DISTINCT u.id)
             FROM usuarios u
@@ -327,9 +331,10 @@ def obtener_reportes_analytics(
               AND {metricas.sql_usuario_real("u")}
               AND s.estado = 'activo'
               AND s.fecha_expiracion >= (now() AT TIME ZONE 'America/Santiago')::date
-        """), {"tid": tenant_id}).scalar() or 0
+        """), {"tid": tenant_id}).scalar() or 0  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
 
         # --- 2. NUEVOS ALUMNOS ESTE MES ---
+        # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
         nuevos_alumnos_mes = db.execute(sql_text(f"""
             SELECT COUNT(*) FROM usuarios u
             WHERE u.tenant_id = :tid
@@ -337,7 +342,7 @@ def obtener_reportes_analytics(
               AND {metricas.sql_usuario_real("u")}
               AND u.created_at >= :inicio
               AND u.created_at <= :fin
-        """), {"tid": tenant_id, "inicio": inicio_mes, "fin": fin_mes}).scalar() or 0
+        """), {"tid": tenant_id, "inicio": inicio_mes, "fin": fin_mes}).scalar() or 0  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
 
         # --- 3. CANCELACIONES ESTE MES ---
         # Suscripciones que expiraron o se cancelaron este mes
@@ -351,6 +356,7 @@ def obtener_reportes_analytics(
         # "Planes Vencidos (Mes)" y la fuente del número (`cancelaciones_mes` =
         # len(filas)). Al compartir el WHERE, la tarjeta y la tabla no pueden
         # discrepar ni en el último día del mes, y el endpoint ahorra un COUNT.
+        # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
         planes_vencidos_rows = db.execute(sql_text(f"""
             SELECT u.nombre AS alumno_nombre, u.correo, p.nombre AS plan_nombre,
                    p.precio_clp, s.fecha_expiracion
@@ -363,7 +369,7 @@ def obtener_reportes_analytics(
               AND (s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date >= :inicio_d
               AND (s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date <= :fin_d
             ORDER BY s.fecha_expiracion DESC, u.nombre ASC
-        """), {"tid": tenant_id, "inicio_d": inicio_mes.date(),
+        """), {"tid": tenant_id, "inicio_d": inicio_mes.date(),  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
                "fin_d": fin_mes.date()}).fetchall()
         planes_vencidos_mes = [{
             "alumno_nombre": r.alumno_nombre,
@@ -450,12 +456,14 @@ def obtener_reportes_analytics(
         # definición única de `clases_service`. Antes se contaban TODAS las clases del mes,
         # incluidas las futuras: en el mes en curso eso inflaba el número (bug 2026-10: 559 con
         # el mes recién empezado). Para un mes cerrado el resultado no cambia.
+        # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
         clases_impartidas = db.execute(sql_text("""
             SELECT COUNT(*) FROM clases
             WHERE tenant_id = :tid
               AND fecha >= :inicio_d
               AND fecha <= :fin_d
-              AND """ + sql_clase_realizada("clases") + """
+              AND """ + sql_clase_realizada("clases") +  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
+              """
         """), {"tid": tenant_id, "inicio_d": inicio_mes.date(), "fin_d": fin_mes.date()}).scalar() or 0
 
         # --- 10. OCUPACION PROMEDIO ---

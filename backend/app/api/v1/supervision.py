@@ -200,6 +200,7 @@ def supervision_grid_semanal(
     # la grilla se mostraba corrida un día. Ver app/utils/semana.py.
     _dow_lunes_cero = sql_dow_lunes_cero("c.fecha")
 
+    # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     rows = db.execute(sql_text(f"""
         SELECT
             {_dow_lunes_cero} AS dia_semana,
@@ -225,7 +226,7 @@ def supervision_grid_semanal(
           AND c.fecha >= :lunes
           AND c.fecha <= :domingo
         ORDER BY c.fecha, c.hora_inicio, d.nombre
-    """), {
+    """), {  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
         "tid": tenant_id,
         "lunes": lunes,
         "domingo": domingo
@@ -330,6 +331,7 @@ def supervision_grilla(
 
     # ── 1) PLANTILLAS: tabla `horarios` (activa) de disciplinas que requieren coach ──
     # `horarios_base` NO se usa: es una tabla legado/zombie (docs/SUPERVISION_CLASES.md).
+    # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     plantillas_rows = db.execute(sql_text(f"""
         SELECT h.id AS horario_id, h.disciplina_id, d.nombre AS disciplina_nombre,
                h.dia_semana, h.hora_inicio::text AS hora_inicio,
@@ -353,7 +355,7 @@ def supervision_grilla(
           AND d.requiere_coach = true
           {filtro_disc_plantillas}
         ORDER BY h.dia_semana, h.hora_inicio, d.nombre
-    """), params).fetchall()
+    """), params).fetchall()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
 
     plantillas = []
     for r in plantillas_rows:
@@ -372,6 +374,7 @@ def supervision_grilla(
 
     # ── 2) CLASES REALES del rango ──
     _dow_lunes_cero = sql_dow_lunes_cero("c.fecha")
+    # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     clases_rows = db.execute(sql_text(f"""
         SELECT c.id AS clase_id, c.fecha::text AS fecha,
                {_dow_lunes_cero} AS dia_semana,
@@ -401,7 +404,7 @@ def supervision_grilla(
           )
           {filtro_disc_clases}
         ORDER BY c.fecha, c.hora_inicio, d.nombre, c.id
-    """), params).fetchall()
+    """), params).fetchall()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
 
     from collections import defaultdict
 

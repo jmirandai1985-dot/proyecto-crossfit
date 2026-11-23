@@ -215,6 +215,7 @@ def conflicto_futuro_en_horario(db: Session, tenant_id: int, horario_id: int,
     if coach_id is not None:
         params["cid"] = coach_id
         excluir = "AND c.coach_id <> :cid"
+    # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     fila = db.execute(text(f"""
         SELECT c.id AS clase_id, c.fecha::text AS fecha, c.coach_id,
                u.nombre AS coach_nombre
@@ -228,7 +229,7 @@ def conflicto_futuro_en_horario(db: Session, tenant_id: int, horario_id: int,
           {excluir}
         ORDER BY c.fecha, c.id
         LIMIT 1
-    """), params).first()
+    """), params).first()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
     if not fila:
         return None
     return {
@@ -306,6 +307,7 @@ def liberar_clases_futuras_de_horario(db: Session, tenant_id: int, horario_id: i
     if coach_id is not None:
         params["cid"] = coach_id
         solo_suyas = "AND coach_id = :cid"
+    # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     res = db.execute(text(f"""
         UPDATE clases
         SET coach_id = NULL,
@@ -319,7 +321,7 @@ def liberar_clases_futuras_de_horario(db: Session, tenant_id: int, horario_id: i
           AND fecha >= :desde
           AND coach_id IS NOT NULL
           {solo_suyas}
-    """), params)
+    """), params)  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
     return res.rowcount
 
 

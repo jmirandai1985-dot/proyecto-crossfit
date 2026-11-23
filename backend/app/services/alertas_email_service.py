@@ -178,6 +178,7 @@ def enviar_alertas_renovacion(db, tenant_id: int = 1, dias_aviso: int = 3) -> di
     from sqlalchemy import text
     from app.services.email_service import send_renovacion_plan, espaciar_envio
     target = (hoy_santiago() + timedelta(days=dias_aviso)).isoformat()
+    # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     rows = db.execute(text(f"""
         SELECT DISTINCT ON (u.id) u.id, u.nombre, u.correo, s.fecha_expiracion
         FROM suscripciones s
@@ -191,7 +192,7 @@ def enviar_alertas_renovacion(db, tenant_id: int = 1, dias_aviso: int = 3) -> di
           AND {_sql_sin_plan_en_cola()}
           AND {sql_fecha_en_chile("s.fecha_expiracion")} = :target
         ORDER BY u.id, s.fecha_expiracion DESC
-    """), {"tid": tenant_id, "target": target}).fetchall()
+    """), {"tid": tenant_id, "target": target}).fetchall()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
 
     enviados, fallidos = [], []
     candidatos, deduplicados = len(rows), 0
@@ -233,6 +234,7 @@ def enviar_alertas_inactividad(db, tenant_id: int = 1, umbral_dias: int = 7) -> 
     from sqlalchemy import text
     from app.services.asistencia_real import sql_cte_asistencias
     from app.services.email_service import send_alerta_inactividad, espaciar_envio
+    # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     rows = db.execute(text(f"""
         WITH {sql_cte_asistencias()}
         SELECT u.id, u.nombre, u.correo,
@@ -244,7 +246,7 @@ def enviar_alertas_inactividad(db, tenant_id: int = 1, umbral_dias: int = 7) -> 
           AND {sql_usuario_real("u")}
           AND u.estado NOT IN ({lista_sql(ESTADOS_USUARIO_SIN_MRR)})
 
-    """), {"tid": tenant_id}).fetchall()
+    """), {"tid": tenant_id}).fetchall()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
 
     limite = hoy_santiago() - timedelta(days=umbral_dias)
     enviados, fallidos = [], []
@@ -289,6 +291,7 @@ def enviar_alertas_urgencia(db, tenant_id: int = 1) -> dict:
     from app.services.email_service import (send_alerta_urgencia_renovacion,
                                             espaciar_envio)
     target = hoy_santiago().isoformat()
+    # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     rows = db.execute(text(f"""
         SELECT DISTINCT ON (u.id) u.id, u.nombre, u.correo
         FROM suscripciones s
@@ -303,7 +306,7 @@ def enviar_alertas_urgencia(db, tenant_id: int = 1) -> dict:
           AND {_sql_sin_plan_en_cola()}
           AND {sql_fecha_en_chile("s.fecha_expiracion")} = :target
         ORDER BY u.id
-    """), {"tid": tenant_id, "target": target}).fetchall()
+    """), {"tid": tenant_id, "target": target}).fetchall()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
 
     enviados, fallidos = [], []
     candidatos, deduplicados = len(rows), 0
@@ -356,6 +359,7 @@ def enviar_alertas_ultimo_credito(db, tenant_id: int = 1) -> dict:
                 "detalle_enviados": [], "detalle_fallidos": [],
                 "motivo": "Es el último día del mes (días_restantes=0)"}
 
+    # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     rows = db.execute(text(f"""
         SELECT DISTINCT ON (u.id) u.id, u.nombre, u.correo, s.creditos_disponibles
         FROM suscripciones s
@@ -369,7 +373,7 @@ def enviar_alertas_ultimo_credito(db, tenant_id: int = 1) -> dict:
           AND u.estado NOT IN ({lista_sql(ESTADOS_USUARIO_SIN_MRR)})
           AND {sql_fecha_en_chile("s.fecha_expiracion")} >= :hoy
         ORDER BY u.id
-    """), {"tid": tenant_id, "hoy": hoy_santiago()}).fetchall()
+    """), {"tid": tenant_id, "hoy": hoy_santiago()}).fetchall()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
 
     enviados, fallidos = [], []
     candidatos, deduplicados = len(rows), 0
@@ -405,6 +409,7 @@ def enviar_alertas_sin_creditos(db, tenant_id: int = 1) -> dict:
     from sqlalchemy import text
     from app.services.email_service import send_alerta_sin_creditos, espaciar_envio
 
+    # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     rows = db.execute(text(f"""
         SELECT DISTINCT ON (u.id) u.id, u.nombre, u.correo
         FROM suscripciones s
@@ -418,7 +423,7 @@ def enviar_alertas_sin_creditos(db, tenant_id: int = 1) -> dict:
           AND u.estado NOT IN ({lista_sql(ESTADOS_USUARIO_SIN_MRR)})
           AND {sql_fecha_en_chile("s.fecha_expiracion")} >= :hoy
         ORDER BY u.id
-    """), {"tid": tenant_id, "hoy": hoy_santiago()}).fetchall()
+    """), {"tid": tenant_id, "hoy": hoy_santiago()}).fetchall()  # nosec B608  -- SQL fijo: solo helpers/constantes, valores como parámetros
 
     enviados, fallidos = [], []
     candidatos, deduplicados = len(rows), 0
