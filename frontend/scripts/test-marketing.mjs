@@ -178,7 +178,7 @@ eq(modalProducto.includes('dias_anuncio: parseInt(formData.dias_anuncio || 0)'),
 eq(modalProducto.includes("dias_anuncio: '0'"), true, 'sin días, el formulario arranca en 0');
 eq(modalProducto.includes('errors.dias_anuncio'), true, 'el formulario valida los días');
 eq(bazar.includes('p.dias_anuncio > 0'), true, 'el inventario marca los productos anunciados');
-eq(bazar.includes('Anunciado en el Inicio'), true, '... con un chip legible');
+eq(bazar.includes('Anunciado · {p.dias_anuncio} día'), true, '... con un chip legible');
 
 // ── 11. El carrusel del Inicio (Bloque 4) ───────────────────────────────────
 // El backend ya manda los vigentes ordenados; lo que se prueba acá es el ARMADO
@@ -235,8 +235,19 @@ eq(tipoDe('producto_bazar').detalle, '#6f95ff', 'el acento de la tienda');
 
 // ── 14. El carrusel está montado en el Inicio del alumno ────────────────────
 console.log('== 14. Montaje en el Inicio del alumno (<768px) ==');
+// Geometría con un set FIJO de avisos: el carrusel real recibe sólo los vigentes
+// del backend, así que probar su geometría contra la BD haría que el test
+// dependiera de cuántos avisos haya hoy (con uno solo no hay vecinas ni barras).
+// Este set de 3 tarjetas se pasa como dato y no mira fecha ni base de datos.
+const AVISOS_FIJOS = [
+    aviso(101, 'promocion'),
+    aviso(102, 'colaboracion'),
+    aviso(103, 'evento'),
+];
+const tarjetasFijas = agruparParaCarrusel(AVISOS_FIJOS);
 const carrusel = readFileSync(new URL('../src/components/CarruselMarketing.jsx', import.meta.url), 'utf8');
 const inicio = readFileSync(new URL('../src/pages/alumno/InicioMobile.jsx', import.meta.url), 'utf8');
+eq(tarjetasFijas.length, 3, 'el set fijo arma 3 tarjetas (hay vecinas a los lados)');
 eq(inicio.includes("import CarruselMarketing from '../../components/CarruselMarketing'"), true,
     'el Inicio móvil importa el carrusel');
 eq(inicio.includes('<CarruselMarketing />'), true, '... y lo dibuja');
@@ -244,7 +255,11 @@ eq(carrusel.includes('if (!tarjetas.length) return null;'), true,
     'sin avisos vigentes la sección no se dibuja (nunca un carrusel vacío)');
 eq(carrusel.includes("useAvisosMarketingVigentes()"), true, 'los avisos salen del endpoint de vigentes');
 eq(carrusel.includes('cm-flyer'), true, 'el flyer se abre en un overlay');
-eq(carrusel.includes('cm-punto'), true, 'los puntos de posición');
+eq(tarjetasFijas.length > 1, true, 'con el set fijo (3 tarjetas) hay barras de posición');
+eq(carrusel.includes('cm-barra'), true,
+    'las mini-barras de posición (reemplazan a los puntos)');
+eq(carrusel.includes('tarjetas.length > 1 &&'), true,
+    '... y sólo se dibujan cuando hay más de una tarjeta');
 
 // ── 15. Rediseño "foto primero" (opción B) + tarjeta fija de Invita y Gana ──
 console.log('== 15. Carrusel opción B y la tarjeta de referidos ==');
@@ -261,15 +276,17 @@ eq(/\d\s*%/.test(JSON.stringify(COPY_REFERIDOS)), false,
     'el texto no promete porcentajes (los define Configuración → Referidos)');
 
 const cssCarrusel = readFileSync(new URL('../src/components/carruselMarketing.css', import.meta.url), 'utf8');
-eq(cssCarrusel.includes('flex: 0 0 82%'), true, 'la tarjeta ocupa 82%: se asoma la vecina');
+eq(cssCarrusel.includes('flex: 0 0 85%'), true,
+    'la tarjeta ocupa 85%: se asoma la vecina');
 eq(cssCarrusel.includes('86%'), false, 'ya no queda el 86% del diseño anterior');
-eq(cssCarrusel.includes('scroll-snap-align: center'), true, 'las tarjetas se centran al deslizar');
-eq(cssCarrusel.includes('min-height: 170px'), true, 'la tarjeta es más alta (foto primero)');
+eq(cssCarrusel.includes('scroll-snap-align: start'), true,
+    'las tarjetas se alinean al inicio al deslizar');
+eq(cssCarrusel.includes('min-height: 230px'), true, 'la tarjeta es más alta (foto primero)');
 eq(cssCarrusel.includes('.cm-fondo img'), true, 'la foto del flyer va de fondo');
 eq(cssCarrusel.includes('opacity: .35'), true, '... apagada, para no tapar el texto');
 eq(cssCarrusel.includes('.cm-tarjeta.cm-referidos'), true, 'la tarjeta de referidos tiene su bloque');
-eq(cssCarrusel.includes(':first-child') && cssCarrusel.includes(':last-child'), true,
-    'la primera y la última pueden quedar centradas (margen de borde)');
+eq(cssCarrusel.includes('scroll-padding-inline: 4vw'), true,
+    'la primera y la última quedan con margen de borde');
 
 eq(carrusel.includes("clase: 'referidos'"), true, 'la tarjeta de referidos se agrega SIEMPRE, al final');
 eq(carrusel.includes("[...base, { clase: 'referidos' }]"), true,
