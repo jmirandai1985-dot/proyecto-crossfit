@@ -141,6 +141,23 @@ export const presentesDe = (clase) => {
 };
 
 /**
+ * Presentes que QUEDARON MARCADOS aunque la reserva se cancelara después.
+ *
+ * `/asistencia/historial` manda `asistieron_count`: reservas con `asistio = true` SIN filtrar
+ * por cancelación (la persona hizo check-in por QR y más tarde se canceló su reserva).
+ * `presentesDe` sigue siendo el criterio de los anillos, del calendario y del detalle (sólo
+ * reservas vigentes); este es el de la tarjeta del mes. Si el backend es viejo y no manda el
+ * campo, cae a `presentesDe`: mismo número de antes, sin romper nada.
+ */
+export const presentesMarcadosDe = (clase) => {
+    const n = clase?.asistieron_count;
+    if (n !== null && n !== undefined && Number.isFinite(Number(n))) {
+        return Math.max(Number(n), 0);
+    }
+    return presentesDe(clase);
+};
+
+/**
  * ¿La clase tiene asistencia que medir? Cerrada (`marcada`) o con al menos una
  * marca (`marcados_count > 0`). NO se usa `ausentesDe > 0`: una clase futura CON
  * reservas y SIN marcar daría ausentes = reservas y contaría como si hubiera
@@ -301,6 +318,40 @@ export const totalesDe = (clases) => {
         libres: Math.max(cupos - (reservas - reservasSinTope), 0),
         // Clases con la asistencia ya cerrada (todas sus reservas vigentes marcadas).
         cerradas: lista.filter((c) => c?.marcada).length,
+    };
+};
+
+/**
+ * Totales de la TARJETA "Personas con asistencia marcada en el mes".
+ *
+ * Reusa `totalesDe` para `cupos`, `clases`, `cerradas`, el desglose sin tope, etc. (la MISMA
+ * cuenta que el resto de la pantalla) y sobreescribe sólo los cuatro números de la tarjeta:
+ *   · `presentes` = Σ `presentesMarcadosDe`: incluye a quien quedó con `asistio = true`
+ *     aunque su reserva se cancelara después;
+ *   · `ausentes` = Σ `ausentesDe` sobre TODAS las clases ocurridas: las reservas vigentes
+ *     que no asistieron son no show aunque la clase todavía no esté cerrada ni marcada. La
+ *     cancelación marcada suma una persona (arriba) pero NO le resta un no show a nadie;
+ *   · `pctMarcadas` = presentes ÷ personas marcadas (`null` sólo sin gente: la pantalla
+ *     pone "—").
+ * Los anillos, el calendario, el detalle diario y el Resumen del coach siguen con `totalesDe`.
+ */
+export const totalesTarjetaMes = (clases) => {
+    const lista = clases || [];
+    const base = totalesDe(lista);
+    // `presentes` sobre las clases con asistencia que medir (una clase sin marcas suma 0).
+    const medibles = lista.filter((c) => Boolean(c?.marcada)
+        || presentesDe(c) > 0 || presentesMarcadosDe(c) > 0);
+    const presentes = medibles.reduce((a, c) => a + presentesMarcadosDe(c), 0);
+    // `ausentes` sobre TODAS las clases ocurridas: reservó y no llegó es no show aunque el
+    // coach todavía no haya cerrado la clase.
+    const ausentes = lista.reduce((a, c) => a + ausentesDe(c), 0);
+    const personasMarcadas = presentes + ausentes;
+    return {
+        ...base,
+        presentes,
+        ausentes,
+        personasMarcadas,
+        pctMarcadas: personasMarcadas === 0 ? null : porcentaje(presentes, personasMarcadas),
     };
 };
 

@@ -19,8 +19,9 @@ import { readFileSync } from 'node:fs';
 import { COACH_SUBTABS, MENU_BY_ROL } from '../src/config/menu.js';
 import {
     DIAS_SEMANA, MESES, aniosDisponibles, calendarioDelMes, clasesOcurridas,
-    filtrarPorHorario, horariosDe, mesesDelAnio, porcentaje, presentesDe, resumenDia,
-    resumenPorDiaSemana, tieneAsistenciaMarcada, totalesDe,
+    filtrarPorHorario, horariosDe, mesesDelAnio, porcentaje, presentesDe,
+    presentesMarcadosDe, resumenDia, resumenPorDiaSemana, tieneAsistenciaMarcada,
+    totalesDe, totalesTarjetaMes,
 } from '../src/utils/historialAsistencia.js';
 
 const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
@@ -101,9 +102,12 @@ ok(!/"faltan"/.test(pyHelper), 'al backend no le toca calcular "faltan" (es arit
 
 console.log('== 2c. La respuesta lleva HECHOS y ningún porcentaje ==');
 for (const hecho of ['"cupo_maximo":', '"reservas_count":', '"marcados_count":', '"marcada":',
-    '"alumnos":', '"estado":', '"disciplina_nombre":']) {
+    '"asistieron_count":', '"alumnos":', '"estado":', '"disciplina_nombre":']) {
     ok(pyHist.includes(hecho), `la respuesta del mes trae ${hecho}`);
 }
+// El campo nuevo es SÓLO del mes: la pestaña del día y el helper compartido no cambian.
+ok(!/asistieron_count/.test(pyHoy), '/clases-hoy NO trae `asistieron_count` (los vigentes no cambian)');
+ok(!/asistieron_count/.test(pyHelper), '`_contadores_de_clases` tampoco: marcados_count/reservas_count intactos');
 ok(/"asistio": bool\(r\.asistio\)/.test(pyHist), 'cada alumno viaja con su `asistio` (el ✓/✗ del detalle)');
 for (const prohibido of ['"pct"', '"porcentaje"', '* 100']) {
     ok(!pyHist.includes(prohibido), `${prohibido} no viaja: el % se calcula UNA vez, en el front`);
@@ -276,8 +280,8 @@ eq(resumenDia([CLASE, PASADA, FUTURA], '2026-10-26').fichas.length, 1,
     'y el detalle del día futuro también (no se vació el mes)');
 ok(/const ocurridas = useMemo\(\(\) => clasesOcurridas\(visibles, hoy\)/.test(PANTALLA),
     'la pantalla aplica el corte de "ya ocurridas" sobre el recorte de filtros');
-ok(/const totalMes = useMemo\(\(\) => totalesDe\(ocurridas\)/.test(PANTALLA),
-    'los totales del mes salen de las clases ocurridas');
+ok(/const totalMes = useMemo\(\(\) => totalesTarjetaMes\(ocurridas\)/.test(PANTALLA),
+    'los totales de la tarjeta del mes salen de las clases ocurridas (incluye los presentes marcados)');
 ok(/const semana = useMemo\(\(\) => resumenPorDiaSemana\(ocurridas\)/.test(PANTALLA),
     'los anillos también');
 ok(/const semanas = useMemo\(\s*\(\) => calendarioDelMes\(anio, mes, visibles, hoy\)/.test(PANTALLA),
@@ -446,6 +450,63 @@ ok(/en \{totalMes\.clases\} clase/.test(tarjetaMes),
     'la cantidad de clases queda como texto secundario ("en N clases")');
 ok(!/Totales del mes \(clases ya ocurridas\)/.test(PANTALLA),
     'el encabezado de la tarjeta ya no dice "clases ya ocurridas"');
+
+console.log('== 10b. La reserva que asistió y DESPUÉS se canceló cuenta como presente ==');
+// 5 reservas: 3 vigentes que asistieron, 1 vigente que no llegó y 1 que hizo check-in y se
+// canceló después (`asistio = true`). `marcados_count`/`reservas_count` filtran `no_cancelada`,
+// así que esa persona desaparecía: el backend del mes manda `asistieron_count` para verla.
+const CON_CANCELADA = {
+    id: 21, fecha: '2026-10-07', hora_inicio: '18:00', hora_fin: '19:00',
+    disciplina_nombre: 'WOD', coach: 'Seba', cupo_maximo: 10, reservas_count: 4,
+    marcados_count: 3, asistieron_count: 4, marcada: true, estado: 'realizada',
+};
+eq(presentesDe(CON_CANCELADA), 3,
+    'presentesDe (anillos, calendario, detalle) sigue mirando SÓLO reservas vigentes');
+const antes = totalesDe([CON_CANCELADA]);
+eq(antes.personasMarcadas, 4, 'totalesDe tampoco cambia: 3 asistieron + 1 no show = 4 personas');
+eq(antes.pctMarcadas, 75, '... y su % sigue siendo 3 de 4 = 75 %');
+
+eq(presentesMarcadosDe(CON_CANCELADA), 4,
+    'presentesMarcadosDe usa `asistieron_count` (cuenta al que canceló después de asistir)');
+const tarjetaCancelada = totalesTarjetaMes([CON_CANCELADA]);
+eq(tarjetaCancelada.presentes, 4, 'la tarjeta del mes: 4 asistieron');
+eq(tarjetaCancelada.ausentes, 1, '... y el no show NO se resta: sigue 1');
+eq(tarjetaCancelada.personasMarcadas, 5, '... 5 personas con asistencia marcada');
+eq(tarjetaCancelada.pctMarcadas, 80, '... 4 de 5 = 80 %');
+eq(tarjetaCancelada.pct, antes.pct, 'el % contra CUPOS (anillos) no se toca');
+eq(tarjetaCancelada.cupos, antes.cupos, 'los cupos ofrecidos salen de la misma cuenta');
+eq(tarjetaCancelada.clases, 1, 'la clase se sigue contando una vez');
+
+// Compatibilidad con un backend viejo (sin `asistieron_count`): mismo número de antes.
+const sinCampoNuevo = { ...CON_CANCELADA, asistieron_count: undefined };
+eq(presentesMarcadosDe(sinCampoNuevo), 3, 'sin el campo nuevo cae a presentesDe');
+eq(totalesTarjetaMes([sinCampoNuevo]).pctMarcadas, 75, '... y la tarjeta no inventa presentes');
+eq(totalesTarjetaMes([]).pctMarcadas, null, 'sin clases la tarjeta muestra "—", no 0 %');
+
+// Si sus ÚNICAS reservas se cancelaron después de marcar, la clase no desaparece del mes.
+const SOLO_CANCELADA_MARCADA = {
+    id: 22, fecha: '2026-10-08', hora_inicio: '08:00', hora_fin: '09:00',
+    disciplina_nombre: 'WOD', cupo_maximo: 10, reservas_count: 0,
+    marcados_count: 0, asistieron_count: 1, marcada: false, estado: 'realizada',
+};
+eq(totalesDe([SOLO_CANCELADA_MARCADA]).personasMarcadas, 0,
+    'totalesDe la deja fuera (no tiene reservas vigentes ni cierre)');
+eq(totalesTarjetaMes([SOLO_CANCELADA_MARCADA]).presentes, 1,
+    'la tarjeta sí cuenta a la persona que quedó marcada');
+
+// Clase PASADA, sin cerrar y sin marcas: sus reservas vigentes igual son no show en la
+// tarjeta (Σ de `ausentesDe` sobre TODAS las clases ocurridas, no sólo las medibles).
+const SIN_MARCAR = {
+    id: 23, fecha: '2026-10-09', hora_inicio: '07:00', hora_fin: '08:00',
+    disciplina_nombre: 'WOD', cupo_maximo: 12, reservas_count: 3,
+    marcados_count: 0, asistieron_count: 0, marcada: false, estado: 'realizada',
+};
+const tarjetaSinMarcar = totalesTarjetaMes([SIN_MARCAR]);
+eq(tarjetaSinMarcar.ausentes, 3,
+    'una clase pasada sin cerrar y sin marcas aporta sus 3 no show (no 0)');
+eq(tarjetaSinMarcar.presentes, 0, '... y ningún presente');
+eq(tarjetaSinMarcar.personasMarcadas, 3, '... 3 personas con asistencia marcada (las 3 no show)');
+eq(tarjetaSinMarcar.pctMarcadas, 0, '0 de 3 = 0 %, no "—"');
 
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);

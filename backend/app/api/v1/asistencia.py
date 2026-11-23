@@ -232,6 +232,11 @@ def historial_mes(
     franja de un día) NO vuelve a pegarle a la API. Cada clase viaja con su lista de alumnos
     (`asistio` incluido), que es lo único que el detalle diario necesita.
 
+    Además de los contadores VIGENTES (`reservas_count` / `marcados_count`), cada clase trae
+    `asistieron_count`: quién quedó con `asistio = true` aunque su reserva se cancelara
+    después. Lo usa sólo la tarjeta "Personas con asistencia marcada en el mes"; las demás
+    pantallas siguen con los contadores vigentes, sin cambios.
+
     Alcance por rol (mismo criterio que `/clases-hoy`, para que las dos pantallas del coach
     no puedan mostrar cosas distintas):
       · el COACH ve las clases del mes que son SUYAS —las TRES vías de
@@ -271,6 +276,19 @@ def historial_mes(
     ids = [c.id for c in clases]
     # Mismo helper que `/clases-hoy`: reservas vigentes, ya presentes y asistencia cerrada.
     reservas_count, marcados_count, marcadas = _contadores_de_clases(db, ids)
+
+    # El HECHO de la tarjeta "Personas con asistencia marcada en el mes": quién quedó con
+    # `asistio = True` aunque su reserva se haya CANCELADO después (check-in por QR y luego
+    # cancelación). `marcados_count` no sirve para eso —filtra `no_cancelada`—, así que esa
+    # persona desaparecía del mes. Acá NO se filtra por estado y el contador es un campo
+    # NUEVO de ESTE endpoint: `/clases-hoy`, las franjas y el Resumen del coach siguen leyendo
+    # `marcados_count` exactamente igual. Una sola consulta agregada para todo el mes.
+    asistieron_count = {}
+    if ids:
+        asistieron_count = dict(db.query(Reserva.clase_id, func.count(Reserva.id)).filter(
+            Reserva.clase_id.in_(ids),
+            Reserva.asistio.is_(True),
+        ).group_by(Reserva.clase_id).all())
 
     # Las reservas del mes (sólo las vigentes) con el nombre del alumno: UNA consulta para
     # todas las clases y UNA para los nombres, en vez de una por clase al abrir un día.
@@ -333,6 +351,9 @@ def historial_mes(
                 "cupo_original": c.cupo_original,
                 "reservas_count": reservas_count.get(c.id, 0),
                 "marcados_count": marcados_count.get(c.id, 0),
+                # Presentes que quedaron marcados aunque la reserva se cancelara después (el
+                # hecho de la tarjeta del mes; ver el comentario de arriba y el docstring).
+                "asistieron_count": asistieron_count.get(c.id, 0),
                 "marcada": c.id in marcadas,
                 "estado": estado_clase(c.fecha, c.hora_inicio, c.hora_fin, c.cancelada, ahora_dt),
                 "alumnos": alumnos_por_clase.get(c.id, []),

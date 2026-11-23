@@ -7,7 +7,7 @@ import { useHistorialAsistencia } from '../hooks/queries';
 import {
     DIAS_SEMANA, aniosDisponibles, calendarioDelMes, clasesOcurridas, fechaSola,
     filtrarPorHorario, horariosDe, mesesDelAnio, nombreMes, resumenDia,
-    resumenPorDiaSemana, totalesDe,
+    resumenPorDiaSemana, totalesTarjetaMes,
 } from '../utils/historialAsistencia';
 // El criterio de disciplina es el MISMO del resto del panel (`disciplina_nombre` que ya
 // devuelve el backend): no hay catálogo propio ni una segunda forma de comparar.
@@ -215,7 +215,7 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
     // Anillos y totales: sólo clases ya ocurridas (fecha <= hoy). El calendario y el detalle
     // siguen usando `visibles` completo: el mes se muestra entero, incluso lo que está por venir.
     const ocurridas = useMemo(() => clasesOcurridas(visibles, hoy), [visibles, hoy]);
-    const totalMes = useMemo(() => totalesDe(ocurridas), [ocurridas]);
+    const totalMes = useMemo(() => totalesTarjetaMes(ocurridas), [ocurridas]);
     const semana = useMemo(() => resumenPorDiaSemana(ocurridas), [ocurridas]);
     const semanas = useMemo(
         () => calendarioDelMes(anio, mes, visibles, hoy), [anio, mes, visibles, hoy],
