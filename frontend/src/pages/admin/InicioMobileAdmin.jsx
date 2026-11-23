@@ -217,7 +217,7 @@ const Kpi = ({ clase, icono, label, valor, sub, error, cargando, dinero, pulso, 
             <span>
                 <span className="kpi-val">
                     <b className={`num${dinero ? ' money' : ''}`}>
-                        {error ? 's/d' : cargando ? '·' : dinero ? precioCLP(valor) : (valor ?? '—')}
+                        {error ? 's/d' : cargando ? '·' : dinero && valor != null ? precioCLP(valor) : (valor ?? 'n/d')}
                     </b>
                 </span>
                 {error
@@ -238,16 +238,15 @@ const Kpi = ({ clase, icono, label, valor, sub, error, cargando, dinero, pulso, 
  * Bloques: KPIs (A), accesos rápidos (B), "En revisión" (C), "Asistencia de hoy" (D) y
  * buscador de alumnos (E).
  */
-const InicioMobileAdmin = () => {
+const InicioMobileAdmin = ({ resumenAdmin }) => {
     const navigate = useNavigate();
     const { tenant_id } = useAuth();
+    const [stats, setStats] = useState(null);
 
     // ── KPIs: un dato por tarjeta y error POR BLOQUE ─────────────────────────
     // Si un endpoint falla, ESA tarjeta dice "s/d" con el motivo y las demás siguen
     // mostrando su número real (mismo criterio que el panel ≥768px).
-    const [kpis, setKpis] = useState({
-        activos: null, nuevosMes: null, vencen: null, caja: null, pagos: null,
-    });
+    const [, setKpis] = useState(null);
     const [errores, setErrores] = useState({ activos: '', vencen: '', vouchers: '', caja: '' });
     const [cargando, setCargando] = useState(true);
 
@@ -307,9 +306,11 @@ const InicioMobileAdmin = () => {
         const nuevos = { activos: null, nuevosMes: null, vencen: null, caja: null, pagos: null };
 
         if (rReportes.status === 'fulfilled') {
+            setStats(rReportes.value.data || null);
             nuevos.activos = rReportes.value.data?.alumnosActivos ?? null;
             nuevos.nuevosMes = rReportes.value.data?.nuevosAlumnosMes ?? null;
         } else {
+            setStats(null);
             errs.activos = motivo(rReportes);
         }
 
@@ -494,6 +495,7 @@ const InicioMobileAdmin = () => {
     const resumenes = hoyConDato
         ? { ...resumenesSemana, [hoy]: resumenFranja(clases) }
         : resumenesSemana;
+    const clasesRealizadasHoy = clases.filter((c) => c?.estado === 'realizada').length;
 
     // Clases del día elegido: si es HOY, la franja seleccionada (como siempre); si es
     // otro día, el día completo con la lista pelada (sin franjas, sin botón Marcar).
@@ -821,53 +823,35 @@ const InicioMobileAdmin = () => {
                     {fechaCorta()} · resumen del día
                 </p>
 
-                {/* ── A. KPIs (A1: orden nuevo) ──────────────────────────────
-                    1) Vouchers por aprobar -> abre la pantalla unificada de
-                       pendientes en la pestaña "Solicitudes" (`?tab=solicitudes`),
-                       no la hoja rápida.
-                    2) Vencen en 5 días -> Fidelización (sin cambios).
-                    3) Alumnos nuevos y en prueba -> su pantalla (sin cambios).
-                    4) Ingresos de hoy -> despliega/colapsa "Pagos del día" INLINE
-                       (accordion). NO navega fuera del dashboard ni va a Reportes.
-                    "Alumnos activos" dejó de ser tarjeta: es el subtítulo que
-                    encabeza la asistencia (ver bloque D). ───────────────────── */}
-                <section className="kpis" aria-label="Resumen del día">
+                {/* ── A. Resumen de HOY: 4 tarjetas ─────────────────────────
+                    Clases, asistentes (snapshot diario), ingresos y pagos.
+                    Los accesos rápidos y la semana vienen después. ────────── */}
+                <section className="kpis" aria-label="Resumen de hoy">
                     <Kpi
-                        clase={`k-vouch${hayVouchers ? ' alive' : ''}`}
-                        icono="voucher" label="Vouchers por aprobar"
-                        valor={errores.vouchers ? null : vouchers.length}
-                        error={errores.vouchers} cargando={cargando}
-                        sub={hayVouchers ? <em>Toca para revisar</em> : 'Todo al día'}
-                        pulso={hayVouchers}
-                        chevron onClick={() => navigate(rutaPendientes('solicitudes'))}
+                        clase="k-activos" icono="clock" label="Clases de hoy"
+                        valor={clasesCargando ? null : clases.length}
+                        error={clasesError} cargando={clasesCargando}
+                        sub={<>{clasesRealizadasHoy} realizadas · Hoy</>}
+                        chevron onClick={() => document.getElementById('ub-asistencia')?.scrollIntoView({ behavior: 'smooth' })}
                     />
                     <Kpi
-                        clase="k-venc" icono="clock" label="Vencen en 5 días"
-                        valor={kpis.vencen} error={errores.vencen} cargando={cargando}
-                        sub="membresías por vencer"
-                        onClick={() => navigate('/admin/fidelizacion?filtro=plan_urgente')}
+                        clase="k-venc" icono="users" label="Asistentes de hoy"
+                        valor={resumenAdmin.asistentesHoy}
+                        error={resumenAdmin.errores.diario} cargando={resumenAdmin.cargando}
+                        sub="Hoy · snapshot diario"
                     />
-                    {/* Tercera tarjeta (ancho completo): abre la pantalla con los dos
-                        listados. El número es el de los que están EN PRUEBA; el pie
-                        reusa el "+N nuevos este mes" que ya trae /reportes/. */}
                     <Kpi
-                        clase="k-prueba wide" icono="users" label="Alumnos nuevos y en prueba"
-                        valor={prueba.errorPrueba ? null : prueba.enPrueba.length}
-                        error={prueba.errorPrueba} cargando={prueba.cargando}
-                        sub={kpis.nuevosMes != null
-                            ? <><em>+{kpis.nuevosMes}</em> nuevos este mes</>
-                            : 'toca para ver el detalle'}
-                        chevron onClick={abrirTarjeta} testid="kpi-prueba"
+                        clase="k-caja" icono="caja" label="Ingresos de hoy" dinero
+                        valor={resumenAdmin.caja?.ingresos ?? null}
+                        error={resumenAdmin.errores.caja} cargando={resumenAdmin.cargando}
+                        sub="Hoy · caja del día"
+                        chevron onClick={() => setMostrarPagos((v) => !v)}
                     />
-                    {/* Cuarta tarjeta (ancho completo): la caja del día. Tocar
-                        despliega/colapsa el detalle INLINE (la sección de abajo);
-                        NO navega fuera del dashboard. */}
                     <Kpi
-                        clase="k-caja wide" icono="caja" label="Ingresos de hoy" dinero
-                        valor={kpis.caja} error={errores.caja} cargando={cargando}
-                        sub={kpis.pagos != null
-                            ? <><em>{kpis.pagos} {kpis.pagos === 1 ? 'pago' : 'pagos'}</em> registrados</>
-                            : 'caja del día'}
+                        clase="k-vouch" icono="voucher" label="Pagos de hoy"
+                        valor={resumenAdmin.caja?.pagos ?? null}
+                        error={resumenAdmin.errores.caja} cargando={resumenAdmin.cargando}
+                        sub="Hoy · pagos registrados"
                         chevron onClick={() => setMostrarPagos((v) => !v)}
                     />
                 </section>
@@ -921,6 +905,143 @@ const InicioMobileAdmin = () => {
                 </nav>
 
                 {/* ── C. "En revisión": vouchers por aprobar + pedidos del Bazar nuevos ── */}
+                {/* ── Asistencia de la semana (resumen) ───────────────────── */}
+                <section className="card" aria-labelledby="ub-semana-resumen" data-testid="admin-semana-resumen">
+                    <div className="card-head">
+                        <h2 id="ub-semana-resumen">Asistencia de la semana</h2>
+                        <span className="live">L–D · semana en curso</span>
+                    </div>
+                    <div className="week" role="group" aria-label="Resumen de la semana">
+                        {diasSemana.map((d) => {
+                            const r = resumenes[d.fechaStr] || { clases: 0, reservas: 0, ocupacion: 0 };
+                            const elegido = d.fechaStr === diaAsistencia;
+                            return (
+                                <button key={d.fechaStr} type="button"
+                                    className={`day${elegido ? ' sel' : ''}${d.fechaStr === hoy ? ' today' : ''}`}
+                                    aria-pressed={elegido}
+                                    aria-label={`${d.nombre} ${d.diaNum}: ${r.clases} ${r.clases === 1 ? 'clase' : 'clases'}, ${r.reservas} reservas, ${r.ocupacion === null ? 'acceso libre sin cupo' : `${r.ocupacion}% de ocupación`}`}
+                                    onClick={() => setDiaPedido(d.fechaStr === hoy ? null : d.fechaStr)}>
+                                    <span className="dw">{d.letra}<b>{d.diaNum}</b></span>
+                                    <b className="dc num">{r.reservas}</b>
+                                    <span className="dp">{r.ocupacion === null ? 'libre' : `${r.ocupacion}%`}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <p className="note">Reservas y ocupación por día. El detalle del día elegido está abajo.</p>
+                    {semanaError && <p className="empty-line" role="alert">⚠️ {semanaError}</p>}
+                </section>
+
+                {/* ── Negocio del mes ──────────────────────────────────────── */}
+                <section className="card" aria-labelledby="ub-negocio" data-testid="admin-negocio">
+                    <div className="card-head">
+                        <h2 id="ub-negocio">Negocio del mes</h2>
+                        <span className="badge">parcial</span>
+                    </div>
+                    <div className="kpis">
+                        <Kpi
+                            clase="k-caja" icono="caja" label="Ingreso del mes" dinero
+                            valor={stats?.ingresoMensual ?? null}
+                            error={errores.activos} cargando={cargando}
+                            sub="Mes en curso · parcial · comparación: n/d"
+                        />
+                        <Kpi
+                            clase="k-activos" icono="chart" label="MRR" dinero
+                            valor={stats?.mrr ?? null}
+                            error={errores.activos} cargando={cargando}
+                            sub="Hoy · precio de lista"
+                        />
+                        <Kpi
+                            clase="k-venc" icono="cart" label="Ventas Bazar" dinero
+                            valor={stats?.ventasBazar ?? null}
+                            error={errores.activos} cargando={cargando}
+                            sub="Mes en curso · parcial"
+                        />
+                        <Kpi
+                            clase="k-vouch" icono="users" label="Membresías"
+                            valor={stats?.totalSuscripcionesMes ?? null}
+                            error={errores.activos} cargando={cargando}
+                            sub="Mes en curso · parcial"
+                        />
+                    </div>
+                </section>
+
+                {/* ── Alumnos ──────────────────────────────────────────────── */}
+                <section className="card" aria-labelledby="ub-alumnos" data-testid="admin-alumnos-mock">
+                    <div className="card-head">
+                        <h2 id="ub-alumnos">Alumnos</h2>
+                        <span className="live">Hoy + mes en curso</span>
+                    </div>
+                    <div className="kpis">
+                        <Kpi
+                            clase="k-activos" icono="users" label="Alumnos activos"
+                            valor={resumenAdmin.alumnosActivos}
+                            error={resumenAdmin.errores.diario} cargando={resumenAdmin.cargando}
+                            sub="Hoy · snapshot diario"
+                        />
+                        <Kpi
+                            clase="k-venc" icono="clock" label="Alumnos en riesgo"
+                            valor={resumenAdmin.alumnosRiesgo}
+                            error={resumenAdmin.errores.churn} cargando={resumenAdmin.cargando}
+                            sub={resumenAdmin.riesgoPendiente
+                                ? 'pendiente de reentrenar'
+                                : 'Hoy · crítico + alto'}
+                        />
+                        <Kpi
+                            clase="k-prueba" icono="users" label="Nuevos del mes"
+                            valor={stats?.nuevosAlumnosMes ?? null}
+                            error={errores.activos} cargando={cargando}
+                            sub="Mes en curso · parcial"
+                            chevron onClick={abrirTarjeta}
+                        />
+                    </div>
+                </section>
+
+                {/* ── Conversión ───────────────────────────────────────────── */}
+                <section className="card" aria-labelledby="ub-conversion" data-testid="admin-conversion-mock">
+                    <div className="card-head">
+                        <h2 id="ub-conversion">Conversión</h2>
+                        <span className="live">{resumenAdmin.periodoTexto || 'sin mes cerrado'}</span>
+                    </div>
+                    <div className="kpis">
+                        <Kpi
+                            clase="k-prueba wide" icono="chart" label="Conversión prueba→plan"
+                            valor={resumenAdmin.conversionRate === null
+                                ? null
+                                : `${resumenAdmin.conversionRate}%`}
+                            error={resumenAdmin.errores.mensual} cargando={resumenAdmin.cargando}
+                            sub={`${resumenAdmin.conversionHint}${resumenAdmin.periodoTexto
+                                ? ` · ${resumenAdmin.periodoTexto}` : ''}`}
+                        />
+                    </div>
+                </section>
+
+                {/* ── Ocupación real del mes cerrado ────────────────────────── */}
+                <section className="card" aria-labelledby="ub-ocupacion" data-testid="admin-ocupacion-mock">
+                    <div className="card-head">
+                        <h2 id="ub-ocupacion">Ocupación</h2>
+                        <span className="live">{resumenAdmin.periodoTexto || 'sin mes cerrado'}</span>
+                    </div>
+                    <div className="kpis">
+                        <Kpi
+                            clase="k-caja" icono="chart" label="Ocupación"
+                            valor={resumenAdmin.ocupacionReal === null
+                                ? null
+                                : `${resumenAdmin.ocupacionReal}%`}
+                            error={resumenAdmin.errores.mensual} cargando={resumenAdmin.cargando}
+                            sub={`Mes cerrado${resumenAdmin.periodoTexto ? ` · ${resumenAdmin.periodoTexto}` : ''} · asistencia real / cupo`}
+                        />
+                        <Kpi
+                            clase="k-activos" icono="check" label="Asistencia real"
+                            valor={resumenAdmin.asistenciaReal === null
+                                ? null
+                                : `${resumenAdmin.asistenciaReal}%`}
+                            error={resumenAdmin.errores.mensual} cargando={resumenAdmin.cargando}
+                            sub={`Mes cerrado${resumenAdmin.periodoTexto ? ` · ${resumenAdmin.periodoTexto}` : ''} · reservas confirmadas`}
+                        />
+                    </div>
+                </section>
+
                 <section className="card" aria-labelledby="ub-revision" data-testid="admin-revision">
                     <div className="card-head">
                         <h2 id="ub-revision">
@@ -1020,9 +1141,8 @@ const InicioMobileAdmin = () => {
 
 
                 {/* ── D. "Asistencia": HOY por franja + la semana en curso ─────
-                    A1: "Alumnos activos" dejó de ser tarjeta y es el SUBTÍTULO de
-                        esta tarjeta (el número y el "+N nuevos este mes" siguen
-                        saliendo de /reportes, como antes: sólo cambió de lugar).
+                    El subtítulo de alumnos activos usa el snapshot diario del BI
+                    (misma fuente que la tarjeta "Alumnos activos" del bloque A).
                     A3: rejilla de los 7 días (L-D) con el total de reservas y el
                         % de ocupación de cada uno. El día elegido manda en la
                         lista de abajo; HOY conserva las franjas y los botones
@@ -1049,29 +1169,24 @@ const InicioMobileAdmin = () => {
                         visible arranca con un número.
                         Si /reportes falló se dice "s/d" con el motivo —nunca un 0 falso—. */}
                     <p className="att-sub" data-testid="admin-activos">
-                        {errores.activos ? (
+                        {resumenAdmin.errores.diario ? (
                             <>
-                                <b className="num">s/d</b> alumnos activos
-                                {/* A5.3: el motivo del error es TEXTO visible —antes sólo
-                                    aparecía en el hover del ⚠️, imposible en táctil— y se
-                                    anuncia, como los demás avisos de la pantalla. */}
-                                <span className="att-err" role="alert">⚠️ {errores.activos}</span>
+                                <b className="num">n/d</b> alumnos activos
+                                <span className="att-err" role="alert">⚠️ {resumenAdmin.errores.diario}</span>
                             </>
                         ) : (
-                            <>
-                                <button type="button" className="att-link"
-                                    onClick={() => navigate('/admin/alumnos?estado=activo')}
-                                    aria-label="Ver el padrón de alumnos activos">
-                                    <b className="num">{cargando ? '…' : kpis.activos}</b> alumnos activos
-                                </button>
-                                {!cargando && kpis.nuevosMes != null && (
-                                    <button type="button" className="att-link"
-                                        onClick={() => navigate('/admin/alumnos-prueba')}
-                                        aria-label="Ver los alumnos nuevos de este mes">
-                                        · <em>+{kpis.nuevosMes}</em> nuevos este mes
-                                    </button>
-                                )}
-                            </>
+                            <button type="button" className="att-link"
+                                onClick={() => navigate('/admin/alumnos?estado=activo')}
+                                aria-label="Ver el padrón de alumnos activos">
+                                <b className="num">{resumenAdmin.cargando ? '…' : (resumenAdmin.alumnosActivos ?? 'n/d')}</b> alumnos activos
+                            </button>
+                        )}
+                        {!resumenAdmin.cargando && stats?.nuevosAlumnosMes != null && (
+                            <button type="button" className="att-link"
+                                onClick={() => navigate('/admin/alumnos-prueba')}
+                                aria-label="Ver los alumnos nuevos de este mes">
+                                · <em>+{stats.nuevosAlumnosMes}</em> nuevos este mes
+                            </button>
                         )}
                     </p>
 

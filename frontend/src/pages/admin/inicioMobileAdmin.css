@@ -185,6 +185,7 @@
    Vouchers por aprobar · Vencen en 5 días · Alumnos nuevos y en prueba (ancha) ·
    Ingresos de hoy (ancha). */
 .ub-admin .k-venc { --tint: var(--ub-amber); }
+.ub-admin .k-activos { --tint: var(--ub-teal); }
 .ub-admin .k-vouch { --tint: var(--ub-blue); }
 .ub-admin .k-caja { --tint: var(--ub-violet); }
 

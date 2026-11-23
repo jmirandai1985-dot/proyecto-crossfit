@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+    Activity, Banknote, CalendarDays, DollarSign, ShoppingCart,
+    Target, TrendingUp, TriangleAlert, UserPlus, Users,
+} from 'lucide-react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 // Dashboard MÓVIL (<768px) del admin: réplica del mockup admin-mobile-mockup.html
@@ -19,6 +23,8 @@ import AdminTarjetaAlumnosPrueba from '../../components/AdminTarjetaAlumnosPrueb
 import PagosDelDia from '../../components/pagos/PagosDelDia';
 // Aviso REUTILIZABLE (secciones + Reintentar) para las tarjetas que pueden fallar.
 import AvisoCarga from '../../components/AvisoCarga';
+import { KpiCard } from '../../components/kpis/KpiCard';
+import { useResumenAdmin } from '../../components/dashboard/useResumenAdmin';
 // Vista previa/descarga del voucher: la lógica del blob autenticado (y su
 // descarga forzada) vive en el hook compartido, no en cada pantalla.
 import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
@@ -94,6 +100,7 @@ const AdminDashboard = () => {
     const solicitudes = solicitudesQ.data || [];
     const countPendientes = registrosQ.data || 0;
     const stats = statsQ.data ?? null;
+    const resumenAdmin = useResumenAdmin();
     const registrosError = registrosQ.error
         ? mensajeError(registrosQ.error, 'No se pudo cargar el dato') : '';
     const solicitudesError = solicitudesQ.error
@@ -108,13 +115,9 @@ const AdminDashboard = () => {
     // pública /static/uploads/... (que se sirve sin autenticación por StaticFiles).
     const [rechazoModal, setRechazoModal] = useState({ open: false, solicitud_id: null, motivo: '' });
     // Fidelización state
-    const [alumnosRiesgo, setAlumnosRiesgo] = useState([]);
     const [vencimientos, setVencimientos] = useState([]);
     const [fidelizacionLoading, setFidelizacionLoading] = useState(true);
-    // Error POR TARJETA de fidelización: antes un Promise.all + catch mudo dejaba
-    // ambas listas vacías y las tarjetas mostraban "0" como si no hubiera nadie en
-    // riesgo (dato falso en un panel de churn).
-    const [fidelizacionError, setFidelizacionError] = useState({ riesgo: '', vencimientos: '' });
+    const [fidelizacionError, setFidelizacionError] = useState({ vencimientos: '' });
     // ── "Clases de hoy" (tarjeta + sección) ────────────────────────────────────
     // Reutiliza GET /asistencia/clases-hoy (ya trae coach, estado y reservas) y filtra
     // en el front las disciplinas que EXIGEN coach (`requiere_coach`), sin hardcodear
@@ -189,6 +192,7 @@ const AdminDashboard = () => {
         statsQ.refetch();
         clasesHoyQ.refetch();
         nuevosMesQ.refetch();
+        resumenAdmin.recargar();
         cargarFidelizacion();
         cargarBi();
     };
@@ -233,37 +237,20 @@ const AdminDashboard = () => {
     };
 
     const cargarFidelizacion = async () => {
-        // Promise.allSettled (antes Promise.all + catch mudo): si un endpoint falla,
-        // el otro se sigue mostrando y la tarjeta afectada indica el error en vez de
-        // mostrar "0" como si todo estuviera bien. Mismo patrón que las colas (React Query).
+        // El riesgo ahora sale del snapshot de churn (`useResumenAdmin`); acá
+        // sólo queda la tarjeta de vencimientos. Sin catch mudo: si falla, se
+        // muestra el motivo y no un 0 falso.
         setFidelizacionLoading(true);
-        const [riesgoRes, vencRes] = await Promise.allSettled([
-            api.get(`/api/v1/fidelizacion/tenant/${tenant_id}/en-riesgo`),
-            api.get(`/api/v1/fidelizacion/tenant/${tenant_id}/vencimientos`)
-        ]);
-        if (riesgoRes.status === 'fulfilled') {
-            setAlumnosRiesgo(riesgoRes.value.data?.alumnos_alerta || []);
-            setFidelizacionError(prev => ({ ...prev, riesgo: '' }));
-        } else {
-            console.error('Error cargando alumnos en riesgo', riesgoRes.reason);
-            setAlumnosRiesgo([]);
-            setFidelizacionError(prev => ({
-                ...prev,
-                riesgo: riesgoRes.reason?.response?.data?.detail
-                    || riesgoRes.reason?.message
-                    || 'No se pudo cargar el dato',
-            }));
-        }
-        if (vencRes.status === 'fulfilled') {
-            setVencimientos(vencRes.value.data?.alumnos || []);
-            setFidelizacionError(prev => ({ ...prev, vencimientos: '' }));
-        } else {
-            console.error('Error cargando vencimientos', vencRes.reason);
+        try {
+            const res = await api.get(`/api/v1/fidelizacion/tenant/${tenant_id}/vencimientos`);
+            setVencimientos(res.data?.alumnos || []);
+            setFidelizacionError((prev) => ({ ...prev, vencimientos: '' }));
+        } catch (error) {
             setVencimientos([]);
-            setFidelizacionError(prev => ({
+            setFidelizacionError((prev) => ({
                 ...prev,
-                vencimientos: vencRes.reason?.response?.data?.detail
-                    || vencRes.reason?.message
+                vencimientos: error?.response?.data?.detail
+                    || error?.message
                     || 'No se pudo cargar el dato',
             }));
         }
@@ -365,13 +352,6 @@ const AdminDashboard = () => {
     const totalNuevosMes = nuevosMesQ.data?.total ?? nuevosMes.length;
     const convertidosNuevosMes = nuevosMes.filter((a) => a.convertido).length;
 
-    // "Alumnos en Riesgo": la tarjeta dice "> 7 días", así que el número usa
-    // EXACTAMENTE esa condición (la tabla de Fidelización la recibe por
-    // `?filtro=sin_actividad`).
-    const alumnosRiesgoSinActividad = alumnosRiesgo.filter(
-        (a) => Number(a.dias_ausente) > 7,
-    );
-
     // Resumen de "Clases de hoy" (tarjeta + encabezado de la sección):
     // X de Y realizadas + ocupación del día (reservas sobre cupos ofrecidos).
     const clasesHoyRealizadas = clasesHoy.filter(c => c.estado === 'realizada').length;
@@ -391,7 +371,7 @@ const AdminDashboard = () => {
                 {/* <768px: el dashboard móvil ya tiene su propio estado de carga
                     (nunca un spinner a pantalla completa que tape los KPIs). */}
                 <div className="md:hidden">
-                    <InicioMobileAdmin />
+                    <InicioMobileAdmin resumenAdmin={resumenAdmin} />
                 </div>
                 <div className="hidden md:flex items-center justify-center h-96">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900 mx-auto mb-4" />
@@ -406,7 +386,7 @@ const AdminDashboard = () => {
             {/* Vista MÓVIL (<768px): resume el día y enlaza a las pantallas que ya
                 existen. No se monta en ≥768px (regla de oro: el escritorio no cambia). */}
             <div className="md:hidden">
-                <InicioMobileAdmin />
+                <InicioMobileAdmin resumenAdmin={resumenAdmin} />
             </div>
 
             {/* Vista de ESCRITORIO (≥768px): el dashboard de siempre, sin cambios. */}
@@ -427,10 +407,187 @@ const AdminDashboard = () => {
                     </div>
                 )}
 
+                {/* ── BLOQUES DEL MOCKUP (escritorio) ─────────────────────────
+                    Hoy → Negocio del mes → Alumnos → Conversión → Ocupación.
+                    Cada bloque dice su período. Los detalles operativos siguen
+                    debajo como profundización. ─────────────────────────────── */}
+
+                <section aria-labelledby="dashboard-hoy" className="space-y-3">
+                    <div>
+                        <h2 id="dashboard-hoy" className="text-lg font-bold text-zinc-100">Hoy</h2>
+                        <p className="text-xs text-zinc-500">Operación y caja del día en curso</p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                        <KpiCard
+                            label="Clases de hoy"
+                            value={clasesHoyLoading || clasesHoyError ? null : `${clasesHoyRealizadas}/${clasesHoyTotal}`}
+                            icon={CalendarDays}
+                            color="border-indigo-500"
+                            hint={clasesHoyError ? 'Hoy · no se pudieron cargar' : 'Hoy · realizadas / total'}
+                        />
+                        <KpiCard
+                            label="Asistentes de hoy"
+                            value={resumenAdmin.asistentesHoy}
+                            icon={Users}
+                            color="border-purple-500"
+                            hint="Hoy · último snapshot diario"
+                        />
+                        <KpiCard
+                            label="Ingresos de hoy"
+                            value={resumenAdmin.caja?.ingresos ?? null}
+                            unit="CLP"
+                            icon={DollarSign}
+                            color="border-emerald-500"
+                            hint="Hoy · caja del día"
+                        />
+                        <KpiCard
+                            label="Pagos de hoy"
+                            value={resumenAdmin.caja?.pagos ?? null}
+                            icon={Banknote}
+                            color="border-teal-500"
+                            hint="Hoy · pagos registrados"
+                        />
+                    </div>
+                </section>
+
+                <section aria-labelledby="dashboard-negocio-mes" className="space-y-3">
+                    <div>
+                        <h2 id="dashboard-negocio-mes" className="text-lg font-bold text-zinc-100">Negocio del mes</h2>
+                        <p className="text-xs text-zinc-500">
+                            Mes en curso · parcial · comparación con el mes anterior: n/d
+                            (no se compara un mes parcial contra un mes completo)
+                        </p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                        <KpiCard
+                            label="Ingreso del mes"
+                            value={stats?.ingresoMensual ?? null}
+                            unit="CLP"
+                            icon={DollarSign}
+                            color="border-amber-500"
+                            hint="Mes en curso · parcial · comparación: n/d"
+                        />
+                        <KpiCard
+                            label="MRR"
+                            value={stats?.mrr ?? null}
+                            unit="CLP"
+                            icon={Banknote}
+                            color="border-emerald-500"
+                            hint="Hoy · precio de lista"
+                        />
+                        <KpiCard
+                            label="Ventas Bazar"
+                            value={stats?.ventasBazar ?? null}
+                            unit="CLP"
+                            icon={ShoppingCart}
+                            color="border-teal-500"
+                            hint="Mes en curso · parcial"
+                        />
+                        <KpiCard
+                            label="Membresías del mes"
+                            value={stats?.totalSuscripcionesMes ?? null}
+                            icon={Users}
+                            color="border-green-500"
+                            hint="Mes en curso · parcial"
+                        />
+                    </div>
+                </section>
+
+                <section aria-labelledby="dashboard-alumnos" className="space-y-3">
+                    <div>
+                        <h2 id="dashboard-alumnos" className="text-lg font-bold text-zinc-100">Alumnos</h2>
+                        <p className="text-xs text-zinc-500">Base de clientes y señales de riesgo</p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <KpiCard
+                            label="Alumnos activos"
+                            value={resumenAdmin.alumnosActivos}
+                            icon={Users}
+                            color="border-sky-500"
+                            hint="Hoy · snapshot diario"
+                        />
+                        <KpiCard
+                            label="Alumnos en riesgo"
+                            value={resumenAdmin.alumnosRiesgo}
+                            icon={TriangleAlert}
+                            color="border-red-500"
+                            hint={resumenAdmin.riesgoPendiente
+                                ? 'pendiente de reentrenar'
+                                : 'Hoy · crítico + alto'}
+                        />
+                        <KpiCard
+                            label="Nuevos del mes"
+                            value={stats?.nuevosAlumnosMes ?? null}
+                            icon={UserPlus}
+                            color="border-green-500"
+                            hint="Mes en curso · parcial"
+                        />
+                    </div>
+                </section>
+
+                <section aria-labelledby="dashboard-conversion-mock" className="space-y-3">
+                    <div>
+                        <h2 id="dashboard-conversion-mock" className="text-lg font-bold text-zinc-100">Conversión</h2>
+                        <p className="text-xs text-zinc-500">
+                            Prueba → plan · {resumenAdmin.periodoTexto
+                                ? `mes cerrado: ${resumenAdmin.periodoTexto}`
+                                : 'sin mes cerrado'}
+                        </p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <KpiCard
+                            label="Conversión prueba→plan"
+                            value={resumenAdmin.conversionRate}
+                            unit={resumenAdmin.conversionRate === null ? '' : '%'}
+                            icon={TrendingUp}
+                            color="border-green-500"
+                            hint={`${resumenAdmin.conversionHint}${resumenAdmin.periodoTexto
+                                ? ` · ${resumenAdmin.periodoTexto}` : ''}`}
+                        />
+                    </div>
+                </section>
+
+                <section aria-labelledby="dashboard-ocupacion" className="space-y-3">
+                    <div>
+                        <h2 id="dashboard-ocupacion" className="text-lg font-bold text-zinc-100">Ocupación</h2>
+                        <p className="text-xs text-zinc-500">
+                            Mes cerrado · asistencia real sobre cupo de clases pasadas
+                            {resumenAdmin.periodoTexto ? ` (${resumenAdmin.periodoTexto})` : ''}
+                        </p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <KpiCard
+                            label="Ocupación"
+                            value={resumenAdmin.ocupacionReal}
+                            unit={resumenAdmin.ocupacionReal === null ? '' : '%'}
+                            icon={Target}
+                            color="border-amber-500"
+                            hint={resumenAdmin.periodoTexto
+                                ? `Mes cerrado · ${resumenAdmin.periodoTexto} · asistencia real / cupo`
+                                : 'Sin mes cerrado'}
+                        />
+                        <KpiCard
+                            label="Asistencia real"
+                            value={resumenAdmin.asistenciaReal}
+                            unit={resumenAdmin.asistenciaReal === null ? '' : '%'}
+                            icon={Activity}
+                            color="border-purple-500"
+                            hint={resumenAdmin.periodoTexto
+                                ? `Mes cerrado · ${resumenAdmin.periodoTexto} · reservas confirmadas`
+                                : 'Sin mes cerrado'}
+                        />
+                    </div>
+                </section>
+
+                <div className="pt-3 border-t border-zinc-800">
+                    <h2 className="text-lg font-bold text-zinc-100">Detalle operativo</h2>
+                    <p className="text-xs text-zinc-500">
+                        Clases, solicitudes, pagos y prospectos del día
+                    </p>
+                </div>
+
                 {/* 1. OPERATIVA INMEDIATA: lo que requiere atención HOY va primero.
-                    Clases de hoy y solicitudes de plan son las dos colas accionables;
-                    Ocupación promedio se mantiene al lado de Clases porque es su KPI
-                    de apoyo (no es una métrica financiera). */}
+                    Clases de hoy y solicitudes de plan son las dos colas accionables. */}
                 {stats && (
                     <section aria-labelledby="dashboard-operativa" className="space-y-3">
                         <div>
@@ -441,7 +598,7 @@ const AdminDashboard = () => {
                                 Clases y solicitudes de plan que requieren atención ahora
                             </p>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <button onClick={() => document.getElementById('clases-hoy')?.scrollIntoView({ behavior: 'smooth' })} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-indigo-600 hover:shadow-md hover:border-indigo-700 transition-all cursor-pointer text-left">
                                 <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Clases de Hoy</p>
                                 {clasesHoyLoading ? (
@@ -454,7 +611,7 @@ const AdminDashboard = () => {
                                             {clasesHoyRealizadas}<span className="text-lg font-semibold text-zinc-500">/{clasesHoyTotal}</span>
                                         </p>
                                         <p className="text-xs text-zinc-500 mt-1">
-                                            {clasesHoyRealizadas} de {clasesHoyTotal} realizadas · {reservasHoy}/{cuposHoy} reservas ({ocupacionHoyPct}%) — Clic para ver
+                                            {clasesHoyRealizadas} de {clasesHoyTotal} realizadas — Clic para ver
                                         </p>
                                     </>
                                 )}
@@ -475,12 +632,6 @@ const AdminDashboard = () => {
                                     {desglosePendientes.map((d) => d.texto).join(' · ')} — Clic para ver
                                 </p>
                             </button>
-                            <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-purple-600">
-                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide"
-                                    title="Ocupacion: clases.asistentes_confirmados / clases.cupo_maximo (lugares reservados sobre cupo ofrecido). NO mide asistencia real. Puede verse 0% porque las asistencias todavia no estan vinculadas a su clase (asistencias.clase_id es NULL en toda la base).">Ocupación promedio</p>
-                                <p className="text-3xl font-bold text-purple-700 mt-1">{stats.asistenciaPromedio || 0}%</p>
-                                <p className="text-xs text-zinc-500 mt-1">Ocupación en clases</p>
-                            </div>
                         </div>
                     </section>
                 )}
@@ -699,8 +850,8 @@ const AdminDashboard = () => {
                         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                             <button onClick={() => navigate('/admin/alumnos?estado=activo')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-blue-600 hover:shadow-md hover:border-blue-700 transition-all cursor-pointer text-left">
                                 <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos Activos</p>
-                                <p className="text-3xl font-bold text-blue-400 mt-1">{stats.alumnosActivos || 0}</p>
-                                <p className="text-xs text-zinc-500 mt-1">Total miembros con plan vigente — Clic para ver el padrón activo</p>
+                                <p className="text-3xl font-bold text-blue-400 mt-1">{resumenAdmin.alumnosActivos ?? 'n/d'}</p>
+                                <p className="text-xs text-zinc-500 mt-1">Hoy · snapshot diario — Clic para ver el padrón activo</p>
                             </button>
                             <button onClick={() => setFidelizacionModal('membresias')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-green-600 hover:shadow-md hover:border-green-700 transition-all cursor-pointer text-left">
                                 <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Membresías Mensuales</p>
@@ -712,20 +863,11 @@ const AdminDashboard = () => {
                                 <p className="text-3xl font-bold text-amber-700 mt-1">
                                     ${(stats.ingresoMensual || 0).toLocaleString('es-CL')}
                                 </p>
-                                <p className="text-xs text-zinc-500 mt-1">Ingresos del mes actual</p>
-                                {/* El MoM es de INGRESOS: antes estaba mal ubicado en la tarjeta
-                                    de membresias, donde se leia como crecimiento de suscripciones. */}
-                                {stats.crecimientoMensual === null ? (
-                                    <p className="text-xs font-bold text-zinc-500 mt-1"
-                                        title="Sin mes anterior comparable: el ingreso neto del mes pasado fue <= 0.">
-                                        s/d vs mes anterior (sin base comparable)
-                                    </p>
-                                ) : (
-                                    <p className={`text-xs font-bold mt-1 ${stats.crecimientoMensual > 0 ? 'text-green-600' : stats.crecimientoMensual < 0 ? 'text-red-600' : 'text-zinc-500'}`}>
-                                        {stats.crecimientoMensual > 0 ? '📈' : stats.crecimientoMensual < 0 ? '📉' : '='}{' '}
-                                        {Math.abs(stats.crecimientoMensual ?? 0)}% vs mes anterior
-                                    </p>
-                                )}
+                                <p className="text-xs text-zinc-500 mt-1">Mes en curso · parcial</p>
+                                <p className="text-xs font-bold text-zinc-500 mt-1"
+                                    title="El mes en curso no se compara contra un mes completo: no es el mismo tramo.">
+                                    comparación: n/d
+                                </p>
                             </div>
                             {/* Ventas del Bazar del mes: campo propio de /reportes/ (`ventasBazar`).
                                 Es BRUTA y no recurrente: no está dentro de "Ingreso Mensual" (neto de
@@ -741,10 +883,7 @@ const AdminDashboard = () => {
                                 </p>
                                 <p className="text-xs text-zinc-500 mt-1">
                                     {stats.ventasBazarPedidos || 0} pedido{(stats.ventasBazarPedidos || 0) === 1 ? '' : 's'} cobrado{(stats.ventasBazarPedidos || 0) === 1 ? '' : 's'} del mes
-                                    {/* Sin base comparable no se muestra 0%: se dice que no hay mes anterior. */}
-                                    {stats.ventasBazarVariacion == null
-                                        ? ' · sin base anterior'
-                                        : ` · ${stats.ventasBazarVariacion > 0 ? '↑' : stats.ventasBazarVariacion < 0 ? '↓' : '='} ${Math.abs(stats.ventasBazarVariacion)}% vs mes anterior`}
+                                    {' · comparación: n/d (mes parcial)'}
                                 </p>
                             </button>
                         </div>
@@ -768,7 +907,6 @@ const AdminDashboard = () => {
                 {!fidelizacionLoading && (
                     <AvisoCarga
                         secciones={[
-                            fidelizacionError.riesgo && 'alumnos en riesgo',
                             fidelizacionError.vencimientos && 'vencimientos inminentes',
                         ].filter(Boolean)}
                         variante="oscura"
@@ -779,16 +917,18 @@ const AdminDashboard = () => {
                 {!fidelizacionLoading && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Tarjeta Alumnos en Riesgo */}
-                        <button onClick={() => navigate('/admin/fidelizacion?filtro=sin_actividad')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-red-600 hover:shadow-md hover:border-red-700 transition-all cursor-pointer text-left">
+                        <button onClick={() => navigate('/admin/fidelizacion')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-red-600 hover:shadow-md hover:border-red-700 transition-all cursor-pointer text-left">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos en Riesgo</p>
-                                    {fidelizacionError.riesgo ? (
-                                        <p className="text-sm font-bold text-red-400 mt-2">⚠️ {fidelizacionError.riesgo}</p>
-                                    ) : (
-                                        <p className="text-3xl font-bold text-red-700 mt-1">{alumnosRiesgoSinActividad.length}</p>
-                                    )}
-                                    <p className="text-xs text-zinc-500 mt-1">Sin actividad {'>'} 7 días — Clic para ir a Fidelización</p>
+                                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos en riesgo</p>
+                                    <p className="text-3xl font-bold text-red-700 mt-1">
+                                        {resumenAdmin.alumnosRiesgo ?? 'n/d'}
+                                    </p>
+                                    <p className="text-xs text-zinc-500 mt-1">
+                                        {resumenAdmin.riesgoPendiente
+                                            ? 'pendiente de reentrenar — Clic para ir a Fidelización'
+                                            : 'Hoy · crítico + alto — Clic para ir a Fidelización'}
+                                    </p>
                                 </div>
                                 <span className="text-4xl">⚠️</span>
                             </div>
@@ -885,7 +1025,7 @@ const AdminDashboard = () => {
                                             ? 'Consultando el BI…'
                                             : biConversion.error
                                                 ? `⚠️ ${biConversion.error}`
-                                                : `Compraron plan${biConversion.periodo ? ` (${biConversion.periodo})` : ''} · Conversión prueba→plan: ${biConversion.rate}% · ${biConversion.prueba || 0} en prueba`}
+                                                : `Compraron plan${(resumenAdmin.periodoTexto || biConversion.periodo) ? ` (${resumenAdmin.periodoTexto || biConversion.periodo})` : ''} · Conversión prueba→plan: ${resumenAdmin.conversionRate === null ? 'n/d' : `${resumenAdmin.conversionRate}%`} · ${resumenAdmin.conversionHint}`}
                                         {!biConversion.error && ' — Clic para ver el detalle'}
                                     </p>
                                 </div>
