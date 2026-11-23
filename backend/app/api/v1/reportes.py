@@ -179,7 +179,7 @@ def _historico_ingresos_6m(db: Session, tenant_id: int):
     """
     desde, _ = _inicio_fin_mes(-5)
     _, hasta = _inicio_fin_mes(0)
-    filas = db.execute(sql_text("""
+    filas = db.execute(sql_text(f"""
         SELECT date_trunc('month', fecha)::date AS mes,
                COALESCE(SUM(CASE
                    WHEN tipo = 'ingreso' THEN monto
@@ -190,6 +190,7 @@ def _historico_ingresos_6m(db: Session, tenant_id: int):
         WHERE tenant_id = :tid
           AND fecha >= :desde
           AND fecha <= :hasta
+          AND {metricas.sql_transaccion_real("transacciones_financieras")}
         GROUP BY 1
     """), {
         "tid": tenant_id,
@@ -281,24 +282,26 @@ def obtener_reportes_analytics(
         inicio_mes_ant, fin_mes_ant = _inicio_fin_mes(-1)
         # --- 1. ALUMNOS ACTIVOS ---
         # Alumnos con rol='alumno' Y suscripcion activa vigente (fecha_expiracion >= hoy)
-        alumnos_activos = db.execute(sql_text("""
+        alumnos_activos = db.execute(sql_text(f"""
             SELECT COUNT(DISTINCT u.id)
             FROM usuarios u
             JOIN suscripciones s ON u.id = s.usuario_id
             WHERE u.tenant_id = :tid
               AND u.rol = 'alumno'
               AND u.estado = 'activo'
+              AND {metricas.sql_usuario_real("u")}
               AND s.estado = 'activo'
               AND s.fecha_expiracion >= (now() AT TIME ZONE 'America/Santiago')::date
         """), {"tid": tenant_id}).scalar() or 0
 
         # --- 2. NUEVOS ALUMNOS ESTE MES ---
-        nuevos_alumnos_mes = db.execute(sql_text("""
-            SELECT COUNT(*) FROM usuarios
-            WHERE tenant_id = :tid
-              AND rol = 'alumno'
-              AND created_at >= :inicio
-              AND created_at <= :fin
+        nuevos_alumnos_mes = db.execute(sql_text(f"""
+            SELECT COUNT(*) FROM usuarios u
+            WHERE u.tenant_id = :tid
+              AND u.rol = 'alumno'
+              AND {metricas.sql_usuario_real("u")}
+              AND u.created_at >= :inicio
+              AND u.created_at <= :fin
         """), {"tid": tenant_id, "inicio": inicio_mes, "fin": fin_mes}).scalar() or 0
 
         # --- 3. CANCELACIONES ESTE MES ---
@@ -313,7 +316,7 @@ def obtener_reportes_analytics(
         # "Planes Vencidos (Mes)" y la fuente del número (`cancelaciones_mes` =
         # len(filas)). Al compartir el WHERE, la tarjeta y la tabla no pueden
         # discrepar ni en el último día del mes, y el endpoint ahorra un COUNT.
-        planes_vencidos_rows = db.execute(sql_text("""
+        planes_vencidos_rows = db.execute(sql_text(f"""
             SELECT u.nombre AS alumno_nombre, u.correo, p.nombre AS plan_nombre,
                    p.precio_clp, s.fecha_expiracion
             FROM suscripciones s
@@ -321,6 +324,7 @@ def obtener_reportes_analytics(
             JOIN planes p ON p.id = s.plan_id
             WHERE s.tenant_id = :tid
               AND s.estado = 'vencido'
+              AND {metricas.sql_usuario_real("u")}
               AND (s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date >= :inicio_d
               AND (s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date <= :fin_d
             ORDER BY s.fecha_expiracion DESC, u.nombre ASC

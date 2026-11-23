@@ -245,15 +245,17 @@ def _build_historico_mensual(db, tenant_id):
             fin = date(y, m + 1, 1) - timedelta(days=1)
 
         # Ingresos
-        ing = db.execute(text("""
+        ing = db.execute(text(f"""
             SELECT COALESCE(SUM(monto), 0) FROM transacciones_financieras
             WHERE tenant_id = :tid AND tipo = 'ingreso' AND fecha >= :ini AND fecha <= :fin
+              AND {metricas.sql_transaccion_real("transacciones_financieras")}
         """), {"tid": tenant_id, "ini": inicio, "fin": fin}).scalar() or 0
 
         # Egresos
-        eg = db.execute(text("""
+        eg = db.execute(text(f"""
             SELECT COALESCE(SUM(monto), 0) FROM transacciones_financieras
             WHERE tenant_id = :tid AND tipo = 'egreso' AND fecha >= :ini AND fecha <= :fin
+              AND {metricas.sql_transaccion_real("transacciones_financieras")}
         """), {"tid": tenant_id, "ini": inicio, "fin": fin}).scalar() or 0
 
         # Corte de las DOS columnas de suscripciones (no es el `fin` de las columnas financieras:
@@ -262,20 +264,22 @@ def _build_historico_mensual(db, tenant_id):
 
         # Alumnos vigentes al corte (por FECHA: ver el docstring). Sólo planes COMERCIALES: el
         # "Pase de regreso" da acceso pero no es un cliente (`sql_plan_comercial`).
-        alumnos = db.execute(text("""
+        alumnos = db.execute(text(f"""
             SELECT COUNT(DISTINCT u.id) FROM usuarios u
             JOIN suscripciones s ON u.id = s.usuario_id
             JOIN planes p ON p.id = s.plan_id
             WHERE u.tenant_id = :tid AND u.rol = 'alumno' AND u.estado = 'activo'
-              AND """ + sql_suscripcion_vigente("s", ":corte") + """
-              AND """ + sql_plan_comercial("p") + """
+              AND {metricas.sql_usuario_real("u")}
+              AND {sql_suscripcion_vigente("s", ":corte")}
+              AND {sql_plan_comercial("p")}
         """), {"tid": tenant_id, "corte": corte}).scalar() or 0
 
         # Nuevos alumnos del mes
-        nuevos = db.execute(text("""
-            SELECT COUNT(*) FROM usuarios
-            WHERE tenant_id = :tid AND rol = 'alumno'
-              AND created_at::date >= :ini AND created_at::date <= :fin
+        nuevos = db.execute(text(f"""
+            SELECT COUNT(*) FROM usuarios u
+            WHERE u.tenant_id = :tid AND u.rol = 'alumno'
+              AND {metricas.sql_usuario_real("u")}
+              AND u.created_at::date >= :ini AND u.created_at::date <= :fin
         """), {"tid": tenant_id, "ini": inicio, "fin": fin}).scalar() or 0
 
         # MRR al corte: NO una copia acá, la misma definición del dashboard y del BI
@@ -370,14 +374,20 @@ _MESES_ES_LARGOS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
 
 
 def _neto_rango(db, tenant_id, inicio, fin_exclusive):
-    """(ingresos, egresos, neto) de [inicio, fin_exclusive) desde transacciones."""
-    ing = db.execute(text("""
+    """(ingresos, egresos, neto) de [inicio, fin_exclusive) desde transacciones.
+
+    Excluye las transacciones atribuibles a una cuenta `es_prueba` (misma regla
+    que `metricas.ingresos_netos`): el Excel no puede sumar dinero de demo.
+    """
+    ing = db.execute(text(f"""
         SELECT COALESCE(SUM(monto), 0) FROM transacciones_financieras
         WHERE tenant_id = :tid AND tipo = 'ingreso' AND fecha >= :ini AND fecha < :fin
+          AND {metricas.sql_transaccion_real("transacciones_financieras")}
     """), {"tid": tenant_id, "ini": inicio, "fin": fin_exclusive}).scalar() or 0
-    eg = db.execute(text("""
+    eg = db.execute(text(f"""
         SELECT COALESCE(SUM(monto), 0) FROM transacciones_financieras
         WHERE tenant_id = :tid AND tipo = 'egreso' AND fecha >= :ini AND fecha < :fin
+          AND {metricas.sql_transaccion_real("transacciones_financieras")}
     """), {"tid": tenant_id, "ini": inicio, "fin": fin_exclusive}).scalar() or 0
     ing_f, eg_f = float(ing), float(eg)
     return ing_f, eg_f, ing_f - eg_f
@@ -404,10 +414,11 @@ def _resumen_mes(db, tenant_id, anio, mes, limite_dia=None):
         fin_ex = fin_mes
     ing, eg, neto = _neto_rango(db, tenant_id, inicio, fin_ex)
     corte = _corte_suscripciones(fin_ex - timedelta(days=1))
-    nuevos = db.execute(text("""
-        SELECT COUNT(*) FROM usuarios
-        WHERE tenant_id = :tid AND rol = 'alumno'
-          AND created_at::date >= :ini AND created_at::date < :fin
+    nuevos = db.execute(text(f"""
+        SELECT COUNT(*) FROM usuarios u
+        WHERE u.tenant_id = :tid AND u.rol = 'alumno'
+          AND {metricas.sql_usuario_real("u")}
+          AND u.created_at::date >= :ini AND u.created_at::date < :fin
     """), {"tid": tenant_id, "ini": inicio, "fin": fin_ex}).scalar() or 0
     return {
         "anio": anio, "mes": mes, "corte": corte,
@@ -422,11 +433,15 @@ def _resumen_mes(db, tenant_id, anio, mes, limite_dia=None):
 def _meses_de_historia(db, tenant_id):
     """Meses de historial (desde la primera transacción/alta hasta hoy, en Chile)."""
     hoy = hoy_santiago()
-    primera = db.execute(text("""
+    primera = db.execute(text(f"""
         SELECT MIN(f) FROM (
-            SELECT fecha AS f FROM transacciones_financieras WHERE tenant_id = :tid
+            SELECT fecha AS f FROM transacciones_financieras
+            WHERE tenant_id = :tid
+              AND {metricas.sql_transaccion_real("transacciones_financieras")}
             UNION ALL
-            SELECT created_at AS f FROM usuarios WHERE tenant_id = :tid AND rol = 'alumno'
+            SELECT u.created_at AS f FROM usuarios u
+            WHERE u.tenant_id = :tid AND u.rol = 'alumno'
+              AND {metricas.sql_usuario_real("u")}
         ) t WHERE f IS NOT NULL
     """), {"tid": tenant_id}).scalar()
     if primera is None:
@@ -574,10 +589,11 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
     ing_ytd_a, eg_ytd_a, neto_ytd_a = _neto_rango(db, tenant_id, date(anio - 1, 1, 1), tope_ant + timedelta(days=1))
 
     def _nuevos_rango(ini, fin):
-        return int(db.execute(text("""
-            SELECT COUNT(*) FROM usuarios
-            WHERE tenant_id = :tid AND rol = 'alumno'
-              AND created_at::date >= :ini AND created_at::date < :fin
+        return int(db.execute(text(f"""
+            SELECT COUNT(*) FROM usuarios u
+            WHERE u.tenant_id = :tid AND u.rol = 'alumno'
+              AND {metricas.sql_usuario_real("u")}
+              AND u.created_at::date >= :ini AND u.created_at::date < :fin
         """), {"tid": tenant_id, "ini": ini, "fin": fin}).scalar() or 0)
 
     nuevos_ytd = _nuevos_rango(date(anio, 1, 1), tope + timedelta(days=1))
@@ -632,6 +648,7 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
               AND t.tipo = 'ingreso'
               AND t.categoria = 'membresia'
               AND t.referencia_tipo = 'suscripcion'
+              AND {metricas.sql_transaccion_real("t")}
 
             UNION ALL
 
@@ -648,6 +665,7 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
               AND t.tipo = 'ingreso'
               AND t.categoria = 'membresia'
               AND t.referencia_tipo = 'solicitud_plan'
+              AND {metricas.sql_transaccion_real("t")}
         ),
         tx_agg AS (
             -- Se agrega ANTES de unir con `planes`: si las transacciones se
@@ -679,15 +697,17 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
         ORDER BY ingreso DESC, suscripciones DESC
     """), {"tid": tenant_id}).fetchall()
 
-    gt = db.execute(text("""
+    gt = db.execute(text(f"""
         SELECT COUNT(*), COALESCE(ROUND(AVG(monto)), 0), COALESCE(SUM(monto), 0)
         FROM transacciones_financieras
         WHERE tenant_id = :tid AND tipo = 'ingreso' AND categoria = 'membresia'
+          AND {metricas.sql_transaccion_real("transacciones_financieras")}
     """), {"tid": tenant_id}).first()
-    vida_dias = int(db.execute(text("""
+    vida_dias = int(db.execute(text(f"""
         SELECT COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (
-            COALESCE(fecha_baja::timestamptz, NOW()) - created_at)) / 86400.0)), 0)
-        FROM usuarios WHERE tenant_id = :tid AND rol = 'alumno'
+            COALESCE(u.fecha_baja::timestamptz, NOW()) - u.created_at)) / 86400.0)), 0)
+        FROM usuarios u WHERE u.tenant_id = :tid AND u.rol = 'alumno'
+          AND {metricas.sql_usuario_real("u")}
     """), {"tid": tenant_id}).scalar() or 0)
     ltv = round((arpu or 0) * vida_dias / 30, 0)
 

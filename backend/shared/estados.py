@@ -238,3 +238,11 @@ def lista_sql_pago_bazar() -> str:
     return lista_sql(ESTADOS_PAGO_BAZAR)
 
 
+# ── `usuarios.estado`: estados que NO cuentan como cliente para el MRR ───────────────────────
+# Un registro rechazado puede tener una suscripción date-vigente (p. ej. un alta que nunca se
+# activó). No es un cliente: el MRR lo excluye aunque la fecha de la suscripción siga vigente.
+# Es la MISMA lista que aplica `metricas_service.mrr()`; cualquier métrica que sume planes debe
+# leerla de acá para no inventar una segunda definición.
+ESTADOS_USUARIO_SIN_MRR: Final[tuple] = ("rechazado",)
+
+

@@ -63,12 +63,17 @@ def _verificar_api_key_n8n(
 
 
 def _sum_ingresos(db, tenant_id, desde, hasta, categoria=None):
-    """SUM de `transacciones_financieras` (tipo=ingreso) en un rango de fechas."""
+    """SUM de `transacciones_financieras` (tipo=ingreso) en un rango de fechas.
+
+    Excluye las transacciones que se pueden atribuir a una cuenta `es_prueba`:
+    la fuente de verdad es `metricas.sql_transaccion_real()`.
+    """
     q = db.query(func.coalesce(func.sum(TransaccionFinanciera.monto), 0)).filter(
         TransaccionFinanciera.tenant_id == tenant_id,
         TransaccionFinanciera.tipo == "ingreso",
         TransaccionFinanciera.fecha >= desde,
         TransaccionFinanciera.fecha <= hasta,
+        text(metricas.sql_transaccion_real("transacciones_financieras")),
     )
     if categoria:
         q = q.filter(TransaccionFinanciera.categoria == categoria)
@@ -76,7 +81,11 @@ def _sum_ingresos(db, tenant_id, desde, hasta, categoria=None):
 
 
 def _sum_egresos(db, tenant_id, desde, hasta):
-    """SUM de `transacciones_financieras` (tipo=egreso) en un rango de fechas."""
+    """SUM de `transacciones_financieras` (tipo=egreso) en un rango de fechas.
+
+    Mismo filtro de usuario real que `_sum_ingresos()`: un egreso de una cuenta
+    de prueba no puede mover el neto de un box real.
+    """
     return float(db.query(
         func.coalesce(func.sum(TransaccionFinanciera.monto), 0)
     ).filter(
@@ -84,6 +93,7 @@ def _sum_egresos(db, tenant_id, desde, hasta):
         TransaccionFinanciera.tipo == "egreso",
         TransaccionFinanciera.fecha >= desde,
         TransaccionFinanciera.fecha <= hasta,
+        text(metricas.sql_transaccion_real("transacciones_financieras")),
     ).scalar() or 0)
 
 
@@ -147,8 +157,13 @@ def populate_daily_kpis(
     # (misma columna y mismo criterio que el BI y el ML: `shared.estados.sql_plan_comercial`).
     alumnos_activos = db.query(func.count(Suscripcion.id)).join(
         Plan, Suscripcion.plan_id == Plan.id
+    ).join(
+        Usuario, Usuario.id == Suscripcion.usuario_id
     ).filter(
         Suscripcion.tenant_id == tenant_id,
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == RolUsuario.alumno,
+        Usuario.es_prueba.is_(False),
         Suscripcion.estado == "activo",
         dia_chile(Suscripcion.fecha_expiracion) >= objetivo,
         plan_comercial(Plan.es_comercial),
@@ -157,6 +172,7 @@ def populate_daily_kpis(
     alumnos_nuevos = db.query(func.count(Usuario.id)).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
+        Usuario.es_prueba.is_(False),
         dia_chile(Usuario.created_at) == objetivo,
     ).scalar() or 0
 
@@ -282,6 +298,136 @@ def _calcular_conversion_rate(plan_comprado: int, alumnos_prueba: int):
     return round(plan_comprado / alumnos_prueba * 100, 2)
 
 
+def calcular_asistencia_mes(db, tenant_id, inicio, fin) -> dict:
+    """Asistencia REAL del período: reservas con `asistio=true` / confirmadas.
+
+    El numerador NO es `clases.asistentes_confirmados` (ese contador mide
+    reservas/cupos, no asistencia): es la asistencia real que marca el coach en
+    `reservas.asistio`, la MISMA fuente de `services/asistencia_real.py` y del
+    panel. El denominador son las reservas `confirmada` de las clases
+    REALIZADAS del período.
+
+    Se extrajo del populate para que la prueba de integración pueda verificar
+    el valor sin escribir `monthly_kpis` (que haría commit).
+    """
+    asistentes_mes = db.query(func.count(Reserva.id)).join(
+        Clase, Reserva.clase_id == Clase.id
+    ).join(
+        Usuario, Usuario.id == Reserva.alumno_id
+    ).filter(
+        Reserva.tenant_id == tenant_id,
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == RolUsuario.alumno,
+        Usuario.es_prueba.is_(False),
+        Clase.fecha >= inicio, Clase.fecha <= fin,
+        Reserva.asistio.is_(True),
+        text(sql_clase_realizada("clases")),
+    ).scalar() or 0
+
+    reservas_mes = db.query(func.count(Reserva.id)).join(
+        Clase, Reserva.clase_id == Clase.id
+    ).join(
+        Usuario, Usuario.id == Reserva.alumno_id
+    ).filter(
+        Reserva.tenant_id == tenant_id,
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == RolUsuario.alumno,
+        Usuario.es_prueba.is_(False),
+        Clase.fecha >= inicio, Clase.fecha <= fin,
+        Reserva.estado == "confirmada",
+        text(sql_clase_realizada("clases")),
+    ).scalar() or 0
+
+    return {
+        "asistentes": int(asistentes_mes),
+        "reservas": int(reservas_mes),
+        "asistencia_promedio": (
+            round(asistentes_mes / reservas_mes * 100, 2)
+            if reservas_mes else 0),
+    }
+
+
+def calcular_embudo_conversion(db, tenant_id, inicio, fin) -> dict:
+    """Embudo prueba→plan del período, contando SÓLO alumnos reales.
+
+    Regla de negocio:
+      * `alumnos_prueba`: alumnos DISTINTOS con una suscripción al plan
+        "Prueba" que empieza en el período.
+      * `alumnos_plan_comprado`: alumnos DISTINTOS de ESE cohorte de prueba que
+        compran un plan pago que empieza en el período. Una compra por alumno
+        (no filas de suscripción) y **no** cualquier alumno que ya era miembro.
+      * `conversion_rate`: `plan_comprado / alumnos_prueba * 100` (None si no
+        hubo alumnos en prueba).
+      * `alumnos_clase_prueba_ejecutada`: alumnos con plan "Prueba" (en
+        cualquier momento) con >= 1 asistencia REAL en el período.
+
+    Todos los conteos excluyen `usuarios.es_prueba = true` y exigen
+    `rol='alumno'`. Es la MISMA lógica que usaba el populate, extraída para que
+    las pruebas de integración puedan llamarla sin commitear un `monthly_kpis`.
+    """
+    ids_prueba_mes = [
+        uid for (uid,) in db.query(Suscripcion.usuario_id).join(
+            Plan, Suscripcion.plan_id == Plan.id
+        ).join(
+            Usuario, Usuario.id == Suscripcion.usuario_id
+        ).filter(
+            Suscripcion.tenant_id == tenant_id,
+            Usuario.tenant_id == tenant_id,
+            Usuario.rol == RolUsuario.alumno,
+            Usuario.es_prueba.is_(False),
+            Plan.nombre == PLAN_PRUEBA,
+            dia_chile(Suscripcion.fecha_inicio) >= inicio,
+            dia_chile(Suscripcion.fecha_inicio) <= fin,
+        ).distinct().all()
+    ]
+    alumnos_prueba = len(ids_prueba_mes)
+
+    ids_prueba = [uid for (uid,) in db.query(Suscripcion.usuario_id).join(
+        Plan, Suscripcion.plan_id == Plan.id
+    ).join(
+        Usuario, Usuario.id == Suscripcion.usuario_id
+    ).filter(
+        Suscripcion.tenant_id == tenant_id,
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == RolUsuario.alumno,
+        Usuario.es_prueba.is_(False),
+        Plan.nombre == PLAN_PRUEBA,
+    ).distinct().all()]
+    con_asistencia = asistencias_entre_por_alumno(
+        db, tenant_id, ids_prueba, inicio, fin)
+    alumnos_clase_prueba_ejecutada = sum(
+        1 for n in con_asistencia.values() if n > 0)
+
+    if ids_prueba_mes:
+        alumnos_plan_comprado = db.query(
+            func.count(func.distinct(Suscripcion.usuario_id))
+        ).join(
+            Plan, Suscripcion.plan_id == Plan.id
+        ).join(
+            Usuario, Usuario.id == Suscripcion.usuario_id
+        ).filter(
+            Suscripcion.tenant_id == tenant_id,
+            Usuario.tenant_id == tenant_id,
+            Usuario.rol == RolUsuario.alumno,
+            Usuario.es_prueba.is_(False),
+            Plan.precio_clp > 0,
+            Suscripcion.usuario_id.in_(ids_prueba_mes),
+            dia_chile(Suscripcion.fecha_inicio) >= inicio,
+            dia_chile(Suscripcion.fecha_inicio) <= fin,
+        ).scalar() or 0
+    else:
+        alumnos_plan_comprado = 0
+
+    return {
+        "alumnos_prueba": alumnos_prueba,
+        "alumnos_clase_prueba_ejecutada": alumnos_clase_prueba_ejecutada,
+        "alumnos_plan_comprado": alumnos_plan_comprado,
+        "conversion_rate": _calcular_conversion_rate(
+            alumnos_plan_comprado, alumnos_prueba),
+        "ids_prueba_mes": ids_prueba_mes,
+    }
+
+
 def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> dict:
     """Calcula y hace UPSERT (idempotente) de UN mes en `monthly_kpis`.
 
@@ -299,38 +445,15 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
     fin = date(year, month, calendar.monthrange(year, month)[1])
 
     # ── Embudo prueba → plan ──
-    alumnos_prueba = db.query(
-        func.count(func.distinct(Suscripcion.usuario_id))
-    ).join(Plan, Suscripcion.plan_id == Plan.id).filter(
-        Suscripcion.tenant_id == tenant_id,
-        Plan.nombre == PLAN_PRUEBA,
-        dia_chile(Suscripcion.fecha_inicio) >= inicio,
-        dia_chile(Suscripcion.fecha_inicio) <= fin,
-    ).scalar() or 0
-
-    # "Ejecutó" = tuvo >= 1 asistencia REAL en el período (`asistencia_real`) entre los alumnos
-    # con un plan de prueba (en cualquier momento). Antes salía de la tabla histórica
-    # `asistencias`, que nadie puebla: el embudo quedaba en 0 aunque hubiera alumnos entrenando.
-    ids_prueba = [uid for (uid,) in db.query(Suscripcion.usuario_id).join(
-        Plan, Suscripcion.plan_id == Plan.id
-    ).filter(
-        Suscripcion.tenant_id == tenant_id,
-        Plan.nombre == PLAN_PRUEBA,
-    ).distinct().all()]
-    con_asistencia = asistencias_entre_por_alumno(db, tenant_id, ids_prueba, inicio, fin)
-    alumnos_clase_prueba_ejecutada = sum(1 for n in con_asistencia.values() if n > 0)
-
-    alumnos_plan_comprado = db.query(func.count(Suscripcion.id)).join(
-        Plan, Suscripcion.plan_id == Plan.id
-    ).filter(
-        Suscripcion.tenant_id == tenant_id,
-        Plan.precio_clp > 0,
-        dia_chile(Suscripcion.fecha_inicio) >= inicio,
-        dia_chile(Suscripcion.fecha_inicio) <= fin,
-    ).scalar() or 0
-
-    conversion_rate = _calcular_conversion_rate(
-        alumnos_plan_comprado, alumnos_prueba)
+    # La lógica vive en `calcular_embudo_conversion()`: el numerador cuenta
+    # alumnos DISTINTOS del cohorte de prueba (no filas de cualquier alumno) y
+    # excluye las cuentas es_prueba. Así la conversión no puede pasar de 100 %
+    # solo porque un alumno ya miembro compre otra vez.
+    embudo = calcular_embudo_conversion(db, tenant_id, inicio, fin)
+    alumnos_prueba = embudo["alumnos_prueba"]
+    alumnos_clase_prueba_ejecutada = embudo["alumnos_clase_prueba_ejecutada"]
+    alumnos_plan_comprado = embudo["alumnos_plan_comprado"]
+    conversion_rate = embudo["conversion_rate"]
 
     # ── Actividad / churn ──
     # "Cuántos alumnos había al ABRIR el mes": se mide con la vigencia EN ESA FECHA
@@ -343,6 +466,7 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
     alumnos_baja = db.query(func.count(Usuario.id)).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
+        Usuario.es_prueba.is_(False),
         dia_chile(Usuario.fecha_baja) >= inicio,
         dia_chile(Usuario.fecha_baja) <= fin,
     ).scalar() or 0
@@ -368,36 +492,17 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
     # Mensual la publica separada del MRR y del ingreso neto del mes (caja).
     ingresos_bazar = metricas.ventas_bazar(db, tenant_id, inicio, fin)
 
-    # ── Asistencia ──
-    # Solo clases REALIZADAS del mes (ya terminaron y no canceladas; definición única de
-    # `clases_service`): en el mes en curso descarta las futuras, y en un mes cerrado no cambia.
-    asistentes_mes = db.query(
-        func.coalesce(func.sum(Clase.asistentes_confirmados), 0)
-    ).filter(
-        Clase.tenant_id == tenant_id,
-        Clase.fecha >= inicio, Clase.fecha <= fin,
-        text(sql_clase_realizada("clases")),
-    ).scalar() or 0
-
-    # Reservas CONFIRMADAS del mes, pero SOLO de las clases REALIZADAS — el MISMO
-    # predicado que `asistentes_mes`. Si el denominador incluyera las clases futuras, en
-    # el mes EN CURSO la tasa salía artificialmente baja (2026-10-06: 67.65% contra 100%
-    # real, porque las clases futuras ya tienen reservas). En un mes cerrado todas las
-    # clases terminaron, así que el número no cambia (y en TEST/PROD no hay clases
-    # `cancelada`, así que tampoco cambia por descartarlas).
-    reservas_mes = db.query(func.count(Reserva.id)).join(
-        Clase, Reserva.clase_id == Clase.id
-    ).filter(
-        Reserva.tenant_id == tenant_id,
-        Clase.fecha >= inicio, Clase.fecha <= fin,
-        Reserva.estado == "confirmada",
-        text(sql_clase_realizada("clases")),
-    ).scalar() or 0
+    # ── Asistencia REAL ──
+    # `reservas.asistio` (lo que marcó el coach) sobre las reservas confirmadas
+    # de las clases realizadas. NO `clases.asistentes_confirmados` (ese contador
+    # es de cupos reservados y hacía que la tasa diera ~100 % por construcción).
+    asistencia = calcular_asistencia_mes(db, tenant_id, inicio, fin)
+    asistentes_mes = asistencia["asistentes"]
+    reservas_mes = asistencia["reservas"]
 
     # Definicion COMPARTIDA con Reportes (metricas_service.ocupacion_promedio).
     ocupacion_promedio = metricas.ocupacion_promedio(db, tenant_id, inicio, fin)
-    asistencia_promedio = round(
-        asistentes_mes / reservas_mes * 100, 2) if reservas_mes else 0
+    asistencia_promedio = asistencia["asistencia_promedio"]
 
     # `frecuencia_semanal` = asistentes por semana por alumno activo. El divisor son las
     # semanas TRANSCURRIDAS del período, NO las del mes completo: en el mes EN CURSO el
@@ -644,6 +749,7 @@ def populate_predictions(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
         Usuario.estado == "activo",
+        Usuario.es_prueba.is_(False),
     ).all()
 
     # ── Modelos ML entrenados (opcionales) ───────────────────────────────────
@@ -818,8 +924,13 @@ def populate_predictions(
 
     alumnos_activos_hoy = db.query(
         func.count(func.distinct(Suscripcion.usuario_id))
+    ).join(
+        Usuario, Usuario.id == Suscripcion.usuario_id
     ).filter(
         Suscripcion.tenant_id == tenant_id,
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == RolUsuario.alumno,
+        Usuario.es_prueba.is_(False),
         Suscripcion.estado == "activo",
         dia_chile(Suscripcion.fecha_expiracion) >= hoy,
     ).scalar() or 0

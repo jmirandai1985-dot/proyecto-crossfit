@@ -18,7 +18,7 @@ import math
 from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 import ml.features as features
 from app.core.estados import dia_chile, plan_comercial   # el MISMO criterio que los features y el BI
@@ -28,6 +28,7 @@ from app.models.transaccion_financiera import TransaccionFinanciera
 # La asistencia REAL del panel: el label del churn se construye con lo mismo que ve el box
 # (`services/asistencia_real.py`), no con la tabla histórica `asistencias`, que nadie puebla.
 from app.services.asistencia_real import asistencias_entre_por_alumno
+from app.services.metricas_service import sql_transaccion_real
 from app.utils.santiago import hoy_santiago   # `fecha_ref` por defecto: HOY en Chile
 
 # ── Hiperparámetros (ajustables desde el endpoint/CLI) ──
@@ -241,7 +242,12 @@ FEATURE_COLS_FORECAST = ["t", "sin_mes", "cos_mes"]
 
 
 def _sum_tipo(db, tenant_id, tipo, desde, hasta) -> float:
-    """SUM de montos por tipo ('ingreso'/'egreso') en [desde, hasta]."""
+    """SUM de montos por tipo ('ingreso'/'egreso') en [desde, hasta].
+
+    Excluye las transacciones atribuibles a una cuenta `es_prueba` (misma regla
+    que `metricas.ingresos_netos`): la serie histórica del forecast no puede
+    aprender de datos de demostración.
+    """
     return float(db.query(
         func.coalesce(func.sum(TransaccionFinanciera.monto), 0)
     ).filter(
@@ -249,6 +255,7 @@ def _sum_tipo(db, tenant_id, tipo, desde, hasta) -> float:
         TransaccionFinanciera.tipo == tipo,
         TransaccionFinanciera.fecha >= desde,
         TransaccionFinanciera.fecha <= hasta,
+        text(sql_transaccion_real("transacciones_financieras")),
     ).scalar() or 0)
 
 

@@ -29,6 +29,8 @@ from app.models.segmentacion_alumno import SegmentacionAlumno
 from app.models.usuario import Usuario
 from app.services import churn_service
 from app.services import plan_vencimiento
+from app.services.metricas_service import (MIN_BASE_RETENCION, sql_usuario_real,
+                                           sql_transaccion_real)
 # La asistencia REAL del panel (`reservas.asistio` sobre la fecha de la clase): UNA sola definición
 # para el churn servido en vivo y para las dos consultas crudas de BI (`sql_cte_asistencias()`).
 from app.services.asistencia_real import (asistencias_entre_por_alumno, sql_cte_asistencias,
@@ -938,7 +940,7 @@ def get_financiero(
     """
     tenant_id = current_user["tenant_id"]
 
-    planes = db.execute(sql_text("""
+    planes = db.execute(sql_text(f"""
         WITH tx_plan AS (
             -- Compras normales: la transacción referencia la suscripción.
             SELECT s.plan_id,
@@ -952,6 +954,7 @@ def get_financiero(
               AND t.tipo = 'ingreso'
               AND t.categoria = 'membresia'
               AND t.referencia_tipo = 'suscripcion'
+              AND {sql_transaccion_real("t")}
 
             UNION ALL
 
@@ -968,6 +971,7 @@ def get_financiero(
               AND t.tipo = 'ingreso'
               AND t.categoria = 'membresia'
               AND t.referencia_tipo = 'solicitud_plan'
+              AND {sql_transaccion_real("t")}
         ),
         tx_agg AS (
             -- Se agrega ANTES de unir con `planes`: si las transacciones se
@@ -982,11 +986,19 @@ def get_financiero(
         ),
         subs_agg AS (
             -- Conteo de suscripciones aparte: no se cruza con las transacciones.
-            SELECT plan_id,
+            -- Se une `usuarios` para excluir las cuentas es_prueba: el plan de
+            -- prueba no debe aparecer con suscripciones de demo.
+            SELECT s.plan_id,
                    COUNT(*) AS suscripciones
-            FROM suscripciones
-            WHERE tenant_id = :tid
-            GROUP BY plan_id
+            FROM suscripciones s
+            JOIN usuarios u
+              ON u.id = s.usuario_id
+             AND u.tenant_id = s.tenant_id
+            WHERE s.tenant_id = :tid
+              AND u.rol = 'alumno'
+              AND {sql_usuario_real("u")}
+              AND u.estado = 'activo'
+            GROUP BY s.plan_id
         )
         SELECT p.nombre,
                p.precio_clp,
@@ -1001,12 +1013,13 @@ def get_financiero(
         ORDER BY ingreso_total DESC, suscripciones DESC
     """), {"tid": tenant_id}).fetchall()
 
-    global_tx = db.execute(sql_text("""
+    global_tx = db.execute(sql_text(f"""
         SELECT COUNT(*),
                COALESCE(ROUND(AVG(monto)), 0),
                COALESCE(SUM(monto), 0)
         FROM transacciones_financieras
         WHERE tenant_id = :tid AND tipo = 'ingreso' AND categoria = 'membresia'
+          AND {sql_transaccion_real("transacciones_financieras")}
     """), {"tid": tenant_id}).first()
 
     # ── Matrícula: MISMA forma que `ticket_promedio`, filtrada a su categoría ──
@@ -1014,24 +1027,29 @@ def get_financiero(
     # categoria='matricula', una fila por alumno nuevo). El ticket es el monto
     # fijo vigente del box, salvo que haya cambiado entre medio (por eso promedio
     # y no el valor de configuración de hoy).
-    matricula_tx = db.execute(sql_text("""
+    matricula_tx = db.execute(sql_text(f"""
         SELECT COUNT(*),
                COALESCE(ROUND(AVG(monto)), 0),
                COALESCE(SUM(monto), 0)
         FROM transacciones_financieras
         WHERE tenant_id = :tid AND tipo = 'ingreso' AND categoria = 'matricula'
+          AND {sql_transaccion_real("transacciones_financieras")}
     """), {"tid": tenant_id}).first()
 
-    # Vida del alumno: fecha_baja si está dado de baja; si no, hoy (censura a la
-    # derecha, documentada en `limitaciones`).
-    vida = db.execute(sql_text("""
+    # Vida del alumno para el LTV: sólo alumnos ACTIVOS del box. Se excluyen
+    # los estados 'rechazado' (no son clientes) y 'baja' (ya no están en la
+    # base vigente), además de las cuentas es_prueba. La vida se mide desde el
+    # alta hasta hoy (censura a la derecha, documentada en `limitaciones`).
+    vida = db.execute(sql_text(f"""
         SELECT COUNT(*) AS n_alumnos,
-               COUNT(*) FILTER (WHERE fecha_baja IS NOT NULL) AS n_con_baja,
+               COUNT(*) FILTER (WHERE u.fecha_baja IS NOT NULL) AS n_con_baja,
                COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (
-                   COALESCE(fecha_baja::timestamptz, NOW()) - created_at
+                   COALESCE(u.fecha_baja::timestamptz, NOW()) - u.created_at
                )) / 86400.0)), 0) AS vida_dias
-        FROM usuarios
-        WHERE tenant_id = :tid AND rol = 'alumno'
+        FROM usuarios u
+        WHERE u.tenant_id = :tid AND u.rol = 'alumno'
+          AND u.estado = 'activo'
+          AND {sql_usuario_real("u")}
     """), {"tid": tenant_id}).first()
 
     vida_dias = int(vida[2] or 0)
@@ -1075,8 +1093,9 @@ def get_financiero(
             "n_alumnos": int(vida[0] or 0),
             "n_con_baja": int(vida[1] or 0),
             "formula": (
-                "promedio de días desde el alta hasta la baja (o hasta hoy) de los "
-                "alumnos del box, pasado a meses"),
+                "promedio de días desde el alta hasta hoy de los alumnos "
+                "activos del box, pasado a meses; excluye rechazados, bajas "
+                "y cuentas de prueba"),
             "limitaciones": (
                 "los alumnos que siguen activos sólo aportan el tiempo que llevan "
                 "hasta hoy, así que la vida real de los más antiguos queda "
@@ -1207,9 +1226,10 @@ def get_cohortes(
     filas = db.execute(sql_text(f"""
         WITH {sql_cte_asistencias()},
         altas AS (
-            SELECT id, tenant_id, created_at::date AS alta
-            FROM usuarios
-            WHERE tenant_id = :tid AND rol = 'alumno'
+            SELECT u.id, u.tenant_id, u.created_at::date AS alta
+            FROM usuarios u
+            WHERE u.tenant_id = :tid AND u.rol = 'alumno'
+              AND {sql_usuario_real("u")}
         )
         SELECT to_char(date_trunc('month', alta), 'YYYY-MM') AS cohorte,
                COUNT(*) AS n_alumnos,
@@ -1234,11 +1254,14 @@ def get_cohortes(
 
     def _h(evaluables, activos):
         evaluables, activos = int(evaluables or 0), int(activos or 0)
+        # Mismo umbral que `metricas.retencion_cohorte` y la tarjeta de churn:
+        # con menos de 5 evaluables el porcentaje no representa al box y se
+        # publica n/d (None), no un 25 % de 4 personas.
         return {
             "evaluables": evaluables,
             "activos": activos,
             "retencion_pct": (round(activos / evaluables * 100, 1)
-                              if evaluables else None),
+                              if evaluables >= MIN_BASE_RETENCION else None),
         }
 
     cohortes = [

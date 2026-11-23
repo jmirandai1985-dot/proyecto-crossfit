@@ -17,7 +17,8 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from shared.estados import (lista_sql_pago_bazar, sql_fecha_en_chile,
+from shared.estados import (ESTADOS_USUARIO_SIN_MRR, lista_sql,
+                            lista_sql_pago_bazar, sql_fecha_en_chile,
                             sql_plan_comercial, sql_suscripcion_vigente)
 from app.services.clases_service import sql_clase_realizada
 from app.utils.santiago import hoy_santiago
@@ -28,6 +29,69 @@ from app.utils.santiago import hoy_santiago
 # dias contra 76 hoy daba 7600 por ciento). Bajo el umbral se devuelve None y la
 # UI muestra que no hay dato.
 MIN_BASE_RETENCION = 5
+
+
+def sql_usuario_real(alias: str = "u") -> str:
+    """Predicado SQL: el usuario NO es una cuenta de prueba/demostración.
+
+    Las cuentas de prueba/demo (administradores, testers, datos de demostración)
+    llevan `usuarios.es_prueba = true` y se excluyen de TODAS las métricas de
+    KPIs. Para consultas ORM el equivalente es `Usuario.es_prueba.is_(False)`.
+
+    `alias` es una constante del código (p. ej. "u", "usuarios"), nunca texto de
+    un request: se interpola en el SQL como el resto de los predicados
+    compartidos de `shared/estados.py`.
+    """
+    return f"NOT {alias}.es_prueba"
+
+
+def sql_transaccion_real(alias_tx: str = "t") -> str:
+    """Predicado SQL: deja pasar una transacción si su usuario NO es `es_prueba`.
+
+    `transacciones_financieras` no tiene `usuario_id`; el usuario se resuelve por
+    la referencia:
+      * `referencia_tipo='suscripcion'` → `suscripciones.usuario_id`
+      * `referencia_tipo='solicitud_plan'` → `solicitudes_planes.alumno_id`
+      * `referencia_tipo='pedido'` → `pedidos.alumno_id` (Bazar)
+
+    Regla de los casos ambiguos: una transacción SIN referencia, con
+    `referencia_id` NULL, con un `referencia_tipo` desconocido o cuya fila
+    destino no existe, **se cuenta** (no se puede probar que sea de una cuenta
+    de prueba). Sólo se excluye cuando el destino existe y su usuario tiene
+    `es_prueba = true`. Se usa `NOT EXISTS` para no duplicar filas.
+
+    `alias_tx` es una constante del código (p. ej. "t",
+    "transacciones_financieras"), nunca texto de un request.
+    """
+    t = alias_tx
+    return (
+        f"({t}.referencia_tipo IS NULL"
+        f" OR {t}.referencia_id IS NULL"
+        f" OR {t}.referencia_tipo NOT IN "
+        f"('suscripcion', 'solicitud_plan', 'pedido')"
+        f" OR ({t}.referencia_tipo = 'suscripcion' AND NOT EXISTS ("
+        f"   SELECT 1 FROM suscripciones s"
+        f"   JOIN usuarios u ON u.id = s.usuario_id"
+        f"   WHERE s.id = {t}.referencia_id"
+        f"     AND s.tenant_id = {t}.tenant_id"
+        f"     AND u.tenant_id = s.tenant_id"
+        f"     AND u.es_prueba = true))"
+        f" OR ({t}.referencia_tipo = 'solicitud_plan' AND NOT EXISTS ("
+        f"   SELECT 1 FROM solicitudes_planes sp"
+        f"   JOIN usuarios u ON u.id = sp.alumno_id"
+        f"   WHERE sp.id = {t}.referencia_id"
+        f"     AND sp.tenant_id = {t}.tenant_id"
+        f"     AND u.tenant_id = sp.tenant_id"
+        f"     AND u.es_prueba = true))"
+        f" OR ({t}.referencia_tipo = 'pedido' AND NOT EXISTS ("
+        f"   SELECT 1 FROM pedidos p"
+        f"   JOIN usuarios u ON u.id = p.alumno_id"
+        f"   WHERE p.id = {t}.referencia_id"
+        f"     AND p.tenant_id = {t}.tenant_id"
+        f"     AND u.tenant_id = p.tenant_id"
+        f"     AND u.es_prueba = true))"
+        f")"
+    )
 
 
 def _vigente_sql(param_fecha):
@@ -52,6 +116,7 @@ def _vigente_sql(param_fecha):
         " u.tenant_id = :tid"
         " AND u.rol = 'alumno'"
         " AND u.estado = 'activo'"
+        " AND " + sql_usuario_real("u") +
         " AND EXISTS ("
         "   SELECT 1 FROM suscripciones s"
         "   JOIN planes p ON p.id = s.plan_id"
@@ -78,12 +143,22 @@ def mrr(db: Session, tenant_id: int, hasta: date) -> float:
     la variacion de MRR cambiaba sin que hubiera pasado nada en el negocio). El
     estado solo descarta lo que NUNCA estuvo vigente (`pendiente`/`rechazado`,
     `ESTADOS_SUSCRIPCION_NUNCA_VIGENTES` en shared/estados.py).
+
+    Solo cuentan suscripciones de ALUMNOS REALES (2026-11-22): se une `usuarios`
+    y se excluyen `u.rol != 'alumno'`, `u.es_prueba = true` (administradores,
+    testers, cuentas de prueba y datos de demostración) y los estados de
+    `ESTADOS_USUARIO_SIN_MRR` (`rechazado`). Un alta rechazada puede tener una
+    suscripción date-vigente; no es un cliente y no debe inflar el MRR.
     """
     valor = db.execute(text("""
         SELECT COALESCE(SUM(p.precio_clp), 0)
         FROM suscripciones s
         JOIN planes p ON s.plan_id = p.id
+        JOIN usuarios u ON u.id = s.usuario_id AND u.tenant_id = s.tenant_id
         WHERE s.tenant_id = :tid
+          AND u.rol = 'alumno'
+          AND """ + sql_usuario_real("u") + """
+          AND u.estado NOT IN (""" + lista_sql(ESTADOS_USUARIO_SIN_MRR) + """)
           AND """ + sql_suscripcion_vigente("s", ":hasta") + """
           AND """ + sql_plan_comercial("p") + """
     """), {"tid": tenant_id, "hasta": hasta}).scalar() or 0
@@ -98,15 +173,17 @@ def ingresos_netos(db: Session, tenant_id: int, inicio: date, fin: date) -> floa
     su vez alimenta el LTV del BI).
     """
     params = {"tid": tenant_id, "ini": inicio, "fin": fin}
-    ing = db.execute(text("""
+    ing = db.execute(text(f"""
         SELECT COALESCE(SUM(monto), 0) FROM transacciones_financieras
         WHERE tenant_id = :tid AND tipo = 'ingreso'
           AND fecha >= :ini AND fecha <= :fin
+          AND {sql_transaccion_real("transacciones_financieras")}
     """), params).scalar() or 0
-    egr = db.execute(text("""
+    egr = db.execute(text(f"""
         SELECT COALESCE(SUM(monto), 0) FROM transacciones_financieras
         WHERE tenant_id = :tid AND tipo = 'egreso'
           AND fecha >= :ini AND fecha <= :fin
+          AND {sql_transaccion_real("transacciones_financieras")}
     """), params).scalar() or 0
     return float(ing) - float(egr)
 
@@ -160,6 +237,11 @@ def ventas_bazar_detalle(db: Session, tenant_id: int, inicio: date, fin: date) -
         "   AND " + sql_fecha_en_chile("p.fecha_pedido") + " >= :desde"
         "   AND " + sql_fecha_en_chile("p.fecha_pedido") + " <= :hasta"
         "   AND p.estado IN (" + lista_sql_pago_bazar() + ")"
+        "   AND NOT EXISTS ("
+        "     SELECT 1 FROM usuarios u"
+        "     WHERE u.id = p.alumno_id"
+        "       AND u.tenant_id = p.tenant_id"
+        "       AND u.es_prueba = true)"
     ), {"tid": tenant_id, "desde": inicio, "hasta": fin}).first()
     return {
         "monto": float(fila[0] or 0) if fila else 0.0,
