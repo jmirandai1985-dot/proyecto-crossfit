@@ -46,8 +46,13 @@ def _disc(nombre="CrossFit", requiere=True, open_box=False):
                            es_open_box=open_box)
 
 
-def _horario(inicio, fin):
-    return SimpleNamespace(hora_inicio=inicio, hora_fin=fin)
+def _horario(inicio, fin, disciplina=None):
+    """Fila (HorarioBase, Disciplina) de la consulta de solapamiento."""
+    return (
+        SimpleNamespace(id=1, dia_semana=1, hora_inicio=inicio,
+                        hora_fin=fin, activo=True),
+        disciplina or _disc(),
+    )
 
 
 def _coach_row(horario_id, coach_id, dia, inicio, fin, disciplina,
@@ -89,6 +94,54 @@ def test_solo_valida_disciplinas_con_coach():
     db = _DB([_horario(time(10), time(11))])
     _validar_solapamiento_horario(
         db, 1, _disc(requiere=False), 1, "10:15", "10:45")
+
+
+# ── Levantamiento Olímpico: tiene coach, pero puede solaparse ────────────────
+def test_levantamiento_olimpico_se_solapa_con_crossfit():
+    """LO + CrossFit a la misma hora: permitido (se identifica sin tildes)."""
+    lo = _disc("LEVANTAMIENTO OLIMPICO")
+    db = _DB([_horario(time(19), time(20), lo)])
+    _validar_solapamiento_horario(
+        db, 1, _disc("CrossFit"), 1, "19:00", "20:00")
+
+
+def test_levantamiento_olimpico_se_solapa_con_gap():
+    """LO + Gap (ambos con coach) a la misma hora: permitido."""
+    lo = _disc("levantamiento olímpico")       # con tilde: se normaliza igual
+    db = _DB([_horario(time(19), time(20), lo)])
+    _validar_solapamiento_horario(
+        db, 1, _disc("Gap"), 1, "19:00", "20:00")
+
+
+def test_levantamiento_olimpico_se_solapa_con_open_box():
+    """LO + Open Box: permitido por ambos lados (LO y sala libre)."""
+    open_box = _disc("Open Box", requiere=False, open_box=True)
+    db = _DB([_horario(time(19), time(20), open_box)])
+    _validar_solapamiento_horario(
+        db, 1, _disc("Levantamiento Olímpico"), 1, "19:00", "20:00")
+
+    db_lo = _DB([_horario(time(19), time(20), _disc("Levantamiento Olímpico"))])
+    _validar_solapamiento_horario(
+        db_lo, 1, open_box, 1, "19:00", "20:00")
+
+
+def test_dos_clases_de_crossfit_con_coach_chocan():
+    db = _DB([_horario(time(19), time(20), _disc("CrossFit"))])
+    with pytest.raises(HTTPException) as exc:
+        _validar_solapamiento_horario(
+            db, 1, _disc("CrossFit"), 1, "19:00", "20:00")
+    assert exc.value.status_code == 409
+    assert "CrossFit 19:00-20:00" in exc.value.detail
+
+
+def test_dos_disciplinas_con_coach_sin_lo_tambien_chocan():
+    """La regla no depende de la sala: CrossFit + Gap se pisan."""
+    db = _DB([_horario(time(19), time(20), _disc("Gap"))])
+    with pytest.raises(HTTPException) as exc:
+        _validar_solapamiento_horario(
+            db, 1, _disc("CrossFit"), 1, "19:00", "20:00")
+    assert exc.value.status_code == 409
+    assert "Gap 19:00-20:00" in exc.value.detail
 
 
 def test_normaliza_nombre_de_coach_y_respeta_demo():

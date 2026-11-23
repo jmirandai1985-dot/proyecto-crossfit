@@ -20,19 +20,18 @@ from app.utils.db_commit import commit_o_4xx
 
 router = APIRouter()
 
-# Disciplinas de sala libre / sin coach: sus horarios NO se validan por
-# solapamiento (el box puede tener varias actividades en paralelo).
+# Disciplinas que NO bloquean el solapamiento de horarios: salas libres/sin
+# coach (Musculación, Open Box) y Levantamiento Olímpico. LO tiene coach, pero
+# puede compartir día y hora con cualquier otra clase (regla de negocio).
 DISCIPLINAS_SIN_SOLAPAMIENTO = {
     "musculacion", "musculación", "open box", "levantamiento olimpico",
     "levantamiento olímpico",
 }
 
 # Cruce de coach entre disciplinas: el mismo coach no puede dictar dos clases que
-# se pisen, aunque sean de disciplinas y salas distintas. Quedan fuera las salas
-# de acceso libre (sin coach) y, TEMPORALMENTE, Levantamiento Olímpico: ya está
-# definido que puede coincidir con CrossFit y la regla se revisará después.
-# ⚠️ EXCLUSIÓN TEMPORAL: no cambiar el modelo ni `horarios_coach`; cuando se
-# revise la regla, quitar "levantamiento olimpico" de este set.
+# se pisen, aunque sean de disciplinas distintas. Quedan fuera las salas de
+# acceso libre (sin coach) y Levantamiento Olímpico: tiene coach, pero puede
+# coincidir con cualquier otra clase (crossfit, levantamiento de crossfit, gap).
 DISCIPLINAS_SIN_CRUCE_COACH = {
     "musculacion", "open box", "levantamiento olimpico",
 }
@@ -49,40 +48,58 @@ def _hora(valor) -> hora_cls:
     return hora_cls.fromisoformat(str(valor)[:8])
 
 
-def _validar_solapamiento_horario(db, tenant_id, disciplina, dia_semana,
-                                   hora_inicio, hora_fin, excluir_id=None):
-    """Rechaza dos horarios del MISMO bloque/sala que se pisen.
+def _disciplina_sin_solapamiento(disciplina) -> bool:
+    """True si la disciplina NO entra en la regla de solapamiento de horarios.
 
-    Sólo se valida para disciplinas con coach (CrossFit y similares). Quedan
-    fuera Musculación, Open Box y Levantamiento Olímpico. Los huecos entre
-    bloques son válidos: la regla es estricta (`inicio_A < fin_B AND
-    fin_A > inicio_B`), no "tocarse".
+    Sin coach (Musculación / Open Box, `requiere_coach=False` o `es_open_box`) y
+    Levantamiento Olímpico: tiene coach, pero puede convivir con cualquier otra
+    clase (crossfit, levantamiento de crossfit, gap, etc.). Se compara por nombre
+    normalizado: sin mayúsculas ni tildes.
     """
     if disciplina is None or not disciplina.requiere_coach or disciplina.es_open_box:
-        return
-    nombre = _normalizar_nombre_disciplina(disciplina.nombre)
-    if nombre in DISCIPLINAS_SIN_SOLAPAMIENTO:
+        return True
+    return _normalizar_nombre_disciplina(disciplina.nombre) in DISCIPLINAS_SIN_SOLAPAMIENTO
+
+
+def _validar_solapamiento_horario(db, tenant_id, disciplina, dia_semana,
+                                   hora_inicio, hora_fin, excluir_id=None):
+    """Rechaza dos horarios de disciplinas CON COACH que se pisen el mismo día.
+
+    No se compara por sala (no existen en esta regla): dos clases con coach que
+    comparten día y se solapan chocan. La excepción es Levantamiento Olímpico
+    (ver `_disciplina_sin_solapamiento`): si la disciplina nueva O la existente es
+    LO, el choque se permite. Los huecos entre bloques son válidos: la regla es
+    estricta (`inicio_A < fin_B AND fin_A > inicio_B`), no "tocarse".
+    """
+    if _disciplina_sin_solapamiento(disciplina):
         return
 
     inicio = _hora(hora_inicio)
     fin = _hora(hora_fin)
-    query = db.query(HorarioBase).filter(
-        HorarioBase.tenant_id == tenant_id,
-        HorarioBase.disciplina_id == disciplina.id,
-        HorarioBase.dia_semana == dia_semana,
-        HorarioBase.activo.is_(True),
+    query = (
+        db.query(HorarioBase, Disciplina)
+        .join(Disciplina, Disciplina.id == HorarioBase.disciplina_id)
+        .filter(
+            HorarioBase.tenant_id == tenant_id,
+            HorarioBase.dia_semana == dia_semana,
+            HorarioBase.activo.is_(True),
+        )
     )
     if excluir_id is not None:
         query = query.filter(HorarioBase.id != excluir_id)
-    for otro in query.all():
+    for otro, otra_disciplina in query.all():
+        # La otra clase también tiene que estar sujeta a la regla. Esto es lo
+        # que deja pasar cualquier cruce donde UNA de las dos sea LO.
+        if _disciplina_sin_solapamiento(otra_disciplina):
+            continue
         if inicio < _hora(otro.hora_fin) and fin > _hora(otro.hora_inicio):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    f"El horario se solapa con {disciplina.nombre} "
+                    f"El horario se solapa con {otra_disciplina.nombre} "
                     f"{_hora(otro.hora_inicio).strftime('%H:%M')}-"
                     f"{_hora(otro.hora_fin).strftime('%H:%M')} "
-                    f"(misma sala). Ajusta el inicio o el fin."
+                    "ese día. Ajusta el inicio o el fin."
                 ),
             )
 
@@ -90,8 +107,9 @@ def _validar_solapamiento_horario(db, tenant_id, disciplina, dia_semana,
 def _disciplina_sin_cruce_coach(disciplina) -> bool:
     """True si la disciplina NO entra en la regla de cruce de coach.
 
-    Sin coach (Musculación / Open Box, `requiere_coach=False` o `es_open_box`) y,
-    TEMPORALMENTE, Levantamiento Olímpico (ver `DISCIPLINAS_SIN_CRUCE_COACH`).
+    Sin coach (Musculación / Open Box, `requiere_coach=False` o `es_open_box`) y
+    Levantamiento Olímpico: tiene coach, pero puede coincidir con cualquier otra
+    clase (ver `DISCIPLINAS_SIN_CRUCE_COACH`).
     """
     if disciplina is None or not disciplina.requiere_coach or disciplina.es_open_box:
         return True
