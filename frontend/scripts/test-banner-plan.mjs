@@ -37,6 +37,46 @@ eq(textoBannerPlan(null), null, 'membresia nula -> null');
     eq(b.asegurado, true, 'en cola (clases): candado (asegurado)');
 }
 
+// ── Plan en cola con el plan vigente AGOTADO (0 clases) ─────────────────────
+// La fecha de vencimiento ya no manda: el backend activa la cola por lo que
+// ocurra PRIMERO (fecha O créditos) en la próxima corrida del job diario.
+{
+    const b = textoBannerPlan(mem({
+        plan_en_cola: true, dias_restantes: 5, clases_disponibles: 0,
+        fecha_vencimiento: '2025-05-12',
+    }));
+    eq(b.detalle, 'Tu próximo plan ya está pagado y se activa al día siguiente.',
+        'en cola + 0 créditos: "al día siguiente" (ignora la fecha de vencimiento)');
+    eq(b.asegurado, true, 'en cola + 0 créditos: candado (asegurado)');
+}
+// Con créditos todavía disponibles se MANTIENE la fecha actual.
+{
+    const b = textoBannerPlan(mem({
+        plan_en_cola: true, dias_restantes: 5, clases_disponibles: 3,
+        fecha_vencimiento: '2025-05-12',
+    }));
+    eq(b.detalle, 'Tu próximo plan ya está pagado y se activa el 13 de mayo.',
+        'en cola + créditos: mantiene la fecha de activación');
+}
+// Ilimitado: `clases_disponibles` puede venir NULL/0 y NO es "agotado".
+{
+    const b = textoBannerPlan(mem({
+        es_ilimitado: true, plan_en_cola: true, dias_restantes: 5,
+        clases_disponibles: null, fecha_vencimiento: '2025-05-12',
+    }));
+    eq(b.detalle, 'Tu próximo plan ya está pagado y se activa el 13 de mayo.',
+        'ilimitado + plan en cola: no lo trata como créditos agotados');
+}
+// Sin plan en cola el mensaje sigue siendo el de renovar, aunque no queden clases.
+{
+    const b = textoBannerPlan(mem({
+        plan_en_cola: false, dias_restantes: 5, clases_disponibles: 0,
+        fecha_vencimiento: '2025-05-12',
+    }));
+    eq(b.detalle, 'Renueva ahora para no quedarte sin clases.',
+        'sin plan en cola: nudge de renovar aunque no queden clases');
+}
+
 // ── Fecha de activación derivada del vencimiento (+1 día) ───────────────────
 {
     const b = textoBannerPlan(mem({ plan_en_cola: true, dias_restantes: 5, clases_disponibles: 10, fecha_vencimiento: '2025-05-12' }));

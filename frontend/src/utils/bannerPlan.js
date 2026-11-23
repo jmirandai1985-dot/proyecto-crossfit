@@ -56,12 +56,20 @@ export const textoBannerPlan = (membresia) => {
     })();
 
     const fechaCola = fechaActivacionPlanCola(membresia?.fecha_vencimiento);
+    // Si el plan vigente YA agotó sus clases y hay uno pagado en cola, no sirve
+    // mostrar una fecha derivada del vencimiento: el backend activa la cola por lo
+    // que ocurra PRIMERO (fecha O créditos), así que en la próxima corrida del job
+    // el plan nuevo arranca ("al día siguiente"). Un plan ilimitado no tiene
+    // créditos que agotar, por eso no entra en esta rama.
+    const sinCreditos = !ilimitado && clases === 0;
 
     // Detalle: la fecha de activación del plan en cola (o el llamado a renovar).
     const detalle = planEnCola
-        ? (fechaCola
-            ? `Tu próximo plan ya está pagado y se activa el ${fechaCola}.`
-            : 'Tu próximo plan ya está pagado y se activa al día siguiente.')
+        ? (sinCreditos
+            ? 'Tu próximo plan ya está pagado y se activa al día siguiente.'
+            : (fechaCola
+                ? `Tu próximo plan ya está pagado y se activa el ${fechaCola}.`
+                : 'Tu próximo plan ya está pagado y se activa al día siguiente.'))
         : 'Renueva ahora para no quedarte sin clases.';
 
     return {
