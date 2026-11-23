@@ -304,7 +304,7 @@ const Reportes = () => {
             <div className="space-y-6">
                 {/* Título */}
                 <div>
-                    <h1 className="text-3xl font-bold text-zinc-100">Reportes & Analytics</h1>
+                    <h1 className="text-3xl font-bold text-zinc-100">Reportes &amp; Analytics</h1>
                     <p className="text-zinc-400 mt-1">Análisis de desempeño y estadísticas de tu box</p>
                 </div>
 
