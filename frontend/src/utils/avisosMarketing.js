@@ -528,7 +528,9 @@ export function contarPorEstado(avisos, ahora = new Date()) {
         if (estado === 'vigente') conteo.vigentes += 1;
         else if (estado === 'programado') conteo.programados += 1;
         else conteo.vencidos += 1;
-        if (aviso.fijado_arriba) conteo.fijados += 1;
+        // "Fijados arriba": vigencia no vencida (fecha_fin >= hoy).
+        // Incluye los programados que todavía no empiezan, pero NO los vencidos.
+        if (aviso.fijado_arriba && estado !== 'vencido') conteo.fijados += 1;
     }
     return conteo;
 }

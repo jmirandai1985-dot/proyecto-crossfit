@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import date
+from datetime import date, time as hora_cls
 
 from app.db.database import get_db
 from app.models.horario_base import HorarioBase
@@ -18,6 +18,62 @@ from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso 
 from app.utils.db_commit import commit_o_4xx
 
 router = APIRouter()
+
+# Disciplinas de sala libre / sin coach: sus horarios NO se validan por
+# solapamiento (el box puede tener varias actividades en paralelo).
+DISCIPLINAS_SIN_SOLAPAMIENTO = {
+    "musculacion", "musculación", "open box", "levantamiento olimpico",
+    "levantamiento olímpico",
+}
+
+
+def _normalizar_nombre_disciplina(nombre: str) -> str:
+    return (nombre or "").strip().lower().replace("á", "a").replace("é", "e") \
+        .replace("í", "i").replace("ó", "o").replace("ú", "u")
+
+
+def _hora(valor) -> hora_cls:
+    if isinstance(valor, hora_cls):
+        return valor
+    return hora_cls.fromisoformat(str(valor)[:8])
+
+
+def _validar_solapamiento_horario(db, tenant_id, disciplina, dia_semana,
+                                   hora_inicio, hora_fin, excluir_id=None):
+    """Rechaza dos horarios del MISMO bloque/sala que se pisen.
+
+    Sólo se valida para disciplinas con coach (CrossFit y similares). Quedan
+    fuera Musculación, Open Box y Levantamiento Olímpico. Los huecos entre
+    bloques son válidos: la regla es estricta (`inicio_A < fin_B AND
+    fin_A > inicio_B`), no "tocarse".
+    """
+    if disciplina is None or not disciplina.requiere_coach or disciplina.es_open_box:
+        return
+    nombre = _normalizar_nombre_disciplina(disciplina.nombre)
+    if nombre in DISCIPLINAS_SIN_SOLAPAMIENTO:
+        return
+
+    inicio = _hora(hora_inicio)
+    fin = _hora(hora_fin)
+    query = db.query(HorarioBase).filter(
+        HorarioBase.tenant_id == tenant_id,
+        HorarioBase.disciplina_id == disciplina.id,
+        HorarioBase.dia_semana == dia_semana,
+        HorarioBase.activo.is_(True),
+    )
+    if excluir_id is not None:
+        query = query.filter(HorarioBase.id != excluir_id)
+    for otro in query.all():
+        if inicio < _hora(otro.hora_fin) and fin > _hora(otro.hora_inicio):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"El horario se solapa con {disciplina.nombre} "
+                    f"{_hora(otro.hora_inicio).strftime('%H:%M')}-"
+                    f"{_hora(otro.hora_fin).strftime('%H:%M')} "
+                    f"(misma sala). Ajusta el inicio o el fin."
+                ),
+            )
 
 
 # ── Body JSON de crear/editar horario ───────────────────────────────────────
@@ -70,6 +126,10 @@ def crear_horario(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="La disciplina no existe o no pertenece a este box",
         )
+    _validar_solapamiento_horario(
+        db, tenant_id, disc, body.dia_semana,
+        body.hora_inicio, body.hora_fin,
+    )
     db_horario = HorarioBase(
         tenant_id=tenant_id,
         disciplina_id=body.disciplina_id,
@@ -213,6 +273,17 @@ def actualizar_horario(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes acceso a este horario",
         )
+    disciplina_efectiva = db.query(Disciplina).filter(
+        Disciplina.id == (body.disciplina_id or horario.disciplina_id),
+        Disciplina.tenant_id == tenant_id,
+    ).first()
+    _validar_solapamiento_horario(
+        db, tenant_id, disciplina_efectiva,
+        body.dia_semana if body.dia_semana is not None else horario.dia_semana,
+        body.hora_inicio or horario.hora_inicio,
+        body.hora_fin or horario.hora_fin,
+        excluir_id=horario.id,
+    )
     if body.dia_semana is not None:
         horario.dia_semana = body.dia_semana
     if body.hora_inicio is not None:

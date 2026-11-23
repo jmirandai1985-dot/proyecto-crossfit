@@ -69,6 +69,16 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 @router.put("/cambiar-password", status_code=status.HTTP_200_OK)
+def _normalizar_nombre_coach(nombre: str, rol, es_prueba: bool = False,
+                             correo: str = "") -> str:
+    """Capitaliza el nombre de un coach; no toca cuentas demo ni de prueba."""
+    if str(getattr(rol, "value", rol)) != "coach":
+        return nombre
+    if es_prueba or "demo" in (nombre or "").lower() or "demo" in (correo or "").lower():
+        return nombre
+    return " ".join((nombre or "").strip().split()).title()
+
+
 def cambiar_password(
     datos: CambiarPasswordRequest,
     current_user: dict = Depends(get_current_user),
@@ -165,7 +175,8 @@ def crear_usuario(
     db_usuario = Usuario(
         tenant_id=usuario_data.tenant_id,
         rut=usuario_data.rut,
-        nombre=usuario_data.nombre,
+        nombre=_normalizar_nombre_coach(
+            usuario_data.nombre, usuario_data.rol, correo=usuario_data.correo),
         telefono=usuario_data.telefono,
         correo=usuario_data.correo,
         password_hash=hash_password(usuario_data.password),
@@ -409,6 +420,8 @@ def listar_usuarios(
         False, description="Agrega `membresia` (plan, cupo, vencimiento) y "
                            "`ultima_asistencia` a cada fila. Default false: los "
                            "listados existentes no cambian ni pagan consultas extra."),
+    excluir_prueba: bool = Query(
+        False, description="Si true, oculta las cuentas `es_prueba` del padrón."),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
@@ -440,6 +453,9 @@ def listar_usuarios(
 
     if rol is not None:
         query = query.filter(Usuario.rol == rol)
+
+    if excluir_prueba:
+        query = query.filter(Usuario.es_prueba.is_(False))
 
     if buscar and buscar.strip():
         # Sin mayúsculas NI tildes: el patrón y la columna se normalizan igual (kpis.py).
@@ -516,6 +532,16 @@ def actualizar_usuario(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Ya existe otro usuario con el correo {update_data['correo']} en este box"
             )
+
+    # Coaches: capitalizar el nombre al guardar. Se resuelve con el rol FINAL
+    # (por si el PUT cambia rol y nombre a la vez) y se omite en demo/prueba.
+    if "nombre" in update_data:
+        rol_para_nombre = update_data.get("rol", usuario.rol)
+        update_data["nombre"] = _normalizar_nombre_coach(
+            update_data["nombre"], rol_para_nombre,
+            es_prueba=bool(getattr(usuario, "es_prueba", False)),
+            correo=update_data.get("correo", usuario.correo),
+        )
 
     for field, value in update_data.items():
         setattr(usuario, field, value)

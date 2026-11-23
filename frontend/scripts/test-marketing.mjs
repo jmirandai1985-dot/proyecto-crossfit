@@ -97,6 +97,10 @@ eq(conteo.vigentes, 2, 'vigentes');
 eq(conteo.programados, 1, 'programados');
 eq(conteo.vencidos, 1, 'vencidos');
 eq(conteo.fijados, 1, 'fijados');
+eq(contarPorEstado([{ ...pasado, fijado_arriba: true }], AHORA).fijados, 0,
+    'un fijado vencido no cuenta como "fijados arriba"');
+eq(contarPorEstado([{ ...futuro, fijado_arriba: true }], AHORA).fijados, 1,
+    'un fijado programado (vigencia no vencida) sí cuenta');
 eq(contarPorEstado(undefined, AHORA).total, 0, 'sin lista no rompe');
 
 // ── 6. El formulario: validación espejo del backend ─────────────────────────

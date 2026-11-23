@@ -83,6 +83,7 @@ export const badgeEstado = (usuario) => {
  */
 export const paramsAlumnos = ({
     rol = 'alumno', porPagina = 25, pagina = 1, buscar = '', estado = '',
+    excluirPrueba = false,
 } = {}) => ({
     rol,
     limit: porPagina,
@@ -91,6 +92,8 @@ export const paramsAlumnos = ({
     // `estado` es el filtro server-side del padrón (`GET /usuarios/?estado=`).
     // Sin filtro viaja `undefined` para no cambiar el request de siempre.
     estado: String(estado || '').trim() || undefined,
+    // Opt-in: no altera los listados que ya consumen este helper.
+    excluir_prueba: excluirPrueba ? true : undefined,
 });
 
 /** Cuántas páginas tiene el padrón (el total viene del header X-Total-Count). */

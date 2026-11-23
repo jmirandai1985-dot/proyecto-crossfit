@@ -857,7 +857,7 @@ const AdminKpis = () => {
                                 hint={hintConversionMes}
                                 onDetalle={verKpiMensual('mensual:conversion_rate', conversionMes, conversionMes === null ? '' : '%')}
                             />
-                            <KpiCard label="Riesgo de abandono" value={numOrNull(mes.churn_rate)} unit="%" icon={TriangleAlert} color="border-red-500"
+                            <KpiCard label="Riesgo de abandono" value={numOrNull(mes.churn_rate)} unit={numOrNull(mes.churn_rate) === null ? '' : '%'} icon={TriangleAlert} color="border-red-500"
                                 onDetalle={verKpiMensual('mensual:churn_rate', numOrNull(mes.churn_rate), '%')} />
                         </div>
 

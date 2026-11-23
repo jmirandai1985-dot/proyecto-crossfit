@@ -39,6 +39,8 @@ const MSG_EDICION_OK = 'Suscripción actualizada.';
 const Alumnos = () => {
     const { tenant_id } = useAuth();
     const [searchTerm, setSearchTerm] = useState('');
+    // Filtro opcional del padrón: las cuentas `es_prueba` dejan de listarse.
+    const [excluirPrueba, setExcluirPrueba] = useState(false);
     // Lo que viaja al backend es ESTE término (debounce de 350 ms): una request por
     // tecla haría parpadear la tabla y contaría de más al servidor.
     const [busqueda, setBusqueda] = useState('');
@@ -97,7 +99,7 @@ const Alumnos = () => {
     // que vuelva a pedir a mano. `placeholderData` deja la tabla anterior en pantalla
     // mientras llega la nueva (sin parpadeo).
     const { data: datos, isPending: cargandoAlumnos } = useAlumnosPaginados({
-        porPagina, pagina, buscar: busqueda, estado: estadoFiltro,
+        porPagina, pagina, buscar: busqueda, estado: estadoFiltro, excluirPrueba,
     });
     const alumnos = datos?.lista ?? SIN_DATOS;
     const totalAlumnos = datos?.total ?? 0;
@@ -495,6 +497,18 @@ const Alumnos = () => {
                             className="mt-3 w-full px-4 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-zinc-800 text-zinc-100 placeholder:text-zinc-500"
                             aria-label="Buscar alumno por nombre o correo"
                         />
+                        <label className="mt-2 inline-flex items-center gap-2 text-sm text-zinc-300">
+                            <input
+                                type="checkbox"
+                                checked={excluirPrueba}
+                                onChange={(e) => {
+                                    setExcluirPrueba(e.target.checked);
+                                    setPagina(1);
+                                }}
+                                className="h-4 w-4 rounded border-zinc-600 bg-zinc-800 text-orange-500"
+                            />
+                            Excluir cuentas de prueba
+                        </label>
                     </div>
 
                     {/* Vista MÓVIL (<768px): el padrón como TARJETAS con acordeón.

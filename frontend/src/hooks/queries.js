@@ -218,8 +218,9 @@ export const claves = {
     // alumno refresca la tabla sin que la pantalla vuelva a pedirla a mano. El rol,
     // el tamaño de página, la página y el término de búsqueda van en la clave porque
     // cambian el resultado; el tenant lo pone el token.
-    alumnosPaginados: (rol, porPagina, pagina, buscar, estado) =>
-        ['usuarios', 'alumnos', rol, porPagina, pagina, buscar || '', estado || ''],
+    alumnosPaginados: (rol, porPagina, pagina, buscar, estado, excluirPrueba) =>
+        ['usuarios', 'alumnos', rol, porPagina, pagina, buscar || '', estado || '',
+         excluirPrueba ? 'sin-prueba' : 'con-prueba'],
     // Suscripciones ACTIVAS del box (`GET /suscripciones?estado=activo`): de acá salen
     // la columna "Plan Activo", los créditos de cada fila y el "¿ya tiene plan?" del
     // comprobante. Familia propia `['suscripciones']` (distinta de `['membresia']`,
@@ -2260,12 +2261,16 @@ export function useDescargarReporteVentas() {
 // es el que alimentan el pie ("Mostrando A-B de N") y el cálculo de páginas.
 export function useAlumnosPaginados({
     rol = 'alumno', porPagina = 25, pagina = 1, buscar = '', estado = '',
+    excluirPrueba = false,
 } = {}) {
     return useQuery({
-        queryKey: claves.alumnosPaginados(rol, porPagina, pagina, buscar, estado),
+        queryKey: claves.alumnosPaginados(
+            rol, porPagina, pagina, buscar, estado, excluirPrueba),
         queryFn: async () => {
             const resp = await api.get('/api/v1/usuarios/', {
-                params: paramsAlumnos({ rol, porPagina, pagina, buscar, estado }),
+                params: paramsAlumnos({
+                    rol, porPagina, pagina, buscar, estado, excluirPrueba,
+                }),
             });
             return {
                 lista: resp.data || [],

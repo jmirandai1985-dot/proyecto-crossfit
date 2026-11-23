@@ -9,6 +9,7 @@ from app.db.database import get_db
 from app.models.clase import Clase
 from app.models.coach_disciplina import CoachDisciplina
 from app.models.disciplina import Disciplina
+from app.models.horario_base import HorarioBase
 from app.services import asignaciones_clases as asignaciones
 from app.services.asignaciones_clases import (
     ORIGEN_ADMIN,
@@ -344,6 +345,21 @@ def crear_clase(
         Disciplina.id == clase.disciplina_id,
         Disciplina.tenant_id == tenant_id,
     ).first()
+    # No se puede crear/activar una clase si la disciplina no tiene un horario
+    # base activo para ese día: la clase quedaría huérfana y no se podría
+    # sostener en el grid semanal. El mensaje lo muestra el modal tal cual.
+    hay_horario = db.query(HorarioBase).filter(
+        HorarioBase.tenant_id == tenant_id,
+        HorarioBase.disciplina_id == clase.disciplina_id,
+        HorarioBase.dia_semana == clase.fecha.weekday(),
+        HorarioBase.activo.is_(True),
+    ).first()
+    if hay_horario is None:
+        raise HTTPException(
+            status_code=400,
+            detail=("No hay un horario activo para esta disciplina ese día. "
+                    "Crea el horario en Horarios antes de programar la clase."),
+        )
     cupo_maximo = clase.cupo_maximo
     cupo_original = None
     if disciplina is not None and disciplina.es_open_box:

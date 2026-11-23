@@ -15,8 +15,17 @@ const ESTADOS = [
     { key: 'cancelada', label: 'Canceladas' },
 ];
 
+const normalizarEstado = (estado) => {
+    const valor = String(estado || '').toLowerCase();
+    if (valor === 'activo' || valor === 'active') return 'activa';
+    if (valor === 'cancelado') return 'cancelada';
+    if (valor === 'futuro') return 'futura';
+    if (valor === 'pasado') return 'pasada';
+    return valor;
+};
+
 const tonoEstado = (estado) => {
-    switch (estado) {
+    switch (normalizarEstado(estado)) {
         case 'activa': return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
         case 'futura': return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
         case 'pasada': return 'bg-zinc-700/40 text-zinc-400 border-zinc-700';
@@ -25,7 +34,9 @@ const tonoEstado = (estado) => {
     }
 };
 
-const etiquetaEstado = (estado) => ESTADOS.find((e) => e.key === estado)?.label || estado;
+const etiquetaEstado = (estado) => ESTADOS.find(
+    (e) => e.key === normalizarEstado(estado))?.label
+    || normalizarEstado(estado);
 
 /**
  * Suspensiones de plan (panel admin): supervisión + alta de la suspensión por salud.

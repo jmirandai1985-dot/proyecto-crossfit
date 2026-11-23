@@ -100,6 +100,10 @@ eq(paramsAlumnos({ pagina: 0 }).skip, 0, 'página 0 (borde) -> skip 0, nunca neg
 eq(paramsAlumnos({ buscar: '  Ana  ' }).buscar, 'Ana', 'la búsqueda viaja recortada');
 eq(paramsAlumnos({ buscar: '   ' }).buscar, undefined, 'búsqueda en blanco -> undefined (no viaja el param)');
 ok('buscar' in paramsAlumnos({ buscar: 'x' }), 'la clave `buscar` existe (axios omite el undefined)');
+eq(paramsAlumnos().excluir_prueba, undefined,
+    'sin filtro, no viaja `excluir_prueba`');
+eq(paramsAlumnos({ excluirPrueba: true }).excluir_prueba, true,
+    'el filtro opcional excluye cuentas de prueba');
 
 console.log('\n== 7. Paginación: tramo fuera de rango retrocede ==');
 eq(totalPaginas(0, 25), 1, 'sin resultados -> 1 página (nunca 0)');
