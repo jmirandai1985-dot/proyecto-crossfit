@@ -9,6 +9,7 @@ from datetime import date, time as hora_cls
 
 from app.db.database import get_db
 from app.models.horario_base import HorarioBase
+from app.models.horario_coach import HorarioCoach
 from app.models.disciplina import Disciplina
 from app.core.dependencies import get_current_admin, get_current_user
 from app.services import asignaciones_clases as asignaciones
@@ -24,6 +25,16 @@ router = APIRouter()
 DISCIPLINAS_SIN_SOLAPAMIENTO = {
     "musculacion", "musculación", "open box", "levantamiento olimpico",
     "levantamiento olímpico",
+}
+
+# Cruce de coach entre disciplinas: el mismo coach no puede dictar dos clases que
+# se pisen, aunque sean de disciplinas y salas distintas. Quedan fuera las salas
+# de acceso libre (sin coach) y, TEMPORALMENTE, Levantamiento Olímpico: ya está
+# definido que puede coincidir con CrossFit y la regla se revisará después.
+# ⚠️ EXCLUSIÓN TEMPORAL: no cambiar el modelo ni `horarios_coach`; cuando se
+# revise la regla, quitar "levantamiento olimpico" de este set.
+DISCIPLINAS_SIN_CRUCE_COACH = {
+    "musculacion", "open box", "levantamiento olimpico",
 }
 
 
@@ -72,6 +83,78 @@ def _validar_solapamiento_horario(db, tenant_id, disciplina, dia_semana,
                     f"{_hora(otro.hora_inicio).strftime('%H:%M')}-"
                     f"{_hora(otro.hora_fin).strftime('%H:%M')} "
                     f"(misma sala). Ajusta el inicio o el fin."
+                ),
+            )
+
+
+def _disciplina_sin_cruce_coach(disciplina) -> bool:
+    """True si la disciplina NO entra en la regla de cruce de coach.
+
+    Sin coach (Musculación / Open Box, `requiere_coach=False` o `es_open_box`) y,
+    TEMPORALMENTE, Levantamiento Olímpico (ver `DISCIPLINAS_SIN_CRUCE_COACH`).
+    """
+    if disciplina is None or not disciplina.requiere_coach or disciplina.es_open_box:
+        return True
+    nombre = _normalizar_nombre_disciplina(disciplina.nombre)
+    return nombre in DISCIPLINAS_SIN_CRUCE_COACH
+
+
+def _validar_cruce_coach(db, tenant_id, coach_id, disciplina, dia_semana,
+                         hora_inicio, hora_fin, excluir_horario_id=None):
+    """Rechaza que el MISMO coach dicte dos clases que se pisen el mismo día.
+
+    La regla cruza `horarios_coach` SIN mirar disciplina ni sala: si el coach ya
+    tiene otro horario vigente que se solapa (`inicio_A < fin_B AND
+    fin_A > inicio_B`), responde 409 con la clase y la hora que choca. Los
+    huecos entre bloques son válidos (la regla es estricta, no "tocarse").
+
+    `excluir_horario_id` evita que una clase choque consigo misma cuando se crea
+    o edita a partir de su propia plantilla. Quedan fuera las disciplinas sin
+    coach y Levantamiento Olímpico (exclusión TEMPORAL, ver el set).
+    """
+    if coach_id is None or _disciplina_sin_cruce_coach(disciplina):
+        return
+
+    inicio = _hora(hora_inicio)
+    fin = _hora(hora_fin)
+    hoy = hoy_santiago()
+    filas = (
+        db.query(HorarioCoach, HorarioBase, Disciplina)
+        .join(HorarioBase, HorarioBase.id == HorarioCoach.horario_id)
+        .join(Disciplina, Disciplina.id == HorarioBase.disciplina_id)
+        .filter(
+            HorarioCoach.tenant_id == tenant_id,
+            HorarioCoach.coach_id == coach_id,
+            HorarioBase.activo.is_(True),
+        )
+        .all()
+    )
+    for otro_coach, otro_horario, otra_disciplina in filas:
+        # El WHERE ya acota; se repite en Python para que la regla sea testeable
+        # con una sesión falsa (tests unitarios sin BD) y falle CERRADO.
+        if getattr(otro_coach, "coach_id", None) != coach_id:
+            continue
+        if getattr(otro_coach, "horario_id", None) == excluir_horario_id:
+            continue
+        vigente_hasta = getattr(otro_coach, "vigente_hasta", None)
+        if vigente_hasta is not None and vigente_hasta < hoy:
+            continue
+        if getattr(otro_horario, "dia_semana", None) != dia_semana:
+            continue
+        if not getattr(otro_horario, "activo", True):
+            continue
+        if _disciplina_sin_cruce_coach(otra_disciplina):
+            continue
+        h_inicio = _hora(otro_horario.hora_inicio)
+        h_fin = _hora(otro_horario.hora_fin)
+        if inicio < h_fin and fin > h_inicio:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"El coach ya tiene {otra_disciplina.nombre} "
+                    f"{h_inicio.strftime('%H:%M')}-{h_fin.strftime('%H:%M')} "
+                    "ese día. No puede estar en dos clases a la vez: ajusta el "
+                    "horario o asigna otro coach."
                 ),
             )
 
@@ -130,6 +213,10 @@ def crear_horario(
         db, tenant_id, disc, body.dia_semana,
         body.hora_inicio, body.hora_fin,
     )
+    # Cruce de coach: una plantilla NUEVA todavía no tiene coach (se asigna
+    # después en Supervisión → `horarios_coach`), así que no hay coach que
+    # cruzar acá. La regla se aplica al editar la plantilla y al crear/editar
+    # una clase que ya tiene coach.
     db_horario = HorarioBase(
         tenant_id=tenant_id,
         disciplina_id=body.disciplina_id,
@@ -284,6 +371,24 @@ def actualizar_horario(
         body.hora_fin or horario.hora_fin,
         excluir_id=horario.id,
     )
+    # Cruce de coach entre disciplinas: si la plantilla CAMBIA de disciplina, el
+    # coach actual se suelta (se cierra su vigencia) y no tiene sentido bloquear
+    # el cambio por un choque que va a desaparecer. Si sólo cambian día/horas, el
+    # coach sigue a cargo y sus otros horarios no pueden pisarse.
+    cambia_disciplina = (
+        body.disciplina_id is not None
+        and body.disciplina_id != horario.disciplina_id)
+    if body.activo is not False and not cambia_disciplina:
+        coach_actual = asignaciones.coach_vigente(db, tenant_id, horario.id)
+        _validar_cruce_coach(
+            db, tenant_id,
+            coach_actual.coach_id if coach_actual else None,
+            disciplina_efectiva,
+            body.dia_semana if body.dia_semana is not None else horario.dia_semana,
+            body.hora_inicio or horario.hora_inicio,
+            body.hora_fin or horario.hora_fin,
+            excluir_horario_id=horario.id,
+        )
     if body.dia_semana is not None:
         horario.dia_semana = body.dia_semana
     if body.hora_inicio is not None:

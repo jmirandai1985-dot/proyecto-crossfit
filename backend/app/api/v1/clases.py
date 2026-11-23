@@ -5,6 +5,7 @@ from sqlalchemy import text
 from typing import List, Optional
 from datetime import date
 
+from app.api.v1.horarios import _validar_cruce_coach
 from app.db.database import get_db
 from app.models.clase import Clase
 from app.models.coach_disciplina import CoachDisciplina
@@ -360,6 +361,15 @@ def crear_clase(
             detail=("No hay un horario activo para esta disciplina ese día. "
                     "Crea el horario en Horarios antes de programar la clase."),
         )
+    # Cruce de coach entre disciplinas: el coach de esta clase no puede tener
+    # otro horario vigente que se pise ese día, aunque sea de otra disciplina o
+    # sala. Se excluye su propia plantilla (`horario_base_id`): si no, la clase
+    # chocaría consigo misma.
+    _validar_cruce_coach(
+        db, tenant_id, coach_id, disciplina, clase.fecha.weekday(),
+        clase.hora_inicio, clase.hora_fin,
+        excluir_horario_id=clase.horario_base_id,
+    )
     cupo_maximo = clase.cupo_maximo
     cupo_original = None
     if disciplina is not None and disciplina.es_open_box:
@@ -478,6 +488,19 @@ def actualizar_clase(
                         "(Musculación / Open Box): no tiene cupo máximo."),
             )
         clase.cupo_maximo = clase_update.cupo_maximo
+
+    # Cruce de coach entre disciplinas: con el coach y las horas YA efectivas,
+    # se comprueba que no tenga otro horario vigente que se pise ese día. Se
+    # excluye su propia plantilla para que la clase no choque consigo misma.
+    disciplina_clase = db.query(Disciplina).filter(
+        Disciplina.id == clase.disciplina_id,
+        Disciplina.tenant_id == tenant_id,
+    ).first()
+    _validar_cruce_coach(
+        db, tenant_id, clase.coach_id, disciplina_clase,
+        clase.fecha.weekday(), clase.hora_inicio, clase.hora_fin,
+        excluir_horario_id=clase.horario_base_id,
+    )
 
     commit_o_4xx(
         db,
