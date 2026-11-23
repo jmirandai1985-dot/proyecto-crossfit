@@ -838,7 +838,8 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                         clase="k-venc" icono="users" label="Asistentes de hoy"
                         valor={resumenAdmin.asistentesHoy}
                         error={resumenAdmin.errores.diario} cargando={resumenAdmin.cargando}
-                        sub="Hoy · snapshot diario"
+                        sub="Hoy · snapshot diario — Clic para ver la asistencia"
+                        chevron onClick={() => navigate('/admin/asistencia')}
                     />
                     <Kpi
                         clase="k-caja" icono="caja" label="Ingresos de hoy" dinero
@@ -960,25 +961,29 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                             clase="k-caja" icono="caja" label="Ingreso del mes" dinero
                             valor={stats?.ingresoMensual ?? null}
                             error={errores.activos} cargando={cargando}
-                            sub="Mes en curso · parcial · comparación: n/d"
+                            sub="Mes en curso · parcial · Clic para ver los movimientos"
+                            chevron onClick={() => navigate('/admin/reportes?seccion=movimientos')}
                         />
                         <Kpi
                             clase="k-activos" icono="chart" label="MRR" dinero
                             valor={stats?.mrr ?? null}
                             error={errores.activos} cargando={cargando}
-                            sub="Hoy · precio de lista"
+                            sub="Hoy · precio de lista · Clic para ver los planes"
+                            chevron onClick={() => navigate('/admin/planes')}
                         />
                         <Kpi
                             clase="k-venc" icono="cart" label="Ventas Bazar" dinero
                             valor={stats?.ventasBazar ?? null}
                             error={errores.activos} cargando={cargando}
-                            sub="Mes en curso · parcial"
+                            sub="Mes en curso · parcial · Clic para ver los pedidos"
+                            chevron onClick={() => navigate('/admin/pedidos')}
                         />
                         <Kpi
                             clase="k-vouch" icono="users" label="Membresías"
                             valor={stats?.totalSuscripcionesMes ?? null}
                             error={errores.activos} cargando={cargando}
-                            sub="Mes en curso · parcial"
+                            sub="Mes en curso · parcial · Clic para ver las suscripciones"
+                            chevron onClick={() => navigate('/admin/reportes?seccion=membresias')}
                         />
                     </div>
                 </section>
@@ -1046,7 +1051,8 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                                 ? null
                                 : `${resumenAdmin.ocupacionReal}%`}
                             error={resumenAdmin.errores.mensual} cargando={resumenAdmin.cargando}
-                            sub={`Mes cerrado${resumenAdmin.periodoTexto ? ` · ${resumenAdmin.periodoTexto}` : ''} · asistencia real / cupo`}
+                            sub={`Mes cerrado${resumenAdmin.periodoTexto ? ` · ${resumenAdmin.periodoTexto}` : ''} · asistencia real / cupo — Clic para ver el historial`}
+                            chevron onClick={() => navigate('/admin/historial')}
                         />
                         <Kpi
                             clase="k-activos" icono="check" label="Asistencia real"
@@ -1067,10 +1073,10 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                                 {errorRevision ? 's/d' : totalRevision}
                             </span>
                         </h2>
-                        {vouchers.length > 2 && (
+                        {totalRevision > 0 && (
                             <button type="button" className="link"
-                                onClick={() => navigate(rutaPendientes('solicitudes'))}>
-                                Ver los {vouchers.length}
+                                onClick={() => navigate('/admin/pendientes')}>
+                                Ver todas
                             </button>
                         )}
                     </div>

@@ -433,7 +433,8 @@ const AdminDashboard = () => {
                             value={resumenAdmin.asistentesHoy}
                             icon={Users}
                             color="border-purple-500"
-                            hint="Hoy · último snapshot diario"
+                            hint="Hoy · último snapshot diario — Clic para ver la asistencia"
+                            onDetalle={() => navigate('/admin/asistencia')}
                         />
                         <KpiCard
                             label="Ingresos de hoy"
@@ -441,7 +442,8 @@ const AdminDashboard = () => {
                             unit="CLP"
                             icon={DollarSign}
                             color="border-emerald-500"
-                            hint="Hoy · caja del día"
+                            hint="Hoy · caja del día — Clic para ver los pagos"
+                            onDetalle={() => navigate('/admin/pagos-del-dia')}
                         />
                         <KpiCard
                             label="Pagos de hoy"
@@ -495,7 +497,8 @@ const AdminDashboard = () => {
                             unit="CLP"
                             icon={DollarSign}
                             color="border-amber-500"
-                            hint="Mes en curso · parcial · comparación: n/d"
+                            hint="Mes en curso · parcial · comparación: n/d — Clic para ver los movimientos"
+                            onDetalle={() => navigate('/admin/reportes?seccion=movimientos')}
                         />
                         <KpiCard
                             label="MRR"
@@ -503,7 +506,8 @@ const AdminDashboard = () => {
                             unit="CLP"
                             icon={Banknote}
                             color="border-emerald-500"
-                            hint="Hoy · precio de lista"
+                            hint="Hoy · precio de lista — Clic para ver los planes"
+                            onDetalle={() => navigate('/admin/planes')}
                         />
                         <KpiCard
                             label="Ventas Bazar"
@@ -511,14 +515,16 @@ const AdminDashboard = () => {
                             unit="CLP"
                             icon={ShoppingCart}
                             color="border-teal-500"
-                            hint="Mes en curso · parcial"
+                            hint="Mes en curso · parcial — Clic para ver los pedidos"
+                            onDetalle={() => navigate('/admin/pedidos')}
                         />
                         <KpiCard
                             label="Membresías del mes"
                             value={stats?.totalSuscripcionesMes ?? null}
                             icon={Users}
                             color="border-green-500"
-                            hint="Mes en curso · parcial"
+                            hint="Mes en curso · parcial — Clic para ver las suscripciones"
+                            onDetalle={() => navigate('/admin/reportes?seccion=membresias')}
                         />
                     </div>
                 </section>
@@ -593,8 +599,9 @@ const AdminDashboard = () => {
                             icon={Target}
                             color="border-amber-500"
                             hint={resumenAdmin.periodoTexto
-                                ? `Mes cerrado · ${resumenAdmin.periodoTexto} · asistencia real / cupo`
+                                ? `Mes cerrado · ${resumenAdmin.periodoTexto} · asistencia real / cupo — Clic para ver el historial`
                                 : 'Sin mes cerrado'}
+                            onDetalle={() => navigate('/admin/historial')}
                         />
                         <KpiCard
                             label="Asistencia real"
