@@ -107,10 +107,14 @@ def test_b2_el_aviso_manual_no_escribe_en_la_campana():
 def test_b3_la_campana_de_validacion_sigue_igual():
     fuente = _fuente(PEDIDOS)
     validar = _bloque(fuente, "def actualizar_estado_pedido", "\n@router.")
-    # El aviso de la campana al validar se arma con el código y viaja como
-    # `pedido_<estado>` (pedido_validado): el correo manual es OTRA cosa.
-    assert "codigos_retiro.texto_validado(" in validar
-    assert 'f"pedido_{nuevo_estado}"' in validar
+    # El router delega el efecto en `pedidos_estado` (el MISMO camino que usa el
+    # webhook de Mercado Pago), así que el aviso no se arma en este bloque.
+    assert "pedidos_estado.marcar_validado(" in validar
+    # El aviso de la campana al validar sigue llevando el CÓDIGO de retiro y
+    # viaja como `pedido_validado`: el correo manual es OTRA cosa.
+    estado = _fuente("backend/app/services/pedidos_estado.py")
+    assert "codigos_retiro.texto_validado(" in estado
+    assert '"pedido_validado"' in estado
 
 
 def test_b4_el_envio_manual_reclama_su_fila_y_no_la_dobla():
