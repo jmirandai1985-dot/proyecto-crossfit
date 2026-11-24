@@ -173,11 +173,14 @@ def test_a4_ningun_endpoint_de_pedidos_abre_su_propia_sesion():
 def test_a5_los_otros_previews_tambien_pasan_la_db():
     """Mismo defecto (y mismo fix) en los previews hermanos."""
     for relativa in ("backend/app/api/v1/admin.py",
-                     "backend/app/api/v1/fidelizacion.py",
                      "backend/app/services/fidelizacion_plantillas.py"):
         fuente = _fuente(relativa)
         assert "render_con_contacto(" in fuente
         assert "db=db" in fuente, f"{relativa}: el render tiene que reutilizar la sesión"
+    # `fidelizacion.py` no arma el HTML: delega en `fidelizacion_plantillas.render`
+    # con la MISMA sesión del request (ese render es el que resuelve el pie).
+    fidelizacion = _fuente("backend/app/api/v1/fidelizacion.py")
+    assert "fidelizacion_plantillas.render(db," in fidelizacion
 
 
 # ── A. Y si el render falla, responde CON MENSAJE (nunca sin respuesta) ──────
