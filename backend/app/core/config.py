@@ -261,6 +261,12 @@ def _verificar_entorno_db(entorno: str = None) -> None:
         host = _host_de_url(getattr(settings, nombre, "") or "")
         if not host:
             continue
+        if es_prod and es_url_postgres_local(getattr(settings, nombre, "") or ""):
+            raise RuntimeError(
+                f"[config] {nombre} apunta al Postgres LOCAL de "
+                "docker-compose.local.yml con ENVIRONMENT=production. "
+                "Abortando: un proceso de PRODUCCION no puede escribir en la "
+                "base local de TEST.")
         if not es_prod and _endpoint_conocido(host, PROD_BRANCH_IDS):
             raise RuntimeError(
                 f"[config] {nombre} apunta a la base de PRODUCCION ({host}) con "
@@ -456,18 +462,78 @@ ENDPOINTS_RETIRADOS = (
 )
 
 
+# ── Excepción ESTRECHA: el Postgres local de docker-compose.local.yml ────────
+# Único caso en el que una URL que NO es de Neon se considera "TEST": el
+# contenedor `postgres-local` del override de desarrollo. Las condiciones se
+# exigen TODAS juntas:
+#   * ENVIRONMENT == "test" (con production NUNCA se acepta; ver la guarda);
+#   * host EXACTAMENTE "postgres-local" (el nombre del servicio en la red de
+#     compose). `localhost` y `127.0.0.1` quedan RECHAZADOS a propósito: desde
+#     el host no se distingue de cualquier Postgres ajeno;
+#   * puerto 5432 y base "urban_training_dev" (los del compose local);
+#   * DATABASE_URL y DIRECT_URL apuntando LOS DOS a ese mismo Postgres local.
+# La denylist de PROD y la de endpoints retirados se evalúan ANTES: esta
+# excepción no puede blanquear ninguna URL de Neon, ni por copy/paste.
+POSTGRES_LOCAL_HOST = "postgres-local"
+POSTGRES_LOCAL_PORT = 5432
+POSTGRES_LOCAL_DB = "urban_training_dev"
+
+
+def es_url_postgres_local(url: str) -> bool:
+    """True SOLO si `url` tiene la forma exacta del Postgres local del compose.
+
+    Mira la forma (host/puerto/base), no el ENVIRONMENT: para eso está
+    `es_postgres_local_dev()`.
+    """
+    try:
+        partes = urlsplit(url or "")
+        puerto = partes.port
+    except ValueError:
+        return False
+    return (
+        partes.scheme in ("postgresql", "postgres")
+        and (partes.hostname or "").lower() == POSTGRES_LOCAL_HOST
+        and puerto == POSTGRES_LOCAL_PORT
+        and (partes.path or "").strip("/") == POSTGRES_LOCAL_DB
+    )
+
+
+def es_postgres_local_dev(url: str) -> bool:
+    """True SOLO para el Postgres local, con ENVIRONMENT=test y las DOS URLs locales.
+
+    Es la excepción estrecha que permite correr la app/Alembic/tests contra la
+    base de docker-compose.local.yml sin habilitar ningún otro host.
+    """
+    if _ENVIRONMENT != "test":
+        return False
+    if not es_url_postgres_local(url):
+        return False
+    return (
+        es_url_postgres_local(settings.DATABASE_URL)
+        and es_url_postgres_local(settings.DIRECT_URL)
+    )
+
+
 def is_test_db_url(url: str) -> bool:
     """True SOLO si `url` apunta a un endpoint TEST conocido y NO a PROD.
 
     Fail-safe: False ante duda (URL vacía, desconocida, o que contenga un endpoint
     de PROD o uno retirado que todavía guarde datos reales).
+
+    Excepción ESTRECHA (2026-11-24): el Postgres local de docker-compose.local.yml
+    (`postgres-local`) cuenta como TEST, pero SOLO con ENVIRONMENT=test, con el
+    host/puerto/base exactos y con DATABASE_URL y DIRECT_URL apuntando los dos a
+    esa base. Ver `es_postgres_local_dev()`: la denylist de PROD y los endpoints
+    retirados se evalúan ANTES, así que ninguna URL de Neon se puede "blanquear".
     """
     u = url or ""
     if any(branch in u for branch in PROD_BRANCH_IDS):
         return False
     if any(branch in u for branch in ENDPOINTS_RETIRADOS):
         return False
-    return any(branch in u for branch in TEST_BRANCH_IDS)
+    if any(branch in u for branch in TEST_BRANCH_IDS):
+        return True
+    return es_postgres_local_dev(u)
 
 
 # ── Guardas que corren al importar (arranque de la app / scripts) ────────────
