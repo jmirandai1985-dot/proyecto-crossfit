@@ -71,14 +71,16 @@ function alumnoE2E() {
 }
 
 function limpiarEstado() {
-    const python = process.env.E2E_PYTHON || 'py';
+    const repoRoot = path.resolve(BACKEND, '..');
     try {
-        execFileSync(python, [
-            '-3.12', 'scripts/limpiar_e2e_pago.py',
+        execFileSync('docker', [
+            'compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.local.yml',
+            'run', '--rm',
+            '-v', `${path.resolve(BACKEND)}:/backend:ro`,
+            'backend', 'python', '/backend/scripts/limpiar_e2e_pago.py',
             '--alumno-email', alumnoE2E().email,
         ], {
-            cwd: BACKEND,
-            env: { ...process.env, ENVIRONMENT: 'test' },
+            cwd: repoRoot,
             stdio: 'pipe',
             timeout: 120_000,
         });
