@@ -11,6 +11,7 @@ from app.models.notificacion import Notificacion
 from app.models.notificacion_enviada import NotificacionEnviada
 from app.models.movimiento import Movimiento
 from app.models.plan import Plan
+from app.models.pago import Pago, PagoEvento
 from app.models.suscripcion import Suscripcion
 from app.models.cobertura_emergencia import CoberturaEmergencia
 from app.models.transaccion_financiera import TransaccionFinanciera
