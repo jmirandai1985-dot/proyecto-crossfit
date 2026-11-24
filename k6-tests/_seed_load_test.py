@@ -189,7 +189,7 @@ def limpiar(conn, tenant_id: int, horario_id_previo: int | None,
 
     Sólo toca filas del seed (correos `carga_k6_*`, producto `CARGA_K6*`, WODs
     `K6 G13*`): nunca alumnos reales del box. `usuarios` va al final porque casi
-    todo cuelga de él; `horarios_base.coach_id`, `notificaciones.alumno_id` y
+    todo cuelga de él; `horarios_coach.coach_id`, `notificaciones.alumno_id` y
     `solicitudes_planes` NO tienen CASCADE y hay que borrarlos a mano.
 
     `notificacion_previa` y `tramos_previos` salen del load_config anterior: son
@@ -253,8 +253,8 @@ def limpiar(conn, tenant_id: int, horario_id_previo: int | None,
          "DELETE FROM coach_disciplinas WHERE coach_id IN (%s)" % sel_usuarios),
         ("clases (del coach del seed)",
          "DELETE FROM clases WHERE coach_id IN (%s)" % sel_usuarios),
-        ("horarios_base (del coach del seed)",
-         "DELETE FROM horarios_base WHERE coach_id IN (%s)" % sel_usuarios),
+        ("horarios_coach (del coach del seed)",
+         "DELETE FROM horarios_coach WHERE coach_id IN (%s)" % sel_usuarios),
         # Sólo se borra el horario si lo creó este seed (queda anotado en el config).
         ("horarios (creado por el seed)",
          "DELETE FROM horarios WHERE id = :h AND tenant_id = :t"),
