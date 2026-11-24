@@ -68,14 +68,14 @@ def _alumno_con_acceso():
 
 def _otro_alumno(alumno_id):
     return _one(
-        "SELECT id FROM usuarios WHERE tenant_id = :t AND id <> :a "
+        "SELECT id, tenant_id, correo FROM usuarios WHERE tenant_id = :t AND id <> :a "
         "AND rol::text = 'alumno' ORDER BY id LIMIT 1",
         t=TENANT_ID, a=alumno_id)
 
 
 def _admins(tenant_id):
     return _all(
-        "SELECT id FROM usuarios WHERE tenant_id = :t "
+        "SELECT id, tenant_id, correo FROM usuarios WHERE tenant_id = :t "
         "AND rol::text = 'administrador' AND estado = 'activo' ORDER BY id",
         t=tenant_id)
 

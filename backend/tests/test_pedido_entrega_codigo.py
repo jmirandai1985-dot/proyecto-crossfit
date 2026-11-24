@@ -96,7 +96,7 @@ def _coach(tenant_id=None):
 
 def _otro_box():
     return _one(
-        "SELECT id FROM tenants WHERE id <> :t ORDER BY id LIMIT 1", t=TENANT_ID)
+        "SELECT t.id FROM tenants t WHERE t.id <> :t AND EXISTS (SELECT 1 FROM usuarios u WHERE u.tenant_id = t.id AND u.rol::text = 'coach' AND u.estado = 'activo') ORDER BY t.id LIMIT 1", t=TENANT_ID)
 
 
 def _producto():

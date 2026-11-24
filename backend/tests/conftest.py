@@ -1,4 +1,5 @@
-﻿"""
+import os
+"""
 Configuración de pytest para los tests del backend.
 Estos tests son de integración contra la API real (localhost:8000).
 Usan la base de datos Neon branch test y un alumno REAL de esa branch
@@ -49,7 +50,7 @@ except Exception as e:
     print(f"\n[WARN] Error al verificar DB del servidor: {e}\n")
 
 # ── Configuración compartida ──
-BASE = "http://localhost:8000/api/v1"
+BASE = os.getenv("BOX_TEST_BASE", "http://localhost:8000/api/v1")
 TENANT_ID = 1
 HOY = date.today()
 HOY_STR = str(HOY)
