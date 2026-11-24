@@ -13,7 +13,7 @@ from app.services.email_service import (
     send_solicitud_prueba_clase,
     send_bienvenida_activacion,
     send_renovacion_plan,
-    send_vencimiento_inminente
+    send_alerta_urgencia_renovacion
 )
 
 CORREO_TEST = "jesusmiranda26@gmail.com"
@@ -69,7 +69,7 @@ except Exception as e:
 # EMAIL 4: Vencimiento Inminente (Último día)
 print("\n📧 Email 4: Vencimiento Inminente")
 try:
-    send_vencimiento_inminente(
+    send_alerta_urgencia_renovacion(
         nombre="Test Alumno Jesús",
         correo=CORREO_TEST
     )
