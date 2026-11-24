@@ -49,7 +49,7 @@ services:
       dockerfile: Dockerfile
       target: prod
     env_file:
-      # TEST/ep-crimson-tooth-akhx7q2s (SAFE DEFAULT) — ver cabecera del archivo.
+      # TEST: la rama de Neon que declara backend/.env.test (SAFE DEFAULT — ver cabecera del archivo).
       - ./backend/.env.test
     environment:
       ENVIRONMENT: test
@@ -92,7 +92,7 @@ services:
     #     docker compose --profile mantenimiento up -d maintenance
     profiles: ["mantenimiento"]
     env_file:
-      # TEST/ep-crimson-tooth-akhx7q2s (SAFE DEFAULT) — ver cabecera del archivo.
+      # TEST: la rama de Neon que declara backend/.env.test (SAFE DEFAULT — ver cabecera del archivo).
       - ./backend/.env.test
     environment:
       # health_check.py usa BACKEND_URL para el ping al API.

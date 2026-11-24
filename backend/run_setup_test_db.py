@@ -33,6 +33,7 @@ _config = importlib.import_module("app.core.config")
 settings = _config.settings
 engine = importlib.import_module("app.db.database").engine
 Base = importlib.import_module("app.db.database").Base
+importlib.import_module("app.models")  # registra todas las tablas en Base.metadata
 DB = importlib.import_module("app.db.database").SessionLocal
 text = importlib.import_module("sqlalchemy").text
 Tenant = importlib.import_module("app.models.tenant").Tenant

@@ -1,0 +1,100 @@
+﻿# ============================================================
+# docker-compose.local.yml â€” OVERRIDE SOLO PARA DESARROLLO/TESTS LOCALES
+#
+# Levanta el stack completo con una base PostgreSQL LOCAL (contenedor),
+# sin tocar Neon:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+#
+# QuÃ© cambia respecto del base (docker-compose.yml):
+#   * agrega `postgres-local` (postgres:18-alpine) con volumen nombrado, para
+#     que la base NO sea la de Neon;
+#   * backend: DATABASE_URL/DIRECT_URL apuntan a `postgres-local` por la red de
+#     compose y PISAN los valores que trae `env_file: ./backend/.env.test`
+#     (en Compose, `environment` tiene precedencia sobre `env_file`);
+#   * `maintenance` queda con `replicas: 0` + profile propio: es un cron que en
+#     el base toma `./backend/.env.test` (Neon) y corre backups/vencidos/
+#     huÃ©rfanas sobre la BD ACTIVA, asÃ­ que no debe existir en local;
+#   * `n8n` queda con `replicas: 0` + profile propio (no hace falta para tests).
+#
+# âš ï¸ cron-test y box-crossfit-backup-cron NO existen en este compose: son Cron
+#    Jobs de Render (render.yaml) y no se pueden "apagar" desde acÃ¡. Definirlos
+#    en el override los CREARÃA como servicios nuevos (sin imagen/build), asÃ­
+#    que no se agregan.
+#
+# âš ï¸ Este archivo NO va a PROD y no debe contener endpoints de Neon.
+#
+# NOTA OPERATIVA: la base local arranca VACÃA (la app no crea el esquema al
+# arrancar). Para crearlo, correr las migraciones con este mismo override
+# (alembic usa settings.DIRECT_URL, que acÃ¡ apunta a postgres-local):
+#
+#     docker compose -f docker-compose.yml -f docker-compose.local.yml run --rm backend alembic upgrade head
+#
+# `run_setup_test_db.py` NO sirve para esta base: aborta a propÃ³sito porque
+# `is_test_db_url()` sÃ³lo acepta endpoints TEST de Neon (fail-closed).
+# ============================================================
+name: box-crossfit
+
+services:
+  # â”€â”€ PostgreSQL local (misma major que Neon: PostgreSQL 18.x) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  postgres-local:
+    image: postgres:18-alpine
+    command: ["postgres", "-c", "timezone=UTC"]
+    environment:
+      # Credenciales FICTICIAS: sÃ³lo vÃ¡lidas dentro de esta red de compose.
+      POSTGRES_USER: urban_dev
+      POSTGRES_PASSWORD: urban_dev_local
+      POSTGRES_DB: urban_training_dev
+      TZ: America/Santiago
+    ports:
+      # Publicado SÃ“LO en loopback: no queda accesible desde la LAN.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # postgres:18 cambiÃ³ el layout: PGDATA=/var/lib/postgresql/18/docker y el
+      # VOLUME declarado por la imagen es /var/lib/postgresql (antes era
+      # /var/lib/postgresql/data). Montar la ruta vieja duplicarÃ­a el cluster.
+      - pgdata_local:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U urban_dev -d urban_training_dev -h 127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  backend:
+    environment:
+      ENVIRONMENT: test
+      # Sin sslmode ni channel_binding: el Postgres local no usa TLS y
+      # channel_binding es un parÃ¡metro de Neon.
+      DATABASE_URL: postgresql://urban_dev:urban_dev_local@postgres-local:5432/urban_training_dev
+      DIRECT_URL: postgresql://urban_dev:urban_dev_local@postgres-local:5432/urban_training_dev
+    depends_on:
+      postgres-local:
+        condition: service_healthy
+
+  # â”€â”€ Servicios que NO deben correr en local â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # Cron de mantenimiento sobre la BD ACTIVA (backups, vencidos, huÃ©rfanas,
+  # health): en el base usa ./backend/.env.test (Neon TEST). Se apaga con
+  # replicas 0 (aunque alguien active el profile a mano) y con un profile
+  # propio para que `up` normal ni lo vea. Igual se le apunta a la BD local por
+  # si alguna vez se levanta a propÃ³sito.
+  maintenance:
+    profiles: ["local-deshabilitado"]
+    deploy:
+      replicas: 0
+    environment:
+      ENVIRONMENT: test
+      DATABASE_URL: postgresql://urban_dev:urban_dev_local@postgres-local:5432/urban_training_dev
+      DIRECT_URL: postgresql://urban_dev:urban_dev_local@postgres-local:5432/urban_training_dev
+
+  # AutomatizaciÃ³n visual: no se usa para las pruebas locales (y su UI usa
+  # SQLite propio, no la base del proyecto).
+  n8n:
+    profiles: ["local-deshabilitado"]
+    deploy:
+      replicas: 0
+
+volumes:
+  # Persistencia del Postgres local entre recreaciones de contenedores.
+  pgdata_local:
