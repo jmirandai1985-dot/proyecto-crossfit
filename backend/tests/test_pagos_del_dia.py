@@ -297,6 +297,37 @@ def test_resumen_del_dia_suma_y_cuenta_los_pendientes(monkeypatch):
     assert pedidos == [(1, [1, 2])]
 
 
+def test_el_total_de_la_tarjeta_es_la_suma_de_los_cobros_listados(monkeypatch):
+    """Los dos cobros de prueba de hoy: 25.000 (membresía) + 15.000 (Bazar) = 40.000.
+
+    Es el valor que pinta "Ingresos de hoy": sale de `resumen.total_clp`, la MISMA
+    cifra que muestra el encabezado de "Pagos del día", y tiene que ser igual a la
+    suma de los montos de la lista (nunca un total de otra fuente, como la caja de
+    `transacciones_financieras`).
+    """
+    filas = [
+        (_pago(id=8, monto_clp=25000, concepto="membresia"),
+         _solicitud(id=55), _alumno(), _plan()),
+        (_pago(id=9, monto_clp=15000, concepto="bazar", referencia_id=77),
+         None, _alumno(), None),
+    ]
+    monkeypatch.setattr(
+        svc, "suscripciones_por_pago",
+        lambda db, tenant_id, ids: {8: _suscripcion(pago_id=8)})
+    monkeypatch.setattr(
+        svc, "productos_por_pedido",
+        lambda db, tenant_id, ids: {77: "Camiseta · Talla M"})
+
+    resumen = svc.resumen_del_dia(
+        _SesionFalsa(filas), 1, dia=date(2026, 11, 21))
+
+    assert resumen["resumen"]["cantidad"] == 2
+    assert resumen["resumen"]["total_clp"] == 40000
+    assert resumen["resumen"]["total_clp"] == sum(
+        p["monto_clp"] for p in resumen["pagos"])
+    assert [p["origen"] for p in resumen["pagos"]] == ["membresia", "bazar"]
+
+
 # ── El filtro, en el código del servicio ────────────────────────────────────
 def test_el_filtro_es_por_dia_chileno_y_por_tenant():
     fuente = (BACKEND / "app" / "services" / "pagos_del_dia.py").read_text(
@@ -308,5 +339,74 @@ def test_el_filtro_es_por_dia_chileno_y_por_tenant():
     assert "Pago.estado.in_(ESTADOS_DEL_DIA)" in fuente
     assert "SolicitudPlan.tenant_id == Pago.tenant_id" in fuente, (
         "la solicitud del join no puede ser de otro box")
-    assert "Pago.concepto == CONCEPTO_MEMBRESIA" in fuente, (
-        "los pedidos del Bazar no son 'pagos de plan'")
+    assert "Pago.concepto.in_(CONCEPTOS_DEL_DIA)" in fuente, (
+        "la lista del día incluye membresías Y compras del Bazar: las dos viven en `pagos`")
+
+
+# ── Correo, origen y canal de pago (lo que pide la tarjeta "Ingresos de hoy") ─
+def test_serializar_pago_incluye_correo_origen_y_canal():
+    fila = svc.serializar_pago(
+        _pago(metodo_pago="visa"), _solicitud(),
+        _alumno(correo="ana@box.cl"), _plan(), _suscripcion())
+
+    assert fila["correo"] == "ana@box.cl"
+    assert fila["origen"] == "membresia"
+    assert fila["origen_detalle"] == "Plan Full"
+    assert fila["producto"] == "Plan Full"
+    assert fila["canal"] == "Mercado Pago"
+    assert fila["canal_detalle"] == "visa"
+    assert fila["estado_pago"] == "aprobado"
+
+
+def test_un_cobro_del_bazar_usa_el_producto_y_no_espera_suscripcion():
+    fila = svc.serializar_pago(
+        _pago(concepto="bazar", referencia_id=77), None, _alumno(), None, None,
+        origen_detalle="Camiseta M")
+
+    assert fila["origen"] == "bazar"
+    assert fila["producto"] == "Camiseta M"
+    assert fila["origen_detalle"] == "Camiseta M"
+    assert fila["plan"] == "Camiseta M"
+    # Un cobro aprobado del Bazar no tiene plan que activar: ya está "activo".
+    assert fila["estado"] == "activo"
+
+
+def test_el_medio_de_pago_sale_del_tipo_pago_de_mercadopago():
+    """`pagos.tipo_pago` (payment_type_id) distingue crédito / débito / transferencia."""
+    credito = svc.serializar_pago(
+        _pago(tipo_pago="credit_card"), _solicitud(), _alumno(), _plan(), _suscripcion())
+    debito = svc.serializar_pago(
+        _pago(tipo_pago="debit_card"), _solicitud(), _alumno(), _plan(), _suscripcion())
+    banco = svc.serializar_pago(
+        _pago(tipo_pago="bank_transfer"), _solicitud(), _alumno(), _plan(), _suscripcion())
+
+    assert credito["tipo_cobro"] == "Tarjeta de crédito"
+    assert credito["tipo_cobro_clave"] == "tarjeta_credito"
+    assert debito["tipo_cobro"] == "Tarjeta de débito"
+    assert debito["tipo_cobro_clave"] == "tarjeta_debito"
+    assert banco["tipo_cobro"] == "Transferencia"
+    assert banco["tipo_cobro_clave"] == "transferencia"
+
+
+def test_sin_tipo_de_pago_no_se_inventa_el_medio():
+    """Sin `tipo_pago` se muestra el canal REAL (Mercado Pago), nunca un crédito supuesto."""
+    fila = svc.serializar_pago(
+        _pago(tipo_pago=None), _solicitud(), _alumno(), _plan(), _suscripcion())
+
+    assert fila["tipo_cobro"] == "Mercado Pago"
+    assert fila["tipo_cobro_clave"] == "canal"
+
+
+def test_el_producto_del_bazar_lleva_la_talla_cuando_existe():
+    assert svc.texto_producto("Camiseta", "M") == "Camiseta · Talla M"
+    assert svc.texto_producto("Camiseta", None) == "Camiseta"
+    assert svc.texto_producto(None, "M") is None
+    assert svc.texto_producto("  ", "M") is None
+
+
+def test_sin_alumno_el_correo_es_null_no_un_texto_inventado():
+    fila = svc.serializar_pago(_pago(usuario_id=77), None, None, None, None)
+
+    assert fila["correo"] is None
+    assert fila["canal"] == "Mercado Pago"
+    assert fila["canal_detalle"] is None
