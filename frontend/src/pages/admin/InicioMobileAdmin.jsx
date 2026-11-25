@@ -37,8 +37,10 @@ import GraficoClasesHoy from '../../components/dashboard/GraficoClasesHoy';
 // Paneles de las tarjetas de Negocio/Ocupación: los MISMOS componentes del
 // escritorio (ingreso por día, ranking de planes, MRR y ocupación por clase).
 import {
-    PanelIngresoMes, PanelMembresiasMes, PanelMrr, PanelOcupacionConDatos,
+    PanelAlumnosActivos, PanelAsistenciaHoy, PanelIngresoMes, PanelMembresiasMes,
+    PanelMrr, PanelOcupacionConDatos, PanelVentasBazar,
 } from '../../components/dashboard/PanelesNegocio';
+import ResumenClasesHoy from '../../components/dashboard/ResumenClasesHoy';
 import { iniciales } from '../../utils/iniciales';
 // Pedidos listos para entrega (Bazar): qué fila se lista y qué dice cada una.
 // OJO: el CÓDIGO DE RETIRO no se muestra en la tarjeta —es la prueba de que el pedido
@@ -249,6 +251,25 @@ const Kpi = ({ clase, icono, label, valor, sub, error, cargando, dinero, pulso, 
  * Bloques: KPIs (A), accesos rápidos (B), "En revisión" (C), "Asistencia de hoy" (D) y
  * buscador de alumnos (E).
  */
+/**
+ * Tarjeta móvil + su panel ANCLADO. El panel se abre justo debajo de ESA
+ * tarjeta (absolute), sin empujar el resto de la grilla. En móvil ocupa el
+ * ancho de la pantalla y tiene scroll propio.
+ */
+const TarjetaMovilConPanel = ({ abierto, panel, children }) => (
+    // En móvil la tarjeta abierta ocupa las DOS columnas y el panel va dentro
+    // de ella, justo debajo. No se usa absolute: en una grilla de 2 columnas el
+    // panel de ancho completo se saldría de la pantalla.
+    <div className={abierto ? 'col-span-2' : ''}>
+        {children}
+        {abierto && panel ? (
+            <div className="mt-2 max-h-[70vh] overflow-auto">
+                {panel}
+            </div>
+        ) : null}
+    </div>
+);
+
 const InicioMobileAdmin = ({ resumenAdmin }) => {
     const navigate = useNavigate();
     const { tenant_id } = useAuth();
@@ -724,6 +745,8 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
     // 'ingreso' | 'membresias' | 'mrr' | null; Ocupación tiene su propio estado.
     const [panelNegocio, setPanelNegocio] = useState(null);
     const [mostrarOcupacion, setMostrarOcupacion] = useState(false);
+    const [mostrarAsistencia, setMostrarAsistencia] = useState(false);
+    const [mostrarAlumnosActivos, setMostrarAlumnosActivos] = useState(false);
 
     const [tarjeta, setTarjeta] = useState(false);       // pantalla abierta
 
@@ -860,89 +883,104 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                         es una clase del día (hora + barra + "reservas / cupo"), con el
                         cupo REAL de esa clase. Tocar la tarjeta abre el panel del
                         gráfico (antes hacía scroll a la asistencia). */}
-                    <div className="kpi k-activos kpi-grafico" role="button" tabIndex={0}
-                        aria-label="Clases de hoy: reservas confirmadas sobre el cupo de cada clase"
-                        aria-expanded={mostrarClases}
-                        data-testid="kpi-grafico-clases"
-                        onClick={() => setMostrarClases((v) => !v)}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault();
-                                setMostrarClases((v) => !v);
-                            }
-                        }}>
-                        <span className="kpi-top">
-                            <span className="chip"><Icono nombre="clock" /></span>
-                            <span className="kpi-label">Clases de hoy</span>
-                            <span className="kpi-go" aria-hidden="true">›</span>
-                        </span>
-                        {clasesError ? (
-                            <span className="kpi-error">{clasesError}</span>
-                        ) : clasesCargando ? (
-                            <span className="kpi-sub">Cargando las clases…</span>
-                        ) : (
-                            <GraficoClasesHoy clases={clases} alto="7rem"
-                                testid="grafico-clases-hoy-movil" />
-                        )}
-                        <span className="kpi-sub">{clasesRealizadasHoy} realizadas · Hoy</span>
-                    </div>
-                    <Kpi
-                        clase="k-venc" icono="users" label="Asistencia de hoy"
-                        valor={asistenciaHoy}
-                        error={clasesError} cargando={clasesCargando && !clases.length}
-                        sub="Hoy · asistencias registradas — Clic para ver la asistencia"
-                        chevron onClick={() => navigate('/admin/asistencia')}
-                    />
-                    <Kpi
-                        clase="k-caja" icono="caja" label="Ingresos de hoy" dinero
-                        valor={resumenAdmin.ingresosHoy ?? null}
-                        error={resumenAdmin.errores.pagosDia}
-                        cargando={resumenAdmin.cargando || resumenAdmin.pagosDiaCargando}
-                        sub={resumenAdmin.cobrosHoy == null
-                            ? 'Hoy · cobros del día'
-                            : `Hoy · ${resumenAdmin.cobrosHoy} ${resumenAdmin.cobrosHoy === 1 ? 'cobro' : 'cobros'} · membresía y Bazar`}
-                        chevron onClick={() => setMostrarPagos((v) => !v)}
-                    />
+                    <TarjetaMovilConPanel
+                        abierto={mostrarClases}
+                        panel={(
+                            <section className="card" aria-labelledby="ub-clases-hoy">
+                                <div className="card-head">
+                                    <h2 id="ub-clases-hoy">Clases de hoy · reservas / cupo</h2>
+                                    <button type="button" className="link"
+                                        onClick={() => setMostrarClases(false)}>
+                                        Cerrar
+                                    </button>
+                                </div>
+                                <GraficoClasesHoy clases={clases} alto="55vh"
+                                    testid="grafico-clases-hoy-panel" />
+                                <p className="note">
+                                    Reservas confirmadas sobre el cupo de cada clase. Las clases
+                                    sin cupo muestran sólo sus reservas.
+                                </p>
+                            </section>
+                        )}>
+                        <div className="kpi k-activos kpi-grafico" role="button" tabIndex={0}
+                            aria-label="Clases de hoy: reservas confirmadas sobre el cupo de cada clase"
+                            aria-expanded={mostrarClases}
+                            data-testid="kpi-grafico-clases"
+                            onClick={() => setMostrarClases((v) => !v)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    setMostrarClases((v) => !v);
+                                }
+                            }}>
+                            <span className="kpi-top">
+                                <span className="chip"><Icono nombre="clock" /></span>
+                                <span className="kpi-label">Clases de hoy</span>
+                                <span className="kpi-go" aria-hidden="true">›</span>
+                            </span>
+                            {clasesError ? (
+                                <span className="kpi-error">{clasesError}</span>
+                            ) : clasesCargando ? (
+                                <span className="kpi-sub">Cargando las clases…</span>
+                            ) : (
+                                <ResumenClasesHoy clases={clases} max={4} />
+                            )}
+                            <span className="kpi-sub">{clasesRealizadasHoy} realizadas · Hoy</span>
+                        </div>
+                    </TarjetaMovilConPanel>
+                    <TarjetaMovilConPanel
+                        abierto={mostrarAsistencia}
+                        panel={(
+                            <PanelAsistenciaHoy
+                                clases={clases}
+                                cargando={clasesCargando && !clases.length}
+                                error={clasesError}
+                                onCerrar={() => setMostrarAsistencia(false)}
+                                onVerTodo={() => navigate('/admin/asistencia')}
+                            />
+                        )}>
+                        <Kpi
+                            clase="k-venc" icono="users" label="Asistencia de hoy"
+                            valor={asistenciaHoy}
+                            error={clasesError} cargando={clasesCargando && !clases.length}
+                            sub="Hoy · asistencias registradas — Clic para ver el resumen"
+                            chevron onClick={() => setMostrarAsistencia((v) => !v)}
+                        />
+                    </TarjetaMovilConPanel>
+                    <TarjetaMovilConPanel
+                        abierto={mostrarPagos}
+                        panel={(
+                            <section className="card" aria-labelledby="ub-pagos-dia">
+                                <div className="card-head">
+                                    <h2 id="ub-pagos-dia">Pagos del día</h2>
+                                    <button type="button" className="link"
+                                        onClick={() => setMostrarPagos(false)}>
+                                        Cerrar
+                                    </button>
+                                </div>
+                                <PagosDelDia maxFilas={6} mostrarEnlace />
+                            </section>
+                        )}>
+                        <Kpi
+                            clase="k-caja" icono="caja" label="Ingresos de hoy" dinero
+                            valor={resumenAdmin.ingresosHoy ?? null}
+                            error={resumenAdmin.errores.pagosDia}
+                            cargando={resumenAdmin.cargando || resumenAdmin.pagosDiaCargando}
+                            sub={resumenAdmin.cobrosHoy == null
+                                ? 'Hoy · cobros del día'
+                                : `Hoy · ${resumenAdmin.cobrosHoy} ${resumenAdmin.cobrosHoy === 1 ? 'cobro' : 'cobros'} · membresía y Bazar`}
+                            chevron onClick={() => setMostrarPagos((v) => !v)}
+                        />
+                    </TarjetaMovilConPanel>
                 </section>
 
                 {/* ── Clases de hoy: el gráfico abierto ─────────────────────
                     Mismo gráfico que la tarjeta, más alto y desplazable (con muchas
                     clases se recorre dentro del panel). Sin scroll a la asistencia. */}
-                {mostrarClases && (
-                    <section className="card" aria-labelledby="ub-clases-hoy">
-                        <div className="card-head">
-                            <h2 id="ub-clases-hoy">Clases de hoy · reservas / cupo</h2>
-                            <button type="button" className="link"
-                                onClick={() => setMostrarClases(false)}>
-                                Cerrar
-                            </button>
-                        </div>
-                        <GraficoClasesHoy clases={clases} alto="55vh"
-                            testid="grafico-clases-hoy-panel" />
-                        <p className="note">
-                            Reservas confirmadas sobre el cupo de cada clase (el de la propia
-                            clase). Las clases sin cupo muestran sólo sus reservas.
-                        </p>
-                    </section>
-                )}
-
                 {/* ── Pagos del día (accordion DEBAJO de la fila Hoy) ─────────
                     La tarjeta "Ingresos de hoy" alterna este panel en el mismo lugar,
                     sin navegar. El enlace "Ver detalle" conserva la pantalla completa
                     /admin/pagos-del-dia. ──────────────────────────────────── */}
-                {mostrarPagos && (
-                    <section className="card" aria-labelledby="ub-pagos-dia">
-                        <div className="card-head">
-                            <h2 id="ub-pagos-dia">Pagos del día</h2>
-                            <button type="button" className="link"
-                                onClick={() => navigate('/admin/pagos-del-dia')}>
-                                Ver detalle
-                            </button>
-                        </div>
-                        <PagosDelDia maxFilas={4} mostrarEnlace={false} />
-                    </section>
-                )}
-
                 {/* ── B. Accesos rápidos ──────────────────────────────────── */}
                 <nav className="apps" aria-label="Accesos rápidos">
                     <button type="button" className="app a-search" onClick={abrirBuscador}>
@@ -1026,75 +1064,88 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                         <span className="badge">parcial</span>
                     </div>
                     <div className="kpis">
-                        <Kpi
-                            clase="k-caja" icono="caja" label="Ingreso del mes" dinero
-                            valor={resumenAdmin.ingresoMes?.total_clp ?? null}
-                            error={resumenAdmin.ingresoMesError}
-                            cargando={resumenAdmin.ingresoMesCargando}
-                            sub={`Mes en curso · ${resumenAdmin.ingresoMes?.cantidad ?? 0} cobros aprobados · Clic para ver el desglose`}
-                            chevron
-                            onClick={() => setPanelNegocio((v) => (v === 'ingreso' ? null : 'ingreso'))}
-                        />
-                        <Kpi
-                            clase="k-activos" icono="chart" label="MRR" dinero
-                            valor={resumenAdmin.mrr?.total_clp ?? null}
-                            error={resumenAdmin.mrrError}
-                            cargando={resumenAdmin.mrrCargando}
-                            sub={`Hoy · ${resumenAdmin.mrr?.alumnos ?? 0} alumnos con plan pagado · Clic para ver el detalle`}
-                            chevron
-                            onClick={() => setPanelNegocio((v) => (v === 'mrr' ? null : 'mrr'))}
-                        />
-                        <Kpi
-                            clase="k-venc" icono="cart" label="Ventas Bazar" dinero
-                            valor={resumenAdmin.ventasBazar ?? null}
-                            error={resumenAdmin.ventasBazarError}
-                            cargando={resumenAdmin.ventasBazarCargando}
-                            sub={`Mes en curso · ${resumenAdmin.ventasBazarPedidos ?? 0} pedidos cobrados · Clic para ver los pedidos`}
-                            chevron onClick={() => navigate('/admin/pedidos')}
-                        />
-                        <Kpi
-                            clase="k-vouch" icono="users" label="Membresías"
-                            valor={resumenAdmin.membresiasMes?.total_altas ?? null}
-                            error={resumenAdmin.membresiasMesError}
-                            cargando={resumenAdmin.membresiasMesCargando}
-                            sub="Mes en curso · planes pagados (precio > $0) · Clic para ver el ranking"
-                            chevron
-                            onClick={() => setPanelNegocio((v) => (v === 'membresias' ? null : 'membresias'))}
-                        />
+                        <TarjetaMovilConPanel
+                            abierto={panelNegocio === 'ingreso'}
+                            panel={(
+                                <PanelIngresoMes
+                                    resumen={resumenAdmin.ingresoMes}
+                                    cargando={resumenAdmin.ingresoMesCargando}
+                                    error={resumenAdmin.ingresoMesError}
+                                    onCerrar={() => setPanelNegocio(null)}
+                                />
+                            )}>
+                            <Kpi
+                                clase="k-caja" icono="caja" label="Ingreso del mes" dinero
+                                valor={resumenAdmin.ingresoMes?.total_clp ?? null}
+                                error={resumenAdmin.ingresoMesError}
+                                cargando={resumenAdmin.ingresoMesCargando}
+                                sub={`Mes en curso · ${resumenAdmin.ingresoMes?.cantidad ?? 0} cobros aprobados · Clic para ver el desglose`}
+                                chevron
+                                onClick={() => setPanelNegocio((v) => (v === 'ingreso' ? null : 'ingreso'))}
+                            />
+                        </TarjetaMovilConPanel>
+                        <TarjetaMovilConPanel
+                            abierto={panelNegocio === 'mrr'}
+                            panel={(
+                                <PanelMrr
+                                    mrr={resumenAdmin.mrr}
+                                    cargando={resumenAdmin.mrrCargando}
+                                    error={resumenAdmin.mrrError}
+                                    onCerrar={() => setPanelNegocio(null)}
+                                />
+                            )}>
+                            <Kpi
+                                clase="k-activos" icono="chart" label="MRR" dinero
+                                valor={resumenAdmin.mrr?.total_clp ?? null}
+                                error={resumenAdmin.mrrError}
+                                cargando={resumenAdmin.mrrCargando}
+                                sub={`Hoy · ${resumenAdmin.mrr?.alumnos ?? 0} alumnos con membresía de pago · Clic para ver el detalle`}
+                                chevron
+                                onClick={() => setPanelNegocio((v) => (v === 'mrr' ? null : 'mrr'))}
+                            />
+                        </TarjetaMovilConPanel>
+                        <TarjetaMovilConPanel
+                            abierto={panelNegocio === 'bazar'}
+                            panel={(
+                                <PanelVentasBazar
+                                    pagos={resumenAdmin.ingresoMes?.pagos}
+                                    cargando={resumenAdmin.ventasBazarCargando}
+                                    error={resumenAdmin.ventasBazarError}
+                                    onCerrar={() => setPanelNegocio(null)}
+                                    onVerTodo={() => navigate('/admin/pedidos')}
+                                />
+                            )}>
+                            <Kpi
+                                clase="k-venc" icono="cart" label="Ventas Bazar" dinero
+                                valor={resumenAdmin.ventasBazar ?? null}
+                                error={resumenAdmin.ventasBazarError}
+                                cargando={resumenAdmin.ventasBazarCargando}
+                                sub={`Mes en curso · ${resumenAdmin.ventasBazarPedidos ?? 0} pedidos cobrados · Clic para ver el resumen`}
+                                chevron onClick={() => setPanelNegocio((v) => (v === 'bazar' ? null : 'bazar'))}
+                            />
+                        </TarjetaMovilConPanel>
+                        <TarjetaMovilConPanel
+                            abierto={panelNegocio === 'membresias'}
+                            panel={(
+                                <PanelMembresiasMes
+                                    ranking={resumenAdmin.membresiasMes}
+                                    cargando={resumenAdmin.membresiasMesCargando}
+                                    error={resumenAdmin.membresiasMesError}
+                                    onCerrar={() => setPanelNegocio(null)}
+                                />
+                            )}>
+                            <Kpi
+                                clase="k-vouch" icono="users" label="Membresías"
+                                valor={resumenAdmin.membresiasMes?.total_altas ?? null}
+                                error={resumenAdmin.membresiasMesError}
+                                cargando={resumenAdmin.membresiasMesCargando}
+                                sub="Mes en curso · planes de membresía pagados (sin pruebas) · Clic para ver el ranking"
+                                chevron
+                                onClick={() => setPanelNegocio((v) => (v === 'membresias' ? null : 'membresias'))}
+                            />
+                        </TarjetaMovilConPanel>
                     </div>
 
-                    {/* Panel de la tarjeta tocada: se abre dentro de la MISMA
-                        sección (no navega a Reportes). */}
-                    {panelNegocio === 'ingreso' && (
-                        <div style={{ marginTop: '0.75rem' }}>
-                            <PanelIngresoMes
-                                resumen={resumenAdmin.ingresoMes}
-                                cargando={resumenAdmin.ingresoMesCargando}
-                                error={resumenAdmin.ingresoMesError}
-                                onCerrar={() => setPanelNegocio(null)}
-                            />
-                        </div>
-                    )}
-                    {panelNegocio === 'membresias' && (
-                        <div style={{ marginTop: '0.75rem' }}>
-                            <PanelMembresiasMes
-                                ranking={resumenAdmin.membresiasMes}
-                                cargando={resumenAdmin.membresiasMesCargando}
-                                error={resumenAdmin.membresiasMesError}
-                                onCerrar={() => setPanelNegocio(null)}
-                            />
-                        </div>
-                    )}
-                    {panelNegocio === 'mrr' && (
-                        <div style={{ marginTop: '0.75rem' }}>
-                            <PanelMrr
-                                mrr={resumenAdmin.mrr}
-                                cargando={resumenAdmin.mrrCargando}
-                                error={resumenAdmin.mrrError}
-                                onCerrar={() => setPanelNegocio(null)}
-                            />
-                        </div>
-                    )}
                 </section>
 
                 {/* ── Alumnos ──────────────────────────────────────────────── */}
@@ -1104,21 +1155,34 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                         <span className="live">Hoy + mes en curso</span>
                     </div>
                     <div className="kpis">
-                        <Kpi
-                            clase="k-activos" icono="users" label="Alumnos activos"
-                            valor={stats?.alumnosActivos ?? resumenAdmin.alumnosActivos}
-                            error={resumenAdmin.errores.diario} cargando={resumenAdmin.cargando}
-                            sub="Hoy · suscripciones vigentes (en vivo) · Clic para ver el padrón activo"
-                            chevron onClick={() => navigate('/admin/alumnos?estado=activo')}
-                        />
+                        <TarjetaMovilConPanel
+                            abierto={mostrarAlumnosActivos}
+                            panel={(
+                                <PanelAlumnosActivos
+                                    resumen={resumenAdmin.alumnosActivosResumen}
+                                    cargando={resumenAdmin.alumnosActivosCargando}
+                                    error={resumenAdmin.alumnosActivosError}
+                                    onCerrar={() => setMostrarAlumnosActivos(false)}
+                                    onVerTodo={() => navigate('/admin/alumnos?estado=activo')}
+                                />
+                            )}>
+                            <Kpi
+                                clase="k-activos" icono="users" label="Alumnos activos"
+                                valor={resumenAdmin.alumnosActivos}
+                                error={resumenAdmin.errores.diario}
+                                cargando={resumenAdmin.alumnosActivosCargando}
+                                sub="Hoy · suscripciones vigentes (en vivo) · Clic para ver el resumen"
+                                chevron onClick={() => setMostrarAlumnosActivos((v) => !v)}
+                            />
+                        </TarjetaMovilConPanel>
                         <Kpi
                             clase="k-venc" icono="clock" label="Alumnos en riesgo"
                             valor={resumenAdmin.alumnosRiesgo}
                             error={resumenAdmin.errores.churn} cargando={resumenAdmin.cargando}
                             sub={resumenAdmin.riesgoPendiente
                                 ? 'pendiente de reentrenar'
-                                : 'Hoy · crítico + alto · Clic para ver la lista filtrada'}
-                            chevron onClick={() => navigate('/admin/fidelizacion?filtro=total')}
+                                : 'Hoy · crítico + alto entre los activos · Clic para ver la lista filtrada'}
+                            chevron onClick={() => navigate('/admin/fidelizacion?filtro=riesgo_activos')}
                         />
                         <Kpi
                             clase="k-prueba" icono="users" label="Nuevos del mes"
@@ -1146,7 +1210,8 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                                 : `${resumenAdmin.conversionRate}%`}
                             error={resumenAdmin.errores.mensual} cargando={resumenAdmin.cargando}
                             sub={`${resumenAdmin.conversionHint} · Clic para ver los convertidos`}
-                            chevron onClick={() => navigate('/admin/alumnos-convertidos')}
+                            chevron onClick={() => navigate(
+                                `/admin/alumnos-convertidos?anio=${resumenAdmin.periodoAnio}&mes=${resumenAdmin.periodoMes}`)}
                         />
                     </div>
                 </section>
@@ -1160,34 +1225,34 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                             : 'mes en curso'}</span>
                     </div>
                     <div className="kpis">
-                        <Kpi
-                            clase="k-caja" icono="chart" label="Ocupación"
-                            valor={resumenAdmin.ocupacionReal === null
-                                ? null
-                                : `${resumenAdmin.ocupacionReal}%`}
-                            error={resumenAdmin.errores.mensual} cargando={resumenAdmin.cargando}
-                            sub={`Mes en curso${resumenAdmin.periodoTexto ? ` · ${resumenAdmin.periodoTexto}` : ''} · asistencia real / cupo — Clic para ver la ocupación por clase`}
-                            chevron onClick={() => setMostrarOcupacion((v) => !v)}
-                        />
+                        <TarjetaMovilConPanel
+                            abierto={mostrarOcupacion}
+                            panel={(
+                                <PanelOcupacionConDatos
+                                    anio={Number(hoy.slice(0, 4))}
+                                    mes={Number(hoy.slice(5, 7))}
+                                    onCerrar={() => setMostrarOcupacion(false)}
+                                />
+                            )}>
+                            <Kpi
+                                clase="k-caja" icono="chart" label="Ocupación"
+                                valor={resumenAdmin.ocupacionReal === null
+                                    ? null
+                                    : `${resumenAdmin.ocupacionReal}%`}
+                                error={resumenAdmin.errores.mensual} cargando={resumenAdmin.cargando}
+                                sub={`Mes en curso${resumenAdmin.periodoTexto ? ` · ${resumenAdmin.periodoTexto}` : ''} · asistencias marcadas ÷ cupo — Clic para ver el detalle por clase`}
+                                chevron onClick={() => setMostrarOcupacion((v) => !v)}
+                            />
+                        </TarjetaMovilConPanel>
                         <Kpi
                             clase="k-activos" icono="check" label="Asistencia real"
                             valor={resumenAdmin.asistenciaReal === null
                                 ? null
                                 : `${resumenAdmin.asistenciaReal}%`}
                             error={resumenAdmin.errores.mensual} cargando={resumenAdmin.cargando}
-                            sub={`Mes en curso${resumenAdmin.periodoTexto ? ` · ${resumenAdmin.periodoTexto}` : ''} · reservas confirmadas con asistencia marcada`}
+                            sub={`Mes en curso${resumenAdmin.periodoTexto ? ` · ${resumenAdmin.periodoTexto}` : ''} · asistencias marcadas ÷ reservas confirmadas (no es ocupación)`}
                         />
                     </div>
-
-                    {mostrarOcupacion && (
-                        <div style={{ marginTop: '0.75rem' }}>
-                            <PanelOcupacionConDatos
-                                anio={Number(hoy.slice(0, 4))}
-                                mes={Number(hoy.slice(5, 7))}
-                                onCerrar={() => setMostrarOcupacion(false)}
-                            />
-                        </div>
-                    )}
                 </section>
 
                 <section className="card" aria-labelledby="ub-revision" data-testid="admin-revision">
@@ -1314,7 +1379,7 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                             <button type="button" className="att-link"
                                 onClick={() => navigate('/admin/alumnos?estado=activo')}
                                 aria-label="Ver el padrón de alumnos activos">
-                                <b className="num">{resumenAdmin.cargando ? '…' : (stats?.alumnosActivos ?? resumenAdmin.alumnosActivos ?? 'n/d')}</b> alumnos activos
+                                <b className="num">{resumenAdmin.alumnosActivosCargando ? '…' : (resumenAdmin.alumnosActivos ?? 'n/d')}</b> alumnos activos
                             </button>
                         )}
                         {!resumenAdmin.cargando && stats?.nuevosAlumnosMes != null && (

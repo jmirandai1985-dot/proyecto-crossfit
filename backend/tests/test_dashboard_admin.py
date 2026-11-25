@@ -16,7 +16,7 @@ Correr aislado (sin servidor ni suite completa):
     cd backend && py -3.12 -m pytest tests/test_dashboard_admin.py -q --noconftest
 """
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -187,4 +187,152 @@ def test_mrr_usa_la_misma_regla_que_plan_vigente_usable():
     assert "vigente_hoy(Suscripcion.fecha_expiracion" in fuente
     assert "Suscripcion.creditos_disponibles.is_(None)" in fuente
     assert "Suscripcion.creditos_disponibles > 0" in fuente
+
+
+
+# ── Planes de prueba: ni el gratis ni el de precio simbólico son membresías ──
+def test_es_plan_de_prueba_por_nombre():
+    assert svc.es_plan_de_prueba("Prueba") is True
+    assert svc.es_plan_de_prueba("Clase de prueba") is True
+    assert svc.es_plan_de_prueba("Plan Test") is True
+    assert svc.es_plan_de_prueba("Trial 1 clase") is True
+    assert svc.es_plan_de_prueba("Princesa") is False
+    assert svc.es_plan_de_prueba("Plan Full") is False
+    assert svc.es_plan_de_prueba(None) is False
+
+
+def test_ranking_excluye_plan_prueba_con_precio_simbolico():
+    ranking = svc.serializar_ranking([
+        (2, "Plan Full", 40000, 2, 80000),
+        (5, "Prueba", 1500, 9, 13500),   # clase de prueba: NO es membresía
+    ])
+
+    assert ranking["total_altas"] == 2
+    assert [p["plan_nombre"] for p in ranking["planes"]] == ["Plan Full"]
+
+
+def test_mrr_excluye_plan_prueba_con_precio_simbolico():
+    mrr = svc.agrupar_mrr_por_plan([
+        (_suscripcion(3, 10), _plan(2, "Plan Full", 40000)),
+        (_suscripcion(4, 11), _plan(5, "Prueba", 1500)),
+    ])
+
+    assert mrr["alumnos"] == 1
+    assert mrr["total_clp"] == 40000
+    assert [p["plan_nombre"] for p in mrr["planes"]] == ["Plan Full"]
+
+
+# ── Alumnos activos: una fila por alumno y misma base para el riesgo ─────────
+class _ConsultaFalsa:
+    def __init__(self, filas):
+        self.filas = filas
+
+    def join(self, *args, **kwargs):
+        return self
+
+    def outerjoin(self, *args, **kwargs):
+        return self
+
+    def filter(self, *args, **kwargs):
+        return self
+
+    def order_by(self, *args, **kwargs):
+        return self
+
+    def all(self):
+        return list(self.filas)
+
+
+class _SesionFalsa:
+    def __init__(self, filas):
+        self.filas = filas
+
+    def query(self, *modelos):
+        return _ConsultaFalsa(self.filas)
+
+
+def _alumno(usuario_id, nombre, creado="2026-11-01"):
+    return SimpleNamespace(
+        id=usuario_id, nombre=nombre, correo=f"{usuario_id}@box.cl",
+        created_at=datetime.fromisoformat(creado),
+    )
+
+
+def _suscripcion_activa(usuario_id, suscripcion_id=1):
+    return SimpleNamespace(
+        id=suscripcion_id, usuario_id=usuario_id, creditos_disponibles=3,
+        fecha_expiracion=datetime(2026, 12, 1, 23, 59, 59, tzinfo=SANTIAGO),
+    )
+
+
+def test_listar_alumnos_activos_cuenta_una_vez_por_alumno():
+    filas = [
+        (_suscripcion_activa(3, 10), _alumno(3, "Ana"), _plan(2, "Plan Full", 40000)),
+        # Misma alumna con otra suscripción vigente: no se cuenta dos veces.
+        (_suscripcion_activa(3, 11), _alumno(3, "Ana"), _plan(6, "Plan Básico", 25000)),
+        (_suscripcion_activa(4, 12), _alumno(4, "Beto"), _plan(2, "Plan Full", 40000)),
+    ]
+
+    resultado = svc.listar_alumnos_activos(_SesionFalsa(filas), 1, limite=10)
+
+    assert resultado["total"] == 2
+    assert {a["nombre"] for a in resultado["alumnos"]} == {"Ana", "Beto"}
+
+
+def test_la_base_de_activos_es_la_misma_que_usa_el_riesgo():
+    fuente = (BACKEND / "app" / "services" / "dashboard_admin.py").read_text(
+        encoding="utf-8")
+
+    assert "def ids_alumnos_activos" in fuente
+    assert 'Usuario.rol == "alumno"' in fuente
+    assert "Usuario.es_prueba.is_(False)" in fuente
+    assert 'Suscripcion.estado == "activo"' in fuente
+    assert "vigente_hoy(Suscripcion.fecha_expiracion" in fuente
+
+
+# ── Ocupación por clase: misma fórmula que la tarjeta ───────────────────────
+class _ResultadoFalso:
+    def __init__(self, filas=None, scalar=None):
+        self._filas = filas or []
+        self._scalar = scalar
+
+    def fetchall(self):
+        return self._filas
+
+    def scalar(self):
+        return self._scalar
+
+
+class _SesionOcupacion:
+    def __init__(self, filas, sin_cupo):
+        self.filas = filas
+        self.sin_cupo = sin_cupo
+        self.llamadas = 0
+
+    def execute(self, *args, **kwargs):
+        self.llamadas += 1
+        if self.llamadas == 1:
+            return _ResultadoFalso(filas=self.filas)
+        return _ResultadoFalso(scalar=self.sin_cupo)
+
+
+def test_ocupacion_por_clase_suma_asistentes_y_cupos():
+    filas = [
+        SimpleNamespace(id=1, fecha=date(2026, 11, 2), hora_inicio=time(18, 0),
+                        disciplina="CrossFit", coach="Ana", cupo_maximo=10,
+                        asistentes=4),
+        SimpleNamespace(id=2, fecha=date(2026, 11, 3), hora_inicio=time(19, 0),
+                        disciplina="CrossFit", coach="Ana", cupo_maximo=10,
+                        asistentes=1),
+    ]
+
+    resultado = svc.ocupacion_mes_por_clase(
+        _SesionOcupacion(filas, sin_cupo=7), 1, anio=2026, mes=11)
+
+    assert resultado["asistentes"] == 5
+    assert resultado["cupo"] == 20
+    assert resultado["total_pct"] == 25.0
+    assert resultado["clases_sin_cupo"] == 7
+    assert [c["pct"] for c in resultado["clases"]] == [40.0, 10.0]
+    assert resultado["clases"][0]["hora_inicio"] == "18:00"
 

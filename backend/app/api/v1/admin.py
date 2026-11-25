@@ -999,3 +999,43 @@ def mrr(
     """
     return dashboard_svc.mrr_por_plan(db, current_user["tenant_id"])
 
+
+
+@router.get("/alumnos-activos")
+def alumnos_activos(
+    limite: int = Query(
+        10, ge=1, le=50,
+        description="Cuántos alumnos devolver en el resumen (el total va aparte)"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Resumen de alumnos ACTIVOS hoy: total + últimos `limite` (para el panel).
+
+    "Activo" = usuario `rol='alumno'`, estado activo, no `es_prueba`, con una
+    suscripción vigente hoy (día chileno). Es la MISMA base que usa el conteo de
+    "Alumnos en riesgo" en `/kpis/churn` (`total_activos`), así que el riesgo
+    nunca puede superar a los activos. El padrón completo sigue en
+    `/admin/alumnos?estado=activo`.
+    """
+    return dashboard_svc.listar_alumnos_activos(
+        db, current_user["tenant_id"], limite=limite)
+
+
+@router.get("/ocupacion-mes")
+def ocupacion_mes(
+    anio: Optional[int] = Query(
+        None, ge=2000, le=2100, description="Año (default: el del mes en curso)"),
+    mes: Optional[int] = Query(
+        None, ge=1, le=12, description="Mes 1-12 (default: el mes en curso)"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Ocupación del mes POR CLASE: asistencias reales / cupo de cada realizada.
+
+    Misma fórmula y filtros que `metricas_service.ocupacion_promedio` (la fuente
+    del número de la tarjeta "Ocupación"): el total de este panel coincide con
+    la tarjeta. Las clases sin cupo se informan aparte y no entran al %.
+    """
+    return dashboard_svc.ocupacion_mes_por_clase(
+        db, current_user["tenant_id"], anio=anio, mes=mes)
+

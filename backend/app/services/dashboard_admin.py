@@ -15,6 +15,16 @@ Fuente de verdad de las tarjetas de NEGOCIO del mes:
   `planes.precio_clp > 0`, vigente por día chileno y créditos `> 0` o `NULL`
   (ilimitado). Se cuenta UN plan por alumno (el que vence más tarde), igual que
   la regla de "plan vigente usable", para no sumar dos veces a la misma persona.
+* **Planes de prueba**: no son membresías. No hay un flag dedicado en `planes`
+  (`es_comercial` sigue en True para "Prueba"), así que se excluyen por NOMBRE
+  (`prueba`/`test`/`trial`) tanto en el ranking como en el MRR: el plan de
+  prueba gratis y el de precio simbólico ($1.500) quedan fuera.
+* **Alumnos activos** (`ids_alumnos_activos`) es la base compartida con
+  `/kpis/churn`: el riesgo se intersecta con esos IDs, así que nunca supera a
+  los activos. `listar_alumnos_activos` devuelve el total + el resumen.
+* **Ocupación por clase** (`ocupacion_mes_por_clase`) repite EXACTAMENTE los
+  predicados de `metricas_service.ocupacion_promedio`, para que el panel y la
+  tarjeta den el mismo porcentaje.
 
 Los cálculos puros (`dias_del_mes`, `agrupar_por_dia`, `serializar_ranking`,
 `agrupar_mrr_por_plan`, `resumir_ingreso_mes`) no tocan la base: se prueban
@@ -24,7 +34,7 @@ import calendar
 from datetime import date, timedelta
 from typing import Optional, Sequence
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, text
 from sqlalchemy.orm import Session, aliased
 
 from app.core.estados import vigente_hoy
@@ -33,6 +43,7 @@ from app.models.plan import Plan
 from app.models.solicitud_plan import SolicitudPlan
 from app.models.suscripcion import Suscripcion
 from app.models.usuario import Usuario
+from app.services.clases_service import sql_clase_realizada
 from app.services.pagos_del_dia import (
     CONCEPTO_BAZAR,
     CONCEPTO_MEMBRESIA,
@@ -56,6 +67,32 @@ ESTADO_APROBADO = "aprobado"
 # Tope defensivo: el panel es un resumen mensual. Un pico absurdo de filas no
 # puede volver lenta la carga del Dashboard.
 MAX_PAGOS_MES = 2000
+
+# ── Planes que NO son membresías ────────────────────────────────────────────
+# El plan de prueba (gratis o con un precio simbólico, p. ej. $1.500) es una
+# CLASE de prueba: no es una venta recurrente y no puede inflar el MRR ni el
+# ranking de membresías. No hay un flag dedicado en `planes` (`es_comercial`
+# sigue en True para "Prueba" y `primera_clase_tomada` no se usa), así que la
+# marca disponible es el NOMBRE. Se excluye cualquier plan cuyo nombre contenga
+# "prueba", "test" o "trial" (sin distinguir mayúsculas).
+FRAGMENTOS_PLAN_PRUEBA = ("prueba", "test", "trial")
+
+
+def es_plan_de_prueba(nombre) -> bool:
+    """¿El nombre del plan corresponde a una clase de prueba (no a una membresía)?
+
+    Se usa en el ranking y en el MRR, tanto en SQL como al agregar en Python.
+    """
+    texto = str(nombre or "").strip().lower()
+    return any(fragmento in texto for fragmento in FRAGMENTOS_PLAN_PRUEBA)
+
+
+def _no_es_plan_prueba(columna):
+    """Predicado SQL: el nombre del plan NO contiene una marca de prueba."""
+    return and_(*[
+        ~func.lower(columna).like(f"%{fragmento}%")
+        for fragmento in FRAGMENTOS_PLAN_PRUEBA
+    ])
 
 
 def rango_del_mes(anio: Optional[int] = None, mes: Optional[int] = None,
@@ -143,15 +180,15 @@ def resumir_ingreso_mes(cobros: Sequence[dict], pagos: Sequence[dict],
 def serializar_ranking(filas: Sequence) -> dict:
     """Ranking de planes vendidos: excluye precios <= 0 y calcula el % de altas.
 
-    `filas` = `[(plan_id, nombre, precio_clp, altas, total_clp)]`. El plan de
-    prueba gratis (`precio_clp = 0`) se descarta acá ADEMÁS del filtro SQL: si
-    alguna vez llegara una fila con precio 0, no puede aparecer como "plan
-    vendido" ni en el denominador del porcentaje.
+    `filas` = `[(plan_id, nombre, precio_clp, altas, total_clp)]`. Se descartan
+    acá ADEMÁS del filtro SQL: los precios <= 0 (plan gratis) y los planes de
+    PRUEBA (nombre con "prueba"/"test"/"trial", incluido el de $1.500). Un plan
+    de prueba no es una membresía vendida ni suma en el denominador del %.
     """
     planes = []
     for plan_id, nombre, precio, altas, total in filas:
         precio = int(precio or 0)
-        if precio <= 0:
+        if precio <= 0 or es_plan_de_prueba(nombre):
             continue
         planes.append({
             "plan_id": plan_id,
@@ -186,7 +223,7 @@ def agrupar_mrr_por_plan(filas: Sequence) -> dict:
             continue
         vistos.add(alumno_id)
         precio = int(getattr(plan, "precio_clp", 0) or 0)
-        if precio <= 0:
+        if precio <= 0 or es_plan_de_prueba(getattr(plan, "nombre", None)):
             continue
         fila = por_plan.setdefault(plan.id, {
             "plan_id": plan.id,
@@ -334,6 +371,7 @@ def ranking_planes_mes(db: Session, tenant_id: int,
         .filter(Pago.concepto == CONCEPTO_MEMBRESIA)
         .filter(Pago.estado == ESTADO_APROBADO)
         .filter(plan_precio > 0)
+        .filter(_no_es_plan_prueba(plan_nombre))
         .filter(fecha_cobro >= inicio)
         .filter(fecha_cobro <= fin)
         .group_by(plan_id, plan_nombre, plan_precio)
@@ -365,6 +403,7 @@ def _filas_mrr(db: Session, tenant_id: int, hoy: date):
         .filter(Usuario.es_prueba.is_(False))
         .filter(Suscripcion.estado == "activo")
         .filter(Plan.precio_clp > 0)
+        .filter(_no_es_plan_prueba(Plan.nombre))
         .filter(vigente_hoy(Suscripcion.fecha_expiracion, hoy=hoy))
         .filter(or_(
             Suscripcion.creditos_disponibles.is_(None),
@@ -387,4 +426,190 @@ def mrr_por_plan(db: Session, tenant_id: int,
     resultado = agrupar_mrr_por_plan(filas)
     resultado.update({"fecha": hoy.isoformat()})
     return resultado
+
+
+
+# ── Alumnos ACTIVOS (la base del padrón y del riesgo) ───────────────────────
+def ids_alumnos_activos(db: Session, tenant_id: int,
+                        hoy: Optional[date] = None) -> set[int]:
+    """IDs de alumnos con una suscripción VIGENTE HOY (misma regla del Dashboard).
+
+    "Activo" = alumno real (`rol='alumno'`, `es_prueba=false`), usuario en estado
+    `activo` y al menos una suscripción `activo` cuya vigencia (día chileno)
+    incluye hoy. Es la MISMA base para la tarjeta "Alumnos activos" y para
+    contar "Alumnos en riesgo": el riesgo se intersecta con estos IDs, así que
+    nunca puede superar a los activos.
+    """
+    hoy = hoy or hoy_santiago()
+    tiene_plan = (
+        db.query(Suscripcion.id)
+        .filter(
+            Suscripcion.usuario_id == Usuario.id,
+            Suscripcion.tenant_id == tenant_id,
+            Suscripcion.estado == "activo",
+            vigente_hoy(Suscripcion.fecha_expiracion,
+                        Suscripcion.fecha_inicio, hoy=hoy),
+        )
+        .exists()
+    )
+    filas = db.query(Usuario.id).filter(
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == "alumno",
+        Usuario.estado == "activo",
+        Usuario.es_prueba.is_(False),
+        tiene_plan,
+    ).all()
+    return {int(uid) for (uid,) in filas}
+
+
+def _filas_alumnos_activos(db: Session, tenant_id: int, hoy: date):
+    """Filas (suscripción, alumno, plan) de los activos, ordenadas para deduplicar."""
+    return (
+        db.query(Suscripcion, Usuario, Plan)
+        .join(Usuario, Usuario.id == Suscripcion.usuario_id)
+        # outerjoin: un plan borrado no puede hacer desaparecer al alumno del
+        # padrón activo (la suscripción sigue vigente).
+        .outerjoin(Plan, Plan.id == Suscripcion.plan_id)
+        .filter(
+            Suscripcion.tenant_id == tenant_id,
+            Usuario.tenant_id == tenant_id,
+            Usuario.rol == "alumno",
+            Usuario.estado == "activo",
+            Usuario.es_prueba.is_(False),
+            Suscripcion.estado == "activo",
+            vigente_hoy(Suscripcion.fecha_expiracion,
+                        Suscripcion.fecha_inicio, hoy=hoy),
+        )
+        .order_by(
+            Suscripcion.usuario_id.asc(),
+            Suscripcion.fecha_expiracion.desc(),
+            Suscripcion.id.desc(),
+        )
+        .all()
+    )
+
+
+def listar_alumnos_activos(db: Session, tenant_id: int,
+                           limite: int = 10,
+                           hoy: Optional[date] = None) -> dict:
+    """`GET /admin/alumnos-activos`: total y los últimos `limite` alumnos activos.
+
+    Un alumno puede tener más de una suscripción vigente: se cuenta UNA vez (la
+    que vence más tarde). El detalle completo sigue en
+    `/admin/alumnos?estado=activo`.
+    """
+    hoy = hoy or hoy_santiago()
+    vistos = set()
+    alumnos = []
+    for suscripcion, alumno, plan in _filas_alumnos_activos(db, tenant_id, hoy):
+        if alumno.id in vistos:
+            continue
+        vistos.add(alumno.id)
+        alumnos.append({
+            "id": alumno.id,
+            "nombre": alumno.nombre,
+            "correo": alumno.correo,
+            "plan_id": plan.id if plan is not None else None,
+            "plan_nombre": plan.nombre if plan is not None else None,
+            "precio_clp": int(plan.precio_clp or 0) if plan is not None else 0,
+            "fecha_expiracion": (suscripcion.fecha_expiracion.isoformat()
+                                 if suscripcion.fecha_expiracion else None),
+            "creditos_disponibles": suscripcion.creditos_disponibles,
+            "_alta": (alumno.created_at.isoformat()
+                      if getattr(alumno, "created_at", None) else ""),
+        })
+    # "Últimos" = altas más recientes. Se ordena después de deduplicar y el
+    # campo de apoyo no se devuelve.
+    alumnos.sort(key=lambda a: (a["_alta"], a["nombre"] or ""), reverse=True)
+    for alumno in alumnos:
+        alumno.pop("_alta", None)
+    limite = max(1, int(limite or 10))
+    return {"total": len(alumnos), "alumnos": alumnos[:limite]}
+
+
+
+# ── Ocupación del mes POR CLASE (misma fórmula que la tarjeta) ───────────────
+def ocupacion_mes_por_clase(db: Session, tenant_id: int,
+                            anio: Optional[int] = None,
+                            mes: Optional[int] = None) -> dict:
+    """`GET /admin/ocupacion-mes`: asistencias reales / cupo, por clase realizada.
+
+    Usa EXACTAMENTE los mismos predicados que
+    `metricas_service.ocupacion_promedio` (la fuente del número de la tarjeta):
+    clases con `cupo_maximo` no nulo, `sql_clase_realizada("c")` y asistencias
+    `reservas.asistio = true` de usuarios que NO son `es_prueba`. Por eso el
+    total de este panel (suma de asistentes / suma de cupos) coincide con el
+    porcentaje de la tarjeta.
+
+    Las clases sin tope (Musculación / Open Box) no tienen denominador: se
+    informan como conteo (`clases_sin_cupo`) y quedan fuera del porcentaje.
+    """
+    primer_dia, ultimo_dia, _, _ = rango_del_mes(anio, mes)
+
+    filas = db.execute(text(f"""
+        SELECT c.id, c.fecha, c.hora_inicio,
+               d.nombre AS disciplina, uc.nombre AS coach,
+               c.cupo_maximo,
+               COUNT(r.id) FILTER (
+                   WHERE r.asistio IS TRUE AND NOT ua.es_prueba
+               ) AS asistentes
+        FROM clases c
+        LEFT JOIN disciplinas d
+               ON d.id = c.disciplina_id
+        LEFT JOIN usuarios uc
+               ON uc.id = c.coach_id
+        LEFT JOIN reservas r
+               ON r.clase_id = c.id
+              AND r.tenant_id = c.tenant_id
+        LEFT JOIN usuarios ua
+               ON ua.id = r.alumno_id
+              AND ua.tenant_id = c.tenant_id
+        WHERE c.tenant_id = :tid
+          AND c.fecha >= :ini
+          AND c.fecha <= :fin
+          AND c.cupo_maximo IS NOT NULL
+          AND {sql_clase_realizada("c")}
+        GROUP BY c.id, c.fecha, c.hora_inicio, d.nombre, uc.nombre, c.cupo_maximo
+        ORDER BY c.fecha ASC, c.hora_inicio ASC
+    """), {"tid": tenant_id, "ini": primer_dia, "fin": ultimo_dia}).fetchall()  # nosec B608
+
+    clases = [{
+        "id": fila.id,
+        "fecha": fila.fecha.isoformat() if fila.fecha else None,
+        "hora_inicio": (fila.hora_inicio.strftime("%H:%M")
+                        if fila.hora_inicio else None),
+        "disciplina": fila.disciplina or "Clase",
+        "coach": fila.coach,
+        "cupo": int(fila.cupo_maximo or 0),
+        "asistentes": int(fila.asistentes or 0),
+        "pct": (round(int(fila.asistentes or 0) / int(fila.cupo_maximo) * 100, 2)
+                if fila.cupo_maximo else None),
+    } for fila in filas]
+
+    asistentes = sum(clase["asistentes"] for clase in clases)
+    cupo = sum(clase["cupo"] for clase in clases)
+    total_pct = round(asistentes / cupo * 100, 2) if cupo > 0 else None
+
+    # Clases realizadas SIN tope: no entran al %, pero el panel las informa.
+    sin_cupo = db.execute(text(f"""
+        SELECT COUNT(*)
+        FROM clases c
+        WHERE c.tenant_id = :tid
+          AND c.fecha >= :ini
+          AND c.fecha <= :fin
+          AND c.cupo_maximo IS NULL
+          AND {sql_clase_realizada("c")}
+    """), {"tid": tenant_id, "ini": primer_dia, "fin": ultimo_dia}).scalar() or 0  # nosec B608
+
+    return {
+        "anio": primer_dia.year,
+        "mes": primer_dia.month,
+        "desde": primer_dia.isoformat(),
+        "hasta": ultimo_dia.isoformat(),
+        "total_pct": total_pct,
+        "asistentes": asistentes,
+        "cupo": cupo,
+        "clases_sin_cupo": int(sin_cupo),
+        "clases": clases,
+    }
 

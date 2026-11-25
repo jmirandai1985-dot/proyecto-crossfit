@@ -7,14 +7,15 @@
  *  - Ingreso del mes  → `GET /admin/ingreso-mes` (pagos aprobados por día).
  *  - Membresías mes   → `GET /admin/membresias-mes` (ranking de planes pagados).
  *  - MRR              → `GET /admin/mrr` (membresías activas por plan).
- *  - Ocupación        → `GET /asistencia/historial` (una fila por clase).
+ *  - Ocupación        → `GET /admin/ocupacion-mes` (una fila por clase, misma
+ *                       fórmula que la tarjeta: asistencias reales / cupo).
  *
  * Estilo: el mismo `section` con borde y "Cerrar" que los paneles de "Clases de
  * hoy" y "Pagos del día" del Dashboard. Los componentes son de presentación:
  * no piden datos ni deciden reglas de negocio.
  */
 import React from 'react';
-import { useHistorialAsistencia } from '../../hooks/queries';
+import { useOcupacionMes } from '../../hooks/queries';
 import { mensajeError } from '../../services/queryClient';
 import { fmtFechaCortaChile } from '../../utils/fecha';
 
@@ -39,7 +40,7 @@ const diaCorto = (fecha) => {
 export function PanelDetalle({ id, titulo, subtitulo, onCerrar, children }) {
     return (
         <section aria-labelledby={id}
-            className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+            className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
             <div className="flex items-start justify-between gap-3">
                 <div>
                     <h2 id={id} className="text-lg font-bold text-zinc-100">{titulo}</h2>
@@ -74,6 +75,14 @@ const KpiResumen = ({ label, valor, detalle }) => (
         <p className="text-lg font-bold text-zinc-100">{valor}</p>
         {detalle && <p className="text-[11px] text-zinc-500">{detalle}</p>}
     </div>
+);
+
+/** Enlace secundario "Ver todo" del pie de un panel (mantiene la pantalla completa). */
+const VerTodo = ({ onClick, texto = 'Ver todo' }) => (
+    <button type="button" onClick={onClick}
+        className="w-full rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-700 transition-colors">
+        {texto} →
+    </button>
 );
 
 // ── Ingreso del mes ─────────────────────────────────────────────────────────
@@ -144,7 +153,7 @@ export function PanelMembresiasMes({ ranking, cargando, error, onCerrar }) {
         <PanelDetalle
             id="dashboard-membresias-mes"
             titulo="Membresías del mes · planes vendidos"
-            subtitulo="Ranking de planes con precio mayor a $0 vendidos este mes. El plan de prueba gratis no es una venta."
+            subtitulo="Ranking de planes de membresía con precio mayor a $0 vendidos este mes. Los planes de prueba (gratis o de precio simbólico) no son membresías."
             onCerrar={onCerrar}>
             <EstadoCarga cargando={cargando} error={error}>
                 <KpiResumen label="Planes pagados vendidos"
@@ -152,8 +161,8 @@ export function PanelMembresiasMes({ ranking, cargando, error, onCerrar }) {
                     detalle="Excluye el plan de prueba gratis" />
                 {planes.length === 0 ? (
                     <p className="text-sm text-zinc-500">
-                        Sin membresías pagadas este mes. En este box el plan de prueba
-                        es gratuito, así que sus alumnos no entran en el ranking.
+                        Sin membresías pagadas este mes. Los planes de prueba (gratis o
+                        de precio simbólico) no cuentan como membresía y no entran al ranking.
                     </p>
                 ) : (
                     <div className="rounded-lg border border-zinc-800 overflow-hidden">
@@ -195,7 +204,7 @@ export function PanelMrr({ mrr, cargando, error, onCerrar }) {
         <PanelDetalle
             id="dashboard-mrr"
             titulo="MRR · membresías activas hoy"
-            subtitulo="Planes pagados con membresía activa, vigente y con créditos. Un plan por alumno (el que vence más tarde). Precio de LISTA del plan (no se prorratean los planes de larga duración)."
+            subtitulo="Membresías de pago activas, vigentes y con créditos. Un plan por alumno (el que vence más tarde). Los planes de prueba no cuentan. Precio de LISTA (no se prorratean los planes largos)."
             onCerrar={onCerrar}>
             <EstadoCarga cargando={cargando} error={error}>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -206,8 +215,8 @@ export function PanelMrr({ mrr, cargando, error, onCerrar }) {
                 </div>
                 {planes.length === 0 ? (
                     <p className="text-sm text-zinc-500">
-                        No hay membresías activas pagadas hoy. El plan de prueba gratis
-                        (precio $0) no cuenta para el MRR.
+                        No hay membresías de pago activas hoy. Los planes de prueba
+                        (gratis o de precio simbólico) no cuentan para el MRR.
                     </p>
                 ) : (
                     <div className="rounded-lg border border-zinc-800 overflow-hidden">
@@ -244,38 +253,35 @@ export function PanelMrr({ mrr, cargando, error, onCerrar }) {
 
 // ── Ocupación del mes por clase ────────────────────────────────────────────
 /**
- * `historial` = respuesta de `GET /asistencia/historial` (clases del mes con
- * `marcados_count` y `cupo_maximo`). Ocupación de cada clase realizada CON tope:
- * asistentes reales (`marcados_count`) / cupo. Las clases sin tope (Musculación /
- * Open Box) no tienen denominador y se informan aparte.
+ * `data` = respuesta de `GET /admin/ocupacion-mes`: total + una fila por clase
+ * realizada CON cupo. El backend usa la MISMA fórmula de la tarjeta
+ * (`metricas_service.ocupacion_promedio`): asistencias reales (sin cuentas
+ * `es_prueba`) / cupo. Las clases sin tope se informan aparte.
  */
-export function PanelOcupacionMes({ historial, cargando, error, onCerrar }) {
-    const clases = Array.isArray(historial?.clases) ? historial.clases : [];
-    const conCupo = clases.filter((c) => c.estado === 'realizada'
-        && c.cupo_maximo !== null && c.cupo_maximo !== undefined);
-    const sinTope = clases.filter((c) => c.estado === 'realizada'
-        && (c.cupo_maximo === null || c.cupo_maximo === undefined));
-    const asistentes = conCupo.reduce((a, c) => a + (c.marcados_count || 0), 0);
-    const cupos = conCupo.reduce((a, c) => a + (c.cupo_maximo || 0), 0);
-    const totalPct = cupos > 0 ? Math.round((asistentes / cupos) * 1000) / 10 : null;
+export function PanelOcupacionMes({ data, cargando, error, onCerrar }) {
+    const clases = Array.isArray(data?.clases) ? data.clases : [];
+    const totalPct = data?.total_pct ?? null;
+    const asistentes = data?.asistentes ?? 0;
+    const cupo = data?.cupo ?? 0;
+    const sinTope = data?.clases_sin_cupo ?? 0;
 
     return (
         <PanelDetalle
             id="dashboard-ocupacion-mes"
             titulo="Ocupación del mes · por clase"
-            subtitulo="Asistencia real (marcada) sobre el cupo de cada clase realizada. Las clases sin tope no tienen porcentaje."
+            subtitulo="Asistencias reales (marcadas, sin cuentas de prueba) sobre el cupo de cada clase realizada. Es la MISMA fórmula de la tarjeta. Las clases sin tope no tienen porcentaje."
             onCerrar={onCerrar}>
             <EstadoCarga cargando={cargando} error={error}>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <KpiResumen label="Ocupación del mes"
                         valor={totalPct === null ? 'n/d' : `${totalPct}%`}
-                        detalle={`${asistentes} asistencias / ${cupos} cupos`} />
-                    <KpiResumen label="Clases con cupo" valor={conCupo.length}
+                        detalle={`${asistentes} asistencias / ${cupo} cupos`} />
+                    <KpiResumen label="Clases con cupo" valor={clases.length}
                         detalle="Realizadas este mes" />
-                    <KpiResumen label="Clases sin tope" valor={sinTope.length}
+                    <KpiResumen label="Clases sin tope" valor={sinTope}
                         detalle="Musculación / Open Box" />
                 </div>
-                {conCupo.length === 0 ? (
+                {clases.length === 0 ? (
                     <p className="text-sm text-zinc-500">
                         Todavía no hay clases realizadas con cupo este mes: sin
                         denominador no se publica un porcentaje.
@@ -292,38 +298,34 @@ export function PanelOcupacionMes({ historial, cargando, error, onCerrar }) {
                                 </tr>
                             </thead>
                             <tbody>
-                                {conCupo.map((clase) => {
-                                    const pct = Math.round(
-                                        ((clase.marcados_count || 0) / clase.cupo_maximo) * 1000) / 10;
-                                    return (
-                                        <tr key={clase.id} className="border-t border-zinc-800/70">
-                                            <td className="px-3 py-2 text-zinc-200">
-                                                <span className="text-zinc-400">
-                                                    {fmtFechaCortaChile(clase.fecha)} · {String(clase.hora_inicio).slice(0, 5)}
-                                                </span>
-                                                <br />
-                                                {clase.disciplina_nombre}
-                                                {clase.coach ? ` · ${clase.coach}` : ''}
-                                            </td>
-                                            <td className="px-3 py-2 text-right text-zinc-300">
-                                                {clase.marcados_count || 0}
-                                            </td>
-                                            <td className="px-3 py-2 text-right text-zinc-400">
-                                                {clase.cupo_maximo}
-                                            </td>
-                                            <td className={`px-3 py-2 text-right font-semibold ${pct >= 80 ? 'text-emerald-300' : pct >= 50 ? 'text-amber-300' : 'text-zinc-300'}`}>
-                                                {pct}%
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
+                                {clases.map((clase) => (
+                                    <tr key={clase.id} className="border-t border-zinc-800/70">
+                                        <td className="px-3 py-2 text-zinc-200">
+                                            <span className="text-zinc-400">
+                                                {fmtFechaCortaChile(clase.fecha)} · {clase.hora_inicio}
+                                            </span>
+                                            <br />
+                                            {clase.disciplina}
+                                            {clase.coach ? ` · ${clase.coach}` : ''}
+                                        </td>
+                                        <td className="px-3 py-2 text-right text-zinc-300">
+                                            {clase.asistentes}
+                                        </td>
+                                        <td className="px-3 py-2 text-right text-zinc-400">
+                                            {clase.cupo}
+                                        </td>
+                                        <td className={`px-3 py-2 text-right font-semibold ${clase.pct >= 80 ? 'text-emerald-300' : clase.pct >= 50 ? 'text-amber-300' : 'text-zinc-300'}`}>
+                                            {clase.pct == null ? 'n/d' : `${clase.pct}%`}
+                                        </td>
+                                    </tr>
+                                ))}
                             </tbody>
                         </table>
                     </div>
                 )}
-                {sinTope.length > 0 && (
+                {sinTope > 0 && (
                     <p className="text-[11px] text-zinc-500">
-                        {sinTope.length} clases realizadas sin cupo (Musculación / Open Box):
+                        {sinTope} clases realizadas sin cupo (Musculación / Open Box):
                         se cuentan aparte y no entran en el porcentaje.
                     </p>
                 )}
@@ -339,17 +341,193 @@ export function PanelOcupacionMes({ historial, cargando, error, onCerrar }) {
  * Lo comparten la vista de escritorio y la móvil.
  */
 export function PanelOcupacionConDatos({ anio, mes, onCerrar }) {
-    const historialQ = useHistorialAsistencia(anio, mes);
-    const error = historialQ.error
-        ? mensajeError(historialQ.error, 'No se pudo cargar la ocupación del mes')
+    const ocupacionQ = useOcupacionMes(anio, mes);
+    const error = ocupacionQ.error
+        ? mensajeError(ocupacionQ.error, 'No se pudo cargar la ocupación del mes')
         : '';
     return (
         <PanelOcupacionMes
-            historial={historialQ.data}
-            cargando={historialQ.isPending}
+            data={ocupacionQ.data}
+            cargando={ocupacionQ.isPending}
             error={error}
             onCerrar={onCerrar}
         />
+    );
+}
+
+
+
+// ── Asistencia de hoy (lista resumida) ──────────────────────────────────────
+const horaDe = (clase) => String(clase?.hora_inicio || '').slice(0, 5);
+const asistentesDe = (clase) => Number(clase?.asistentes_confirmados) || 0;
+const reservasDeClase = (clase) => Number(clase?.reservas_count) || 0;
+const sinCupoClase = (clase) => clase?.cupo_maximo === null
+    || clase?.cupo_maximo === undefined;
+
+export function PanelAsistenciaHoy({ clases, cargando, error, onCerrar, onVerTodo }) {
+    const todas = Array.isArray(clases) ? clases : [];
+    // Las últimas 10 por hora (lo más reciente primero); el total de la
+    // tarjeta se calcula sobre TODAS las clases, no sobre el recorte.
+    const lista = [...todas]
+        .sort((a, b) => horaDe(b).localeCompare(horaDe(a)))
+        .slice(0, 10);
+    const total = todas.reduce((suma, clase) => suma + asistentesDe(clase), 0);
+
+    return (
+        <PanelDetalle
+            id="dashboard-asistencia-hoy"
+            titulo="Asistencia de hoy"
+            subtitulo="Asistencias registradas en las clases del día (asistentes confirmados). Misma suma que la tarjeta."
+            onCerrar={onCerrar}>
+            <EstadoCarga cargando={cargando} error={error}>
+                <KpiResumen label="Asistencias de hoy" valor={total}
+                    detalle={`${todas.length} clases hoy`} />
+                {lista.length === 0 ? (
+                    <p className="text-sm text-zinc-500">No hay clases registradas hoy.</p>
+                ) : (
+                    <div className="max-h-72 overflow-auto rounded-lg border border-zinc-800">
+                        <table className="w-full text-sm">
+                            <thead className="sticky top-0 bg-zinc-900">
+                                <tr className="text-left text-[11px] uppercase tracking-wide text-zinc-500">
+                                    <th className="px-3 py-2">Hora</th>
+                                    <th className="px-3 py-2">Clase</th>
+                                    <th className="px-3 py-2 text-right">Asist.</th>
+                                    <th className="px-3 py-2 text-right">Reservas / cupo</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {lista.map((clase) => (
+                                    <tr key={clase.id} className="border-t border-zinc-800/70">
+                                        <td className="px-3 py-2 text-zinc-400 tabular-nums">
+                                            {horaDe(clase) || '--:--'}
+                                        </td>
+                                        <td className="px-3 py-2 text-zinc-200">
+                                            {clase.disciplina_nombre || 'Clase'}
+                                        </td>
+                                        <td className="px-3 py-2 text-right font-semibold text-zinc-100">
+                                            {asistentesDe(clase)}
+                                        </td>
+                                        <td className="px-3 py-2 text-right text-zinc-400">
+                                            {sinCupoClase(clase)
+                                                ? `${reservasDeClase(clase)} · sin cupo`
+                                                : `${reservasDeClase(clase)} / ${clase.cupo_maximo}`}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+                <VerTodo onClick={onVerTodo} texto="Ver la asistencia completa" />
+            </EstadoCarga>
+        </PanelDetalle>
+    );
+}
+
+
+
+// ── Alumnos activos (lista resumida) ────────────────────────────────────────
+export function PanelAlumnosActivos({ resumen, cargando, error, onCerrar, onVerTodo }) {
+    const alumnos = Array.isArray(resumen?.alumnos) ? resumen.alumnos : [];
+    return (
+        <PanelDetalle
+            id="dashboard-alumnos-activos"
+            titulo="Alumnos activos"
+            subtitulo="Alumnos con una suscripción vigente hoy (día de Chile). El total es la base de la tarjeta y del riesgo."
+            onCerrar={onCerrar}>
+            <EstadoCarga cargando={cargando} error={error}>
+                <KpiResumen label="Alumnos activos" valor={resumen?.total ?? 0}
+                    detalle="Suscripción vigente hoy" />
+                {alumnos.length === 0 ? (
+                    <p className="text-sm text-zinc-500">
+                        No hay alumnos con una suscripción vigente hoy.
+                    </p>
+                ) : (
+                    <ul className="max-h-72 space-y-1 overflow-auto">
+                        {alumnos.map((alumno) => (
+                            <li key={alumno.id}
+                                className="flex items-center justify-between gap-2 rounded border border-zinc-800 px-3 py-2 text-sm">
+                                <div className="min-w-0">
+                                    <p className="truncate text-zinc-200">{alumno.nombre}</p>
+                                    <p className="truncate text-[11px] text-zinc-500">
+                                        {alumno.plan_nombre || 'Sin plan'}
+                                        {alumno.correo ? ` · ${alumno.correo}` : ''}
+                                    </p>
+                                </div>
+                                <span className="shrink-0 text-[11px] text-zinc-400">
+                                    {alumno.fecha_expiracion
+                                        ? `vence ${fmtFechaCortaChile(alumno.fecha_expiracion)}`
+                                        : 'sin vencimiento'}
+                                </span>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+                <VerTodo onClick={onVerTodo} texto="Ver el padrón activo" />
+            </EstadoCarga>
+        </PanelDetalle>
+    );
+}
+
+
+
+// ── Ventas Bazar (lista resumida) ───────────────────────────────────────────
+export function PanelVentasBazar({ pagos, cargando, error, onCerrar, onVerTodo }) {
+    const todos = Array.isArray(pagos) ? pagos.filter((p) => p?.origen === 'bazar') : [];
+    const lista = [...todos]
+        .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')))
+        .slice(0, 10);
+    const total = todos.reduce((suma, pago) => suma + Number(pago.monto_clp || 0), 0);
+
+    return (
+        <PanelDetalle
+            id="dashboard-ventas-bazar"
+            titulo="Ventas Bazar"
+            subtitulo="Cobros aprobados del Bazar en el mes (tabla pagos). La lista muestra los últimos 10."
+            onCerrar={onCerrar}>
+            <EstadoCarga cargando={cargando} error={error}>
+                <KpiResumen label="Ventas del mes" valor={clp(total)}
+                    detalle={`${todos.length} pedidos cobrados`} />
+                {lista.length === 0 ? (
+                    <p className="text-sm text-zinc-500">
+                        Sin ventas del Bazar cobradas por Mercado Pago este mes.
+                    </p>
+                ) : (
+                    <div className="max-h-72 overflow-auto rounded-lg border border-zinc-800">
+                        <table className="w-full text-sm">
+                            <thead className="sticky top-0 bg-zinc-900">
+                                <tr className="text-left text-[11px] uppercase tracking-wide text-zinc-500">
+                                    <th className="px-3 py-2">Fecha</th>
+                                    <th className="px-3 py-2">Alumno</th>
+                                    <th className="px-3 py-2">Producto</th>
+                                    <th className="px-3 py-2 text-right">Monto</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {lista.map((pago) => (
+                                    <tr key={pago.pago_id} className="border-t border-zinc-800/70">
+                                        <td className="px-3 py-2 text-zinc-400">
+                                            {fmtFechaCortaChile(pago.fecha)}
+                                            {pago.hora ? ` · ${pago.hora}` : ''}
+                                        </td>
+                                        <td className="px-3 py-2 text-zinc-200">
+                                            {pago.nombre || 'Alumno'}
+                                        </td>
+                                        <td className="px-3 py-2 text-zinc-300">
+                                            {pago.producto || pago.origen_detalle || 'Producto'}
+                                        </td>
+                                        <td className="px-3 py-2 text-right font-semibold text-zinc-100">
+                                            {clp(pago.monto_clp)}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+                <VerTodo onClick={onVerTodo} texto="Ver todos los pedidos" />
+            </EstadoCarga>
+        </PanelDetalle>
     );
 }
 

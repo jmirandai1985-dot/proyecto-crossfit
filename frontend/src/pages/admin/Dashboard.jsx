@@ -24,11 +24,14 @@ import PagosDelDia from '../../components/pagos/PagosDelDia';
 // Gráfico de barras horizontales de las clases del día (una fila por clase: hora,
 // barra y "reservas / cupo"). MISMO componente que el Inicio móvil.
 import GraficoClasesHoy from '../../components/dashboard/GraficoClasesHoy';
-// Paneles de las tarjetas de NEGOCIO y de OCUPACIÓN: se abren DEBAJO de la fila
-// de KPIs (no navegan a Reportes). Los datos los trae `useResumenAdmin`.
+// Paneles de las tarjetas de NEGOCIO y de OCUPACIÓN: se abren anclados a su
+// tarjeta (TarjetaConPanel), no debajo de la fila. Los datos los trae `useResumenAdmin`.
 import {
-    PanelIngresoMes, PanelMembresiasMes, PanelMrr, PanelOcupacionConDatos,
+    PanelAlumnosActivos, PanelAsistenciaHoy, PanelDetalle, PanelIngresoMes,
+    PanelMembresiasMes, PanelMrr, PanelOcupacionConDatos, PanelVentasBazar,
 } from '../../components/dashboard/PanelesNegocio';
+// Resumen compacto de clases (sin caja con scroll) para la tarjeta de Hoy.
+import ResumenClasesHoy from '../../components/dashboard/ResumenClasesHoy';
 // Aviso REUTILIZABLE (secciones + Reintentar) para las tarjetas que pueden fallar.
 import AvisoCarga from '../../components/AvisoCarga';
 import { KpiCard } from '../../components/kpis/KpiCard';
@@ -73,6 +76,23 @@ const visualClaseHoy = (c) => {
     return { pct, color, ampliado, estado: ESTADO_CLASE_LABEL[c.estado] || '', badge, sinTope };
 };
 
+/**
+ * Tarjeta + su panel ANCLADO. El panel se posiciona absoluto justo debajo de
+ * ESA tarjeta (no después de toda la fila), así abrir uno no empuja ni mueve
+ * las demás tarjetas. El ancho se limita al viewport y el alto a 75vh con
+ * scroll propio para paneles largos (Ingreso del mes, Ocupación).
+ */
+const TarjetaConPanel = ({ abierto, panel, children, align = 'left' }) => (
+    <div className="relative">
+        {children}
+        {abierto && panel ? (
+            <div className={`absolute top-full z-50 mt-2 max-h-[75vh] w-[min(44rem,calc(100vw-2rem))] overflow-auto rounded-lg bg-zinc-900 shadow-2xl ring-1 ring-zinc-700 ${align === 'right' ? 'right-0' : 'left-0'}`}>
+                {panel}
+            </div>
+        ) : null}
+    </div>
+);
+
 const AdminDashboard = () => {
     const navigate = useNavigate();
     const { tenant_id } = useAuth();
@@ -109,7 +129,7 @@ const AdminDashboard = () => {
     const solicitudes = solicitudesQ.data || [];
     const countPendientes = registrosQ.data || 0;
     const stats = statsQ.data ?? null;
-    const resumenAdmin = useResumenAdmin(tenant_id);
+    const resumenAdmin = useResumenAdmin();
     const registrosError = registrosQ.error
         ? mensajeError(registrosQ.error, 'No se pudo cargar el dato') : '';
     const solicitudesError = solicitudesQ.error
@@ -159,18 +179,14 @@ const AdminDashboard = () => {
     const [claseDetalle, setClaseDetalle] = useState(null);
     const [detalleReservas, setDetalleReservas] = useState([]);
     const [detalleLoading, setDetalleLoading] = useState(false);
-    // "Pagos del día": panel debajo de la fila Hoy (mismo PagosDelDia, misma queryKey).
-    // Arranca cerrado; la tarjeta "Ingresos de hoy" lo alterna y un segundo clic lo cierra.
-    const [pagosAbierto, setPagosAbierto] = useState(false);
-    // "Clases de hoy": panel con el GRÁFICO del día (una fila por clase: hora, barra y
-    // "reservas / cupo"), abierto desde la tarjeta. Arranca cerrado.
-    const [clasesAbierto, setClasesAbierto] = useState(false);
-    // "Negocio del mes": panel abierto ('ingreso' | 'membresias' | 'mrr') o null.
-    // Cada tarjeta abre SU panel debajo de la fila (antes Ingreso, MRR y
-    // Membresías navegaban a Reportes/Planes y el detalle no coincidía).
-    const [panelNegocio, setPanelNegocio] = useState(null);
-    // "Ocupación": panel con la ocupación del mes por clase (`/asistencia/historial`).
-    const [ocupacionAbierto, setOcupacionAbierto] = useState(false);
+    // ── Paneles anclados: UNO SOLO abierto a la vez ─────────────────────────
+    // 'clases' | 'asistencia' | 'pagos' | 'ingreso' | 'mrr' | 'bazar'
+    // | 'membresias' | 'alumnos' | 'ocupacion' | null.
+    // Abrir otro cierra el anterior (no se superponen) y un segundo clic cierra.
+    const [panelActivo, setPanelActivo] = useState(null);
+    const alternarPanel = (clave) => setPanelActivo(
+        (actual) => (actual === clave ? null : clave));
+    const cerrarPanel = () => setPanelActivo(null);
     // Fidelización — modal membresías del mes
     const [fidelizacionModal, setFidelizacionModal] = useState(null); // 'membresias'
     // Filtros del listado de membresías: un mes normal trae 263 filas y sin buscador
@@ -186,24 +202,13 @@ const AdminDashboard = () => {
     const membresiasVisibles = useMemo(() => filtrarMembresias(stats?.suscripcionesMes, {
         busqueda: busquedaMembresias, plan: planMembresias, orden: ordenMembresias,
     }), [stats?.suscripcionesMes, busquedaMembresias, planMembresias, ordenMembresias]);
-    // ── Tarjeta BI: "Convertidos" ─────────────────────────────────────────────
-    // Reutiliza el endpoint de la pestaña KPIs (/api/v1/kpis/mensual) — no se
-    // recalcula nada acá. Si el job BI todavía no publicó el mes, la tarjeta
-    // dice "s/d" con el motivo, nunca un 0 falso.
-    const [biConversion, setBiConversion] = useState({
-        loading: true, valor: null, prueba: null, rate: null, periodo: '',
-        // Período del BI en números: la tarjeta lo pasa a /admin/alumnos-convertidos
-        // para que el detalle y el número del panel sean EXACTAMENTE el mismo mes.
-        anio: null, mes: null, error: '',
-    });
-
     useEffect(() => {
-        // Las consultas migradas a React Query (solicitudes, conteo de registros, stats
-        // y clases de hoy) se disparan solas al declarar sus hooks; acá quedan las dos
-        // que siguen con estado local. El auto-refresco de "Clases de hoy" cada 45 s lo
-        // hace `refetchInterval` del hook (y NO corre con la pestaña oculta).
+        // Las consultas migradas a React Query (solicitudes, conteo de registros, stats,
+        // clases y tarjetas del mes) se disparan solas al declarar sus hooks; acá queda
+        // sólo la fidelización, que sigue con estado local. El auto-refresco de
+        // "Clases de hoy" cada 45 s lo hace `refetchInterval` del hook (y NO corre con
+        // la pestaña oculta).
         cargarFidelizacion();
-        cargarBi();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [tenant_id]);
 
@@ -222,7 +227,7 @@ const AdminDashboard = () => {
 
     // Botón "Actualizar" del dashboard: refresca TODO. Lo que vive en React Query se
     // re-pide con `refetch()` (y comparte caché con las otras pantallas); la
-    // fidelización y las tarjetas del BI siguen con su carga local.
+    // fidelización sigue con su carga local.
     const recargarDatos = () => {
         solicitudesQ.refetch();
         registrosQ.refetch();
@@ -232,46 +237,6 @@ const AdminDashboard = () => {
         nuevosMesQ.refetch();
         resumenAdmin.recargar();
         cargarFidelizacion();
-        cargarBi();
-    };
-
-    // ── BI (SOLO LECTURA): "Convertidos" ───────────────────────────────────────
-    // Mismo criterio que la pestaña KPIs: el mensual usa el ÚLTIMO MES CERRADO
-    // con datos (índice /kpis/mensual/periodos -> `default`), no el mes en curso
-    // (vacío).
-    const cargarBi = async () => {
-        setBiConversion((prev) => ({ ...prev, loading: true }));
-        try {
-            const rPer = await api.get('/api/v1/kpis/mensual/periodos');
-            const pedido = rPer.data?.default || null;
-            if (!pedido) {
-                setBiConversion({
-                    loading: false, valor: null, prueba: null, rate: null, periodo: '',
-                    anio: null, mes: null,
-                    error: 'Aún no hay meses cerrados publicados por el BI',
-                });
-                return;
-            }
-            const r = await api.get('/api/v1/kpis/mensual', {
-                params: { year: pedido.year, month: pedido.month },
-            });
-            setBiConversion({
-                loading: false,
-                valor: r.data?.alumnos_plan_comprado ?? null,
-                prueba: r.data?.alumnos_prueba ?? null,
-                rate: r.data?.conversion_rate ?? null,
-                periodo: `${String(pedido.month).padStart(2, '0')}/${pedido.year}`,
-                anio: pedido.year, mes: pedido.month,
-                error: '',
-            });
-        } catch (err) {
-            setBiConversion({
-                loading: false, valor: null, prueba: null, rate: null, periodo: '',
-                anio: null, mes: null,
-                error: err?.response?.data?.detail || err?.message
-                    || 'No se pudo cargar el BI mensual',
-            });
-        }
     };
 
     const cargarFidelizacion = async () => {
@@ -460,124 +425,112 @@ const AdminDashboard = () => {
                         <p className="text-xs text-zinc-500">Operación e ingresos del día en curso</p>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                        {/* "Clases de hoy": el número se reemplazó por el GRÁFICO de
-                            barras del día (una fila por clase, con el cupo REAL de cada
-                            una). Tocar la tarjeta abre el panel del gráfico; ya no hace
-                            scroll a ninguna sección de asistencia. */}
-                        <div
-                            role="button"
-                            tabIndex={0}
-                            aria-label="Ver el gráfico de las clases de hoy"
-                            aria-expanded={clasesAbierto}
-                            data-testid="kpi-grafico-clases-escritorio"
-                            onClick={() => setClasesAbierto((v) => !v)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                    e.preventDefault();
-                                    setClasesAbierto((v) => !v);
-                                }
-                            }}
-                            className="bg-zinc-900 rounded-lg shadow p-4 border-l-4 border-indigo-500 cursor-pointer transition hover:ring-2 hover:ring-zinc-600 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                        >
-                            <div className="flex items-start justify-between gap-2">
-                                <p className="text-xs text-gray-400 uppercase tracking-wide">Clases de hoy</p>
-                                <div className="flex items-center gap-1">
-                                    <CalendarDays className="w-6 h-6 text-gray-600" />
-                                    <span className="text-lg leading-none text-gray-500" aria-hidden="true">›</span>
+                        {/* "Clases de hoy": resumen legible (hora + reservas/cupo; las
+                            clases sin cupo van como texto). El gráfico completo se abre
+                            ANCLADO debajo de esta misma tarjeta. */}
+                        <TarjetaConPanel
+                            abierto={panelActivo === 'clases'}
+                            panel={(
+                                <PanelDetalle
+                                    id="dashboard-grafico-clases"
+                                    titulo="Clases de hoy · reservas / cupo"
+                                    subtitulo="Reservas confirmadas sobre el cupo de cada clase. Las clases sin cupo muestran sólo sus reservas."
+                                    onCerrar={cerrarPanel}>
+                                    <GraficoClasesHoy clases={clasesDia} alto="24rem"
+                                        testid="grafico-clases-hoy-panel-escritorio" />
+                                </PanelDetalle>
+                            )}>
+                            <div
+                                role="button"
+                                tabIndex={0}
+                                aria-label="Ver el detalle de las clases de hoy"
+                                aria-expanded={panelActivo === 'clases'}
+                                data-testid="kpi-grafico-clases-escritorio"
+                                onClick={() => alternarPanel('clases')}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        alternarPanel('clases');
+                                    }
+                                }}
+                                className="bg-zinc-900 rounded-lg shadow p-4 border-l-4 border-indigo-500 cursor-pointer transition hover:ring-2 hover:ring-zinc-600 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                            >
+                                <div className="flex items-start justify-between gap-2">
+                                    <p className="text-xs text-gray-400 uppercase tracking-wide">Clases de hoy</p>
+                                    <div className="flex items-center gap-1">
+                                        <CalendarDays className="w-6 h-6 text-gray-600" />
+                                        <span className="text-lg leading-none text-gray-500" aria-hidden="true">›</span>
+                                    </div>
                                 </div>
+                                <div className="mt-1">
+                                    {clasesDiaLoading ? (
+                                        <p className="text-2xl font-bold text-zinc-600">…</p>
+                                    ) : clasesDiaError ? (
+                                        <p className="text-sm font-bold text-amber-400 mt-2" title={clasesDiaError}>⚠️ s/d</p>
+                                    ) : (
+                                        <ResumenClasesHoy clases={clasesDia} max={6} />
+                                    )}
+                                </div>
+                                <p className="text-[11px] text-zinc-500 mt-2">
+                                    {clasesDiaRealizadas}/{clasesDiaTotal} realizadas · reservas / cupo — Clic para ver el detalle
+                                </p>
                             </div>
-                            <div className="mt-1">
-                                {clasesDiaLoading ? (
-                                    <p className="text-2xl font-bold text-zinc-600">…</p>
-                                ) : clasesDiaError ? (
-                                    <p className="text-sm font-bold text-amber-400 mt-2" title={clasesDiaError}>⚠️ s/d</p>
-                                ) : (
-                                    <GraficoClasesHoy clases={clasesDia} alto="6.5rem"
-                                        testid="grafico-clases-hoy-escritorio" />
-                                )}
-                            </div>
-                            <p className="text-[11px] text-zinc-500 mt-1">
-                                {clasesDiaRealizadas}/{clasesDiaTotal} realizadas · reservas / cupo — Clic para ver el gráfico
-                            </p>
-                        </div>
-                        <KpiCard
-                            label="Asistencia de hoy"
-                            value={asistenciaHoy}
-                            icon={Users}
-                            color="border-purple-500"
-                            hint="Hoy · asistencias registradas en las clases del día — Clic para ver la asistencia"
-                            onDetalle={() => navigate('/admin/asistencia')}
-                        />
+                        </TarjetaConPanel>
+                        <TarjetaConPanel
+                            abierto={panelActivo === 'asistencia'}
+                            align="right"
+                            panel={(
+                                <PanelAsistenciaHoy
+                                    clases={clasesDia}
+                                    cargando={clasesDiaLoading}
+                                    error={clasesDiaError}
+                                    onCerrar={cerrarPanel}
+                                    onVerTodo={() => navigate('/admin/asistencia')}
+                                />
+                            )}>
+                            <KpiCard
+                                label="Asistencia de hoy"
+                                value={asistenciaHoy}
+                                icon={Users}
+                                color="border-purple-500"
+                                hint="Hoy · asistencias registradas en las clases del día — Clic para ver el resumen"
+                                onDetalle={() => alternarPanel('asistencia')}
+                                chevron
+                            />
+                        </TarjetaConPanel>
                         {/* "Ingresos de hoy" es la ÚNICA tarjeta del día: muestra el total
                             cobrado del día y la cantidad de cobros, y abre la lista de
                             pagos. El valor sale de "Pagos del día" (membresías + Bazar),
                             NO de la caja de `transacciones_financieras` (que se quedaba en
                             $0 cuando el webhook no escribía la transacción). "Pagos de hoy"
                             (su tarjeta hermana) se eliminó: repetía el mismo panel. */}
-                        <KpiCard
-                            label="Ingresos de hoy"
-                            value={resumenAdmin.ingresosHoy ?? null}
-                            unit="CLP"
-                            icon={DollarSign}
-                            color="border-emerald-500"
-                            hint={resumenAdmin.cobrosHoy == null
-                                ? 'Hoy · cobros del día — Clic para ver el desglose'
-                                : `Hoy · ${resumenAdmin.cobrosHoy} ${resumenAdmin.cobrosHoy === 1 ? 'cobro' : 'cobros'} de membresía y Bazar — Clic para ver el desglose`}
-                            onDetalle={() => setPagosAbierto((v) => !v)}
-                            chevron
-                        />
+                        <TarjetaConPanel
+                            abierto={panelActivo === 'pagos'}
+                            align="right"
+                            panel={(
+                                <PanelDetalle
+                                    id="dashboard-pagos-hoy"
+                                    titulo="Pagos del día"
+                                    subtitulo="Cobros de planes de hoy por Mercado Pago — el plan y si ya está activo."
+                                    onCerrar={cerrarPanel}>
+                                    <PagosDelDia maxFilas={6} mostrarEnlace />
+                                </PanelDetalle>
+                            )}>
+                            <KpiCard
+                                label="Ingresos de hoy"
+                                value={resumenAdmin.ingresosHoy ?? null}
+                                unit="CLP"
+                                icon={DollarSign}
+                                color="border-emerald-500"
+                                hint={resumenAdmin.cobrosHoy == null
+                                    ? 'Hoy · cobros del día — Clic para ver el desglose'
+                                    : `Hoy · ${resumenAdmin.cobrosHoy} ${resumenAdmin.cobrosHoy === 1 ? 'cobro' : 'cobros'} de membresía y Bazar — Clic para ver el desglose`}
+                                onDetalle={() => alternarPanel('pagos')}
+                                chevron
+                            />
+                        </TarjetaConPanel>
                     </div>
 
-                    {/* Panel del GRÁFICO de clases del día: se abre DEBAJO de la fila Hoy.
-                        Mismo gráfico que la tarjeta, más alto y desplazable. */}
-                    {clasesAbierto && (
-                        <section aria-labelledby="dashboard-grafico-clases"
-                            className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-                            <div className="flex items-start justify-between gap-3">
-                                <div>
-                                    <h2 id="dashboard-grafico-clases" className="text-lg font-bold text-zinc-100">
-                                        Clases de hoy · reservas / cupo
-                                    </h2>
-                                    <p className="text-xs text-zinc-500">
-                                        Reservas confirmadas sobre el cupo de cada clase. Las clases sin
-                                        cupo muestran sólo sus reservas.
-                                    </p>
-                                </div>
-                                <button type="button" onClick={() => setClasesAbierto(false)}
-                                    className="shrink-0 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold transition-colors"
-                                    aria-label="Cerrar el gráfico de las clases de hoy">
-                                    Cerrar
-                                </button>
-                            </div>
-                            <GraficoClasesHoy clases={clasesDia} alto="24rem"
-                                testid="grafico-clases-hoy-panel-escritorio" />
-                        </section>
-                    )}
-
-                    {/* Panel del detalle de pagos: se abre DEBAJO de la fila Hoy, en el
-                        mismo lugar (sin scroll a otra sección). Reutiliza PagosDelDia y su
-                        queryKey; por defecto está cerrado. */}
-                    {pagosAbierto && (
-                        <section aria-labelledby="dashboard-pagos-hoy" id="pagos-del-dia"
-                            className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-                            <div className="flex items-start justify-between gap-3">
-                                <div>
-                                    <h2 id="dashboard-pagos-hoy" className="text-lg font-bold text-zinc-100">
-                                        Pagos del día
-                                    </h2>
-                                    <p className="text-xs text-zinc-500">
-                                        Cobros de planes de hoy por Mercado Pago — el plan y si ya está activo
-                                    </p>
-                                </div>
-                                <button type="button" onClick={() => setPagosAbierto(false)}
-                                    className="shrink-0 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold transition-colors"
-                                    aria-label="Cerrar el detalle de pagos del día">
-                                    Cerrar
-                                </button>
-                            </div>
-                            <PagosDelDia maxFilas={6} mostrarEnlace />
-                        </section>
-                    )}
                 </section>
 
                 <section aria-labelledby="dashboard-negocio-mes" className="space-y-3">
@@ -589,81 +542,102 @@ const AdminDashboard = () => {
                         </p>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                        <KpiCard
-                            label="Ingreso del mes"
-                            value={resumenAdmin.ingresoMesCargando ? '…'
-                                : (resumenAdmin.ingresoMes?.total_clp ?? null)}
-                            unit={resumenAdmin.ingresoMesCargando ? '' : 'CLP'}
-                            icon={DollarSign}
-                            color="border-amber-500"
-                            hint={resumenAdmin.ingresoMesError
-                                || `Mes en curso · ${resumenAdmin.ingresoMes?.cantidad ?? 0} cobros aprobados (membresías + Bazar) — Clic para ver el desglose por día`}
-                            onDetalle={() => setPanelNegocio((v) => (v === 'ingreso' ? null : 'ingreso'))}
-                            chevron
-                        />
-                        <KpiCard
-                            label="MRR"
-                            value={resumenAdmin.mrrCargando ? '…'
-                                : (resumenAdmin.mrr?.total_clp ?? null)}
-                            unit={resumenAdmin.mrrCargando ? '' : 'CLP'}
-                            icon={Banknote}
-                            color="border-emerald-500"
-                            hint={resumenAdmin.mrrError
-                                || `Hoy · ${resumenAdmin.mrr?.alumnos ?? 0} alumnos con plan pagado — Clic para ver el detalle por plan`}
-                            onDetalle={() => setPanelNegocio((v) => (v === 'mrr' ? null : 'mrr'))}
-                            chevron
-                        />
-                        <KpiCard
-                            label="Ventas Bazar"
-                            value={resumenAdmin.ventasBazarCargando ? '…'
-                                : (resumenAdmin.ventasBazar ?? null)}
-                            unit={resumenAdmin.ventasBazarCargando ? '' : 'CLP'}
-                            icon={ShoppingCart}
-                            color="border-teal-500"
-                            hint={resumenAdmin.ventasBazarError
-                                || `Mes en curso · ${resumenAdmin.ventasBazarPedidos ?? 0} pedidos cobrados — Clic para ver los pedidos`}
-                            onDetalle={() => navigate('/admin/pedidos')}
-                            chevron
-                        />
-                        <KpiCard
-                            label="Membresías del mes"
-                            value={resumenAdmin.membresiasMesCargando ? '…'
-                                : (resumenAdmin.membresiasMes?.total_altas ?? null)}
-                            icon={Users}
-                            color="border-green-500"
-                            hint={resumenAdmin.membresiasMesError
-                                || 'Mes en curso · planes pagados (precio > $0) — Clic para ver el ranking'}
-                            onDetalle={() => setPanelNegocio((v) => (v === 'membresias' ? null : 'membresias'))}
-                            chevron
-                        />
+                        <TarjetaConPanel
+                            abierto={panelActivo === 'ingreso'}
+                            panel={(
+                                <PanelIngresoMes
+                                    resumen={resumenAdmin.ingresoMes}
+                                    cargando={resumenAdmin.ingresoMesCargando}
+                                    error={resumenAdmin.ingresoMesError}
+                                    onCerrar={cerrarPanel}
+                                />
+                            )}>
+                            <KpiCard
+                                label="Ingreso del mes"
+                                value={resumenAdmin.ingresoMesCargando ? '…'
+                                    : (resumenAdmin.ingresoMes?.total_clp ?? null)}
+                                unit={resumenAdmin.ingresoMesCargando ? '' : 'CLP'}
+                                icon={DollarSign}
+                                color="border-amber-500"
+                                hint={resumenAdmin.ingresoMesError
+                                    || `Mes en curso · ${resumenAdmin.ingresoMes?.cantidad ?? 0} cobros aprobados (membresías + Bazar) — Clic para ver el desglose por día`}
+                                onDetalle={() => alternarPanel('ingreso')}
+                                chevron
+                            />
+                        </TarjetaConPanel>
+                        <TarjetaConPanel
+                            abierto={panelActivo === 'mrr'}
+                            panel={(
+                                <PanelMrr
+                                    mrr={resumenAdmin.mrr}
+                                    cargando={resumenAdmin.mrrCargando}
+                                    error={resumenAdmin.mrrError}
+                                    onCerrar={cerrarPanel}
+                                />
+                            )}>
+                            <KpiCard
+                                label="MRR"
+                                value={resumenAdmin.mrrCargando ? '…'
+                                    : (resumenAdmin.mrr?.total_clp ?? null)}
+                                unit={resumenAdmin.mrrCargando ? '' : 'CLP'}
+                                icon={Banknote}
+                                color="border-emerald-500"
+                                hint={resumenAdmin.mrrError
+                                    || `Hoy · ${resumenAdmin.mrr?.alumnos ?? 0} alumnos con membresía de pago — Clic para ver el detalle por plan`}
+                                onDetalle={() => alternarPanel('mrr')}
+                                chevron
+                            />
+                        </TarjetaConPanel>
+                        <TarjetaConPanel
+                            abierto={panelActivo === 'bazar'}
+                            align="right"
+                            panel={(
+                                <PanelVentasBazar
+                                    pagos={resumenAdmin.ingresoMes?.pagos}
+                                    cargando={resumenAdmin.ventasBazarCargando}
+                                    error={resumenAdmin.ventasBazarError}
+                                    onCerrar={cerrarPanel}
+                                    onVerTodo={() => navigate('/admin/pedidos')}
+                                />
+                            )}>
+                            <KpiCard
+                                label="Ventas Bazar"
+                                value={resumenAdmin.ventasBazarCargando ? '…'
+                                    : (resumenAdmin.ventasBazar ?? null)}
+                                unit={resumenAdmin.ventasBazarCargando ? '' : 'CLP'}
+                                icon={ShoppingCart}
+                                color="border-teal-500"
+                                hint={resumenAdmin.ventasBazarError
+                                    || `Mes en curso · ${resumenAdmin.ventasBazarPedidos ?? 0} pedidos cobrados — Clic para ver el resumen`}
+                                onDetalle={() => alternarPanel('bazar')}
+                                chevron
+                            />
+                        </TarjetaConPanel>
+                        <TarjetaConPanel
+                            abierto={panelActivo === 'membresias'}
+                            align="right"
+                            panel={(
+                                <PanelMembresiasMes
+                                    ranking={resumenAdmin.membresiasMes}
+                                    cargando={resumenAdmin.membresiasMesCargando}
+                                    error={resumenAdmin.membresiasMesError}
+                                    onCerrar={cerrarPanel}
+                                />
+                            )}>
+                            <KpiCard
+                                label="Membresías del mes"
+                                value={resumenAdmin.membresiasMesCargando ? '…'
+                                    : (resumenAdmin.membresiasMes?.total_altas ?? null)}
+                                icon={Users}
+                                color="border-green-500"
+                                hint={resumenAdmin.membresiasMesError
+                                    || 'Mes en curso · planes de membresía pagados (sin pruebas) — Clic para ver el ranking'}
+                                onDetalle={() => alternarPanel('membresias')}
+                                chevron
+                            />
+                        </TarjetaConPanel>
                     </div>
 
-                    {/* Paneles de las tarjetas: se abren DEBAJO de la fila, en el
-                        mismo lugar (no navegan a Reportes). Sólo uno a la vez. */}
-                    {panelNegocio === 'ingreso' && (
-                        <PanelIngresoMes
-                            resumen={resumenAdmin.ingresoMes}
-                            cargando={resumenAdmin.ingresoMesCargando}
-                            error={resumenAdmin.ingresoMesError}
-                            onCerrar={() => setPanelNegocio(null)}
-                        />
-                    )}
-                    {panelNegocio === 'membresias' && (
-                        <PanelMembresiasMes
-                            ranking={resumenAdmin.membresiasMes}
-                            cargando={resumenAdmin.membresiasMesCargando}
-                            error={resumenAdmin.membresiasMesError}
-                            onCerrar={() => setPanelNegocio(null)}
-                        />
-                    )}
-                    {panelNegocio === 'mrr' && (
-                        <PanelMrr
-                            mrr={resumenAdmin.mrr}
-                            cargando={resumenAdmin.mrrCargando}
-                            error={resumenAdmin.mrrError}
-                            onCerrar={() => setPanelNegocio(null)}
-                        />
-                    )}
                 </section>
 
                 <section aria-labelledby="dashboard-alumnos" className="space-y-3">
@@ -672,14 +646,27 @@ const AdminDashboard = () => {
                         <p className="text-xs text-zinc-500">Base de clientes y señales de riesgo</p>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <KpiCard
-                            label="Alumnos activos"
-                            value={resumenAdmin.alumnosActivos}
-                            icon={Users}
-                            color="border-sky-500"
-                            hint="Hoy · suscripciones vigentes (en vivo) — Clic para ver el padrón activo"
-                            onDetalle={() => navigate('/admin/alumnos?estado=activo')}
-                        />
+                        <TarjetaConPanel
+                            abierto={panelActivo === 'alumnos'}
+                            panel={(
+                                <PanelAlumnosActivos
+                                    resumen={resumenAdmin.alumnosActivosResumen}
+                                    cargando={resumenAdmin.alumnosActivosCargando}
+                                    error={resumenAdmin.alumnosActivosError}
+                                    onCerrar={cerrarPanel}
+                                    onVerTodo={() => navigate('/admin/alumnos?estado=activo')}
+                                />
+                            )}>
+                            <KpiCard
+                                label="Alumnos activos"
+                                value={resumenAdmin.alumnosActivos}
+                                icon={Users}
+                                color="border-sky-500"
+                                hint="Hoy · suscripciones vigentes (en vivo) — Clic para ver el resumen"
+                                onDetalle={() => alternarPanel('alumnos')}
+                                chevron
+                            />
+                        </TarjetaConPanel>
                         <KpiCard
                             label="Alumnos en riesgo"
                             value={resumenAdmin.alumnosRiesgo}
@@ -687,8 +674,8 @@ const AdminDashboard = () => {
                             color="border-red-500"
                             hint={resumenAdmin.riesgoPendiente
                                 ? 'pendiente de reentrenar'
-                                : 'Hoy · crítico + alto — Clic para ver la lista filtrada'}
-                            onDetalle={() => navigate('/admin/fidelizacion?filtro=total')}
+                                : 'Hoy · crítico + alto entre los alumnos activos — Clic para ver la lista filtrada'}
+                            onDetalle={() => navigate('/admin/fidelizacion?filtro=riesgo_activos')}
                         />
                         <KpiCard
                             label="Nuevos del mes"
@@ -720,7 +707,8 @@ const AdminDashboard = () => {
                             color="border-green-500"
                             hint={`${resumenAdmin.conversionHint}${resumenAdmin.periodoTexto
                                 ? ` · ${resumenAdmin.periodoTexto}` : ''} — Clic para ver los convertidos`}
-                            onDetalle={() => navigate('/admin/alumnos-convertidos')}
+                            onDetalle={() => navigate(
+                                `/admin/alumnos-convertidos?anio=${resumenAdmin.periodoAnio}&mes=${resumenAdmin.periodoMes}`)}
                             chevron
                         />
                     </div>
@@ -735,18 +723,28 @@ const AdminDashboard = () => {
                         </p>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <KpiCard
-                            label="Ocupación"
-                            value={resumenAdmin.ocupacionReal}
-                            unit={resumenAdmin.ocupacionReal === null ? '' : '%'}
-                            icon={Target}
-                            color="border-amber-500"
-                            hint={resumenAdmin.periodoTexto
-                                ? `Mes en curso · ${resumenAdmin.periodoTexto} · asistencia real / cupo — Clic para ver la ocupación por clase`
-                                : 'Mes en curso · asistencia real / cupo — Clic para ver la ocupación por clase'}
-                            onDetalle={() => setOcupacionAbierto((v) => !v)}
-                            chevron
-                        />
+                        <TarjetaConPanel
+                            abierto={panelActivo === 'ocupacion'}
+                            panel={(
+                                <PanelOcupacionConDatos
+                                    anio={anioActual}
+                                    mes={mesActual}
+                                    onCerrar={cerrarPanel}
+                                />
+                            )}>
+                            <KpiCard
+                                label="Ocupación"
+                                value={resumenAdmin.ocupacionReal}
+                                unit={resumenAdmin.ocupacionReal === null ? '' : '%'}
+                                icon={Target}
+                                color="border-amber-500"
+                                hint={resumenAdmin.periodoTexto
+                                    ? `Mes en curso · ${resumenAdmin.periodoTexto} · asistencias marcadas ÷ cupo de clases realizadas — Clic para ver el detalle por clase`
+                                    : 'Mes en curso · asistencias marcadas ÷ cupo de clases realizadas — Clic para ver el detalle por clase'}
+                                onDetalle={() => alternarPanel('ocupacion')}
+                                chevron
+                            />
+                        </TarjetaConPanel>
                         <KpiCard
                             label="Asistencia real"
                             value={resumenAdmin.asistenciaReal}
@@ -754,20 +752,10 @@ const AdminDashboard = () => {
                             icon={Activity}
                             color="border-purple-500"
                             hint={resumenAdmin.periodoTexto
-                                ? `Mes en curso · ${resumenAdmin.periodoTexto} · reservas confirmadas con asistencia marcada`
-                                : 'Mes en curso · reservas confirmadas con asistencia marcada'}
+                                ? `Mes en curso · ${resumenAdmin.periodoTexto} · asistencias marcadas ÷ reservas confirmadas (no es ocupación)`
+                                : 'Mes en curso · asistencias marcadas ÷ reservas confirmadas (no es ocupación)'}
                         />
                     </div>
-
-                    {/* Panel de Ocupación: una fila por clase realizada con cupo
-                        (asistencia marcada / cupo). Se pide al abrir. */}
-                    {ocupacionAbierto && (
-                        <PanelOcupacionConDatos
-                            anio={anioActual}
-                            mes={mesActual}
-                            onCerrar={() => setOcupacionAbierto(false)}
-                        />
-                    )}
                 </section>
 
                 <div className="pt-3 border-t border-zinc-800">
@@ -1012,9 +1000,9 @@ const AdminDashboard = () => {
                     )}
                 </div>
 
-                {/* 1b. El detalle de PAGOS DEL DÍA se movió arriba: se despliega justo
-                    debajo de la fila Hoy desde la tarjeta "Ingresos de hoy" (bloque 9),
-                    para no duplicar la sección ni obligar a bajar hasta el final. */}
+                {/* 1b. El detalle de PAGOS DEL DÍA se movió arriba: se ancla a la tarjeta
+                    "Ingresos de hoy" y se despliega allí (bloque 9), para no duplicar
+                    la sección ni obligar a bajar hasta el final. */}
 
                 {/* 2. FINANCIERA Y DE NEGOCIO */}
                 {stats && (
@@ -1097,7 +1085,7 @@ const AdminDashboard = () => {
                 {!fidelizacionLoading && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Tarjeta Alumnos en Riesgo */}
-                        <button onClick={() => navigate('/admin/fidelizacion?filtro=total')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-red-600 hover:shadow-md hover:border-red-700 transition-all cursor-pointer text-left">
+                        <button onClick={() => navigate('/admin/fidelizacion?filtro=riesgo_activos')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-red-600 hover:shadow-md hover:border-red-700 transition-all cursor-pointer text-left">
                             <div className="flex items-center justify-between">
                                 <div>
                                     <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos en riesgo</p>
@@ -1107,7 +1095,7 @@ const AdminDashboard = () => {
                                     <p className="text-xs text-zinc-500 mt-1">
                                         {resumenAdmin.riesgoPendiente
                                             ? 'pendiente de reentrenar — Clic para ir a Fidelización'
-                                            : 'Hoy · crítico + alto — Clic para ir a Fidelización'}
+                                            : 'Hoy · crítico + alto entre los activos — Clic para ir a Fidelización'}
                                     </p>
                                 </div>
                                 <span className="text-4xl">⚠️</span>
@@ -1177,39 +1165,29 @@ const AdminDashboard = () => {
                             </div>
                         </button>
                         <button
-                            onClick={() => {
-                                // Si el BI ya dijo qué mes está mostrando, el detalle abre ESE
-                                // mes (mismo número que la tarjeta); si no, el detalle usa su
-                                // default (último mes cerrado).
-                                const qs = new URLSearchParams();
-                                if (biConversion.anio && biConversion.mes) {
-                                    qs.set('anio', biConversion.anio);
-                                    qs.set('mes', biConversion.mes);
-                                }
-                                navigate(`/admin/alumnos-convertidos${qs.toString() ? `?${qs}` : ''}`);
-                            }}
+                            onClick={() => navigate(
+                                `/admin/alumnos-convertidos?anio=${resumenAdmin.periodoAnio}&mes=${resumenAdmin.periodoMes}`)}
                             className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-teal-600 hover:shadow-md hover:border-teal-700 transition-all cursor-pointer text-left"
                         >
                             <div className="flex items-center justify-between">
                                 <div>
                                     <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Convertidos</p>
-                                    {biConversion.loading ? (
+                                    {resumenAdmin.cargando ? (
                                         <p className="text-3xl font-bold text-zinc-600 mt-1">…</p>
-                                    ) : biConversion.valor === null ? (
+                                    ) : resumenAdmin.planComprado === null ? (
                                         <p className="text-sm font-bold text-amber-400 mt-2">s/d</p>
                                     ) : (
-                                        <p className="text-3xl font-bold text-teal-600 mt-1">{biConversion.valor}</p>
+                                        <p className="text-3xl font-bold text-teal-600 mt-1">{resumenAdmin.planComprado}</p>
                                     )}
                                     <p className="text-xs text-zinc-500 mt-1">
-                                        {biConversion.loading
-                                            ? 'Consultando el BI…'
-                                            : biConversion.error
-                                                ? `⚠️ ${biConversion.error}`
-                                                // OJO: este número sale del BI MENSUAL (mes cerrado,
-                                                // `biConversion.periodo`). No se mezcla con la conversión
-                                                // del mes en curso: son dos períodos distintos.
-                                                : `Compraron plan${biConversion.periodo ? ` (${biConversion.periodo})` : ''} · mes cerrado del BI`}
-                                        {!biConversion.error && ' — Clic para ver el detalle'}
+                                        {resumenAdmin.cargando
+                                            ? 'Consultando el mes en curso…'
+                                            : resumenAdmin.errores.mensual
+                                                ? `⚠️ ${resumenAdmin.errores.mensual}`
+                                                // MISMO período que la tarjeta "Conversión": mes en
+                                                // curso. Ya no se mezcla un mes cerrado del BI.
+                                                : `Compraron plan${resumenAdmin.periodoTexto ? ` (${resumenAdmin.periodoTexto})` : ''} · mes en curso`}
+                                        {!resumenAdmin.errores.mensual && ' — Clic para ver el detalle'}
                                     </p>
                                 </div>
                                 <span className="text-4xl">🚀</span>

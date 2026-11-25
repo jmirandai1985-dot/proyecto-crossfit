@@ -13,7 +13,7 @@ Correr aislado:
     cd backend && py -3.12 -m pytest tests/test_ingreso_mes_integracion.py -q --noconftest
 """
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -148,6 +148,8 @@ def test_membresias_del_mes_excluye_el_plan_gratis():
     filas = [
         (2, "Plan Full", 40000, 2, 80000),
         (5, "Plan Test", 0, 4, 0),
+        # El plan de prueba de $1.500 tampoco es una membresía.
+        (6, "Prueba", 1500, 3, 4500),
     ]
 
     resultado = svc.ranking_planes_mes(_Sesion(filas), 1, anio=2020, mes=1)
@@ -158,10 +160,32 @@ def test_membresias_del_mes_excluye_el_plan_gratis():
     assert resultado["planes"][0]["porcentaje"] == 100.0
 
 
+
+# ── MRR: integración consulta + agregación, con plan de prueba excluido ─────
+def test_mrr_integra_y_excluye_planes_de_prueba():
+    filas = [
+        (SimpleNamespace(id=10, usuario_id=3),
+         _plan(id=2, nombre="Plan Full", precio_clp=40000)),
+        (SimpleNamespace(id=11, usuario_id=4),
+         _plan(id=5, nombre="Prueba", precio_clp=1500)),
+        (SimpleNamespace(id=12, usuario_id=3),
+         _plan(id=6, nombre="Plan Básico", precio_clp=25000)),
+    ]
+
+    resultado = svc.mrr_por_plan(
+        _Sesion(filas), 1, hoy=date(2026, 11, 25))
+
+    assert resultado["fecha"] == "2026-11-25"
+    assert resultado["alumnos"] == 1          # el alumno 3 se cuenta UNA vez
+    assert resultado["total_clp"] == 40000
+    assert [p["plan_nombre"] for p in resultado["planes"]] == ["Plan Full"]
+
+
 # ── Contrato: rutas nuevas y guard de ADMIN ─────────────────────────────────
-def test_los_tres_endpoints_existen_y_exigen_admin():
+def test_los_endpoints_existen_y_exigen_admin():
     rutas = {r.path: r for r in api_admin.router.routes}
-    for path in ("/ingreso-mes", "/membresias-mes", "/mrr"):
+    for path in ("/ingreso-mes", "/membresias-mes", "/mrr",
+                 "/alumnos-activos", "/ocupacion-mes"):
         assert path in rutas, f"falta la ruta {path}"
         dependencias = [d.call for d in rutas[path].dependant.dependencies]
         assert get_current_admin in dependencias, (

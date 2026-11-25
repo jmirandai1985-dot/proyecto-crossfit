@@ -2,31 +2,39 @@
  * Datos y reglas compartidas por el Dashboard admin (escritorio y móvil).
  *
  * Reglas de negocio que viven acá para que las dos vistas no diverjan:
- *  - Alumnos activos: conteo EN VIVO de `/reportes/` (suscripciones vigentes
- *    HOY). Antes era el snapshot diario del BI y la tarjeta quedaba en "n/d".
- *  - Alumnos en riesgo: críticos + altos de las predicciones de churn (lectura
- *    en vivo de `predictions_churn`). Con 0 predicciones el modelo todavía no
- *    tiene datos y la UI dice "pendiente de reentrenar"; con predicciones y 0 en
- *    riesgo se muestra 0, nunca un número inventado.
+ *  - Alumnos activos: `/admin/alumnos-activos` (suscripción vigente HOY, día
+ *    chileno). Es la MISMA base que usa `/kpis/churn` para `total_activos`, así
+ *    que el riesgo es por construcción un subconjunto de los activos.
+ *  - Alumnos en riesgo: `criticos_activos + altos_activos` de `/kpis/churn`
+ *    (predicciones intersectadas con los alumnos activos). La lista de
+ *    Fidelización sigue mostrando todas las predicciones del box; el CONTADOR
+ *    de la tarjeta es el de activos. Con 0 predicciones el modelo todavía no
+ *    tiene datos y la UI dice "pendiente de reentrenar".
  *  - Conversión, asistencia real y ocupación: MES EN CURSO (hoy en Chile),
  *    calculado EN VIVO por `GET /kpis/mes-en-curso` — el mes en curso todavía no
  *    tiene fila en `monthly_kpis` (el job BI publica al cierre).
  *  - Conversión: SIN mínimo de base. Se publica el porcentaje y el conteo
  *    ("2 de 3 pagaron") con los alumnos que empezaron prueba este mes. Con 0
  *    alumnos en prueba se publica 0% y el hint lo explica.
- *  - Ocupación: `metricas_service.ocupacion_promedio` (asistencias REALES /
- *    cupos de las clases realizadas). Se quitó la multiplicación por la tasa de
- *    asistencia: la tarjeta y el panel por clase miden lo mismo.
+ *  - OCUPACIÓN = asistencias marcadas / CUPO de las clases realizadas
+ *    (`metricas_service.ocupacion_promedio`). ASISTENCIA REAL = asistencias
+ *    marcadas / RESERVAS CONFIRMADAS de esas mismas clases
+ *    (`kpis_populate.calcular_asistencia_mes`). Son dos denominadores distintos:
+ *    ocupación mide uso del cupo; asistencia real mide cumplimiento de reservas.
+ *    El panel de ocupación usa exactamente la misma fórmula que la tarjeta.
  *  - Ingreso del mes, Ventas Bazar, Membresías del mes y MRR: `pagos` aprobados
  *    del mes (misma fuente que "Pagos del día") y membresías activas por plan.
- *    NUNCA `transacciones_financieras` (esa es la caja).
+ *    NUNCA `transacciones_financieras` (esa es la caja). Los planes de prueba
+ *    (nombre con "prueba"/"test"/"trial", incluido el de $1.500) NO son
+ *    membresías: quedan fuera del ranking y del MRR.
  */
 import { useCallback, useEffect, useState } from 'react';
 import api from '../../services/api';
 import { hoyChileStr } from '../../utils/fecha';
 import { resumenPagosDelDia } from '../../utils/pagosDelDia';
 import {
-    useIngresoMes, useMembresiasMes, useMrr, usePagosDelDia, useStatsDashboard,
+    useAlumnosActivosResumen, useIngresoMes, useMembresiasMes, useMrr,
+    usePagosDelDia,
 } from '../../hooks/queries';
 
 const MESES_LARGOS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
@@ -42,7 +50,7 @@ const motivoError = (error) => error?.response?.data?.detail
     || (error?.response?.status ? `HTTP ${error.response.status}` : error?.message)
     || 'No se pudo cargar';
 
-export function useResumenAdmin(tenantId) {
+export function useResumenAdmin() {
     // `churn` y `mesCurso` son lecturas EN VIVO: el snapshot diario del BI ya no
     // se usa para "Alumnos activos" (ese número sale de `/reportes/`, que cuenta
     // las suscripciones vigentes hoy) ni para la asistencia del día.
@@ -53,7 +61,7 @@ export function useResumenAdmin(tenantId) {
     // ── Tarjetas de NEGOCIO del mes: todo desde `pagos` ──────────────────────
     // Ingreso del mes + Ventas Bazar, ranking de membresías y MRR comparten la
     // MISMA fuente que "Pagos del día". Nada de `transacciones_financieras`.
-    const statsQ = useStatsDashboard(tenantId);
+    const alumnosActivosQ = useAlumnosActivosResumen(10);
     const ingresoMesQ = useIngresoMes();
     const membresiasMesQ = useMembresiasMes();
     const mrrQ = useMrr();
@@ -97,22 +105,27 @@ export function useResumenAdmin(tenantId) {
 
     useEffect(() => { cargar(); }, [cargar]);
 
-    // "Alumnos activos" EN VIVO: `/reportes/` cuenta las suscripciones vigentes
-    // HOY (misma definición del BI). Ya no se lee el snapshot diario, que podía
-    // venir de hasta 7 días atrás —o no existir— y dejaba la tarjeta en "n/d".
-    const alumnosActivos = numOrNull(statsQ.data?.alumnosActivos);
-    const alumnosActivosError = statsQ.error
-        ? motivoError(statsQ.error) : '';
+    // "Alumnos activos" EN VIVO: suscripción vigente HOY (misma base que el
+    // riesgo). El total y la lista salen del MISMO endpoint, así que la tarjeta
+    // y su panel no pueden discrepar.
+    const alumnosActivos = numOrNull(alumnosActivosQ.data?.total);
+    const alumnosActivosLista = Array.isArray(alumnosActivosQ.data?.alumnos)
+        ? alumnosActivosQ.data.alumnos : [];
+    const alumnosActivosError = alumnosActivosQ.error
+        ? motivoError(alumnosActivosQ.error) : '';
 
-    // Riesgo EN VIVO: críticos + altos de las predicciones del box. Con 0
-    // predicciones el modelo todavía no tiene datos (la tarjeta dice
-    // "pendiente de reentrenar"); con predicciones y 0 en riesgo se muestra 0,
-    // que es un dato real y no un "s/d".
-    const criticos = numOrNull(datos.churn?.criticos) ?? 0;
-    const altos = numOrNull(datos.churn?.altos) ?? 0;
+    // Riesgo EN VIVO: críticos + altos de las predicciones INTERSECTADAS con
+    // los alumnos activos (`criticos_activos`/`altos_activos` de `/kpis/churn`).
+    // Así el riesgo NUNCA supera a los activos. Con 0 predicciones el modelo
+    // todavía no tiene datos (la tarjeta dice "pendiente de reentrenar"); con
+    // predicciones y 0 en riesgo se muestra 0, que es un dato real.
+    const criticos = numOrNull(datos.churn?.criticos_activos);
+    const altos = numOrNull(datos.churn?.altos_activos);
     const totalPredicciones = numOrNull(datos.churn?.total);
-    const alumnosRiesgo = totalPredicciones === null ? null : criticos + altos;
-    const riesgoPendiente = totalPredicciones === null || totalPredicciones === 0;
+    const alumnosRiesgo = criticos === null || altos === null
+        ? null : criticos + altos;
+    const riesgoPendiente = alumnosRiesgo === null
+        || totalPredicciones === null || totalPredicciones === 0;
 
     // ── Conversión prueba→plan del MES EN CURSO ──────────────────────────────
     // SIN mínimo de base: con 1 alumno en prueba ya se publica (antes se ocultaba
@@ -171,7 +184,7 @@ export function useResumenAdmin(tenantId) {
 
     const erroresFinales = { ...errores };
     // `diario` se conserva como clave porque la vista móvil ya la lee para
-    // "Alumnos activos"; ahora el motivo viene de `/reportes/` (dato en vivo).
+    // "Alumnos activos"; ahora el motivo viene de `/admin/alumnos-activos`.
     if (alumnosActivosError) erroresFinales.diario = alumnosActivosError;
     if (pagosDiaError) erroresFinales.pagosDia = pagosDiaError;
     if (ingresoMesError) erroresFinales.ingresoMes = ingresoMesError;
@@ -187,24 +200,31 @@ export function useResumenAdmin(tenantId) {
         // mismo dato, así que refrescar acá también las actualiza.
         recargar: () => {
             cargar();
-            statsQ.refetch();
+            alumnosActivosQ.refetch();
             ingresoMesQ.refetch();
             membresiasMesQ.refetch();
             mrrQ.refetch();
             pagosDiaQ.refetch();
         },
         alumnosActivos,
+        alumnosActivosResumen: alumnosActivosQ.data ?? null,
+        alumnosActivosLista,
+        alumnosActivosCargando: alumnosActivosQ.isPending,
         alumnosActivosError,
         alumnosRiesgo,
         riesgoPendiente,
         criticos,
         altos,
         baseConversion,
+        planComprado,
+        clasePrueba,
         conversionRate,
         conversionHint,
         asistenciaReal,
         ocupacionReal,
         periodoTexto,
+        periodoAnio: anioHoy,
+        periodoMes: mesHoy,
         // ── Negocio del mes ──
         ingresoMes,
         ingresoMesCargando: ingresoMesQ.isPending,
