@@ -29,6 +29,9 @@ from app.models.segmentacion_alumno import SegmentacionAlumno
 from app.models.usuario import Usuario
 from app.services import churn_service
 from app.services import plan_vencimiento
+# Base ÚNICA de "alumno activo": la tarjeta Alumnos activos y el riesgo tienen
+# que salir de la MISMA foto, o el riesgo podría superar a los activos.
+from app.services.dashboard_admin import ids_alumnos_activos
 from app.services.metricas_service import (MIN_BASE_RETENCION, ocupacion_promedio,
                                            sql_usuario_real, sql_transaccion_real)
 # El embudo prueba→plan y la asistencia real del MES EN CURSO se calculan con las MISMAS
@@ -198,6 +201,37 @@ def _situacion_en_vivo(db: Session, predicciones: list, dias_plan: dict,
             "desactualizada": desactualizada,
         }
     return salida
+
+
+def _marcar_activos(predicciones: list, ids_activos: set) -> list:
+    """Agrega `activo=True/False` a cada fila del churn.
+
+    La base de activos es la MISMA de la tarjeta "Alumnos activos"
+    (`dashboard_admin.ids_alumnos_activos`). El frontend usa este campo para el
+    filtro "Solo activos" y así la lista no puede incluir a alguien que no esté
+    en el contador.
+    """
+    for fila in predicciones:
+        fila["activo"] = fila.get("usuario_id") in ids_activos
+    return predicciones
+
+
+def _usuario_id_de(fila):
+    """`usuario_id` de una fila del churn, sea predicción o tupla del query."""
+    if hasattr(fila, "usuario_id"):
+        return fila.usuario_id
+    return fila[0].usuario_id
+
+
+def _filtrar_solo_activos(predicciones: list, ids_activos: set) -> list:
+    """Predicciones cuyo alumno pertenece a la base de activos.
+
+    PURA: la usan el endpoint (`solo_activos=true`) y su test aislado. No toca
+    la base ni duplica la regla de activos: recibe los IDs ya calculados por
+    `ids_alumnos_activos()`. Acepta tanto filas de predicción como las tuplas
+    `(PredictionsChurn, nombre, correo)` que devuelve el query.
+    """
+    return [p for p in predicciones if _usuario_id_de(p) in ids_activos]
 
 
 def _fila_churn(p, nombre, correo, estado_gestion, ultimo_contacto,
@@ -736,6 +770,9 @@ def get_predictions_churn(
         None, max_length=80,
         description="Filtra la tabla por nombre o correo del alumno (parcial, sin "
                     "distinguir mayúsculas ni tildes; server-side)."),
+    solo_activos: bool = Query(
+        False, description="Si true, la lista sólo incluye alumnos con "
+                           "suscripción vigente hoy (misma base que Alumnos activos)."),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -752,6 +789,11 @@ def get_predictions_churn(
     - `buscar`: filtra la TABLA por nombre o correo (server-side, sin mayúsculas
       ni tildes). Los CONTADORES de las tarjetas siguen siendo del box COMPLETO:
       buscar no cambia el tamaño del box.
+    - `solo_activos`: filtra la TABLA a los alumnos con suscripción vigente hoy
+      (la MISMA base de `ids_alumnos_activos()` que usa "Alumnos activos"). Cada
+      fila trae `activo` para que Fidelización pueda filtrar sin otra request.
+    - `criticos_activos`/`altos_activos`: contadores de las tarjetas del
+      Dashboard, siempre intersecados con los activos.
     - `motivo`/`recomendacion`/`fecha_proxima_renovacion` (SITUACIÓN): se arman 100% EN VIVO
       (MISMA regla que el populate: `plan_vencimiento` + `churn_service.recomendacion_churn`) con
       el plan vigente, sus asistencias y los días sin asistir de HOY; no usan el snapshot del BI.
@@ -777,9 +819,19 @@ def get_predictions_churn(
     # Contadores de las tarjetas: SIEMPRE del box COMPLETO (todas las predicciones),
     # no del subconjunto buscado. `total` es el tamaño del box, no el de la búsqueda.
     todas = consulta.all()
+    # La LISTA sigue mostrando todas las predicciones del box (Fidelización no
+    # cambia). Los contadores de las TARJETAS del Dashboard se limitan a los
+    # alumnos ACTIVOS hoy: un alumno en riesgo siempre es parte de los activos.
+    ids_activos = ids_alumnos_activos(db, tenant_id)
     criticos = sum(1 for p, _n, _c in todas if p.riesgo_nivel == "CRITICO")
     altos = sum(1 for p, _n, _c in todas if p.riesgo_nivel == "ALTO")
     medios = sum(1 for p, _n, _c in todas if p.riesgo_nivel == "MEDIO")
+    criticos_activos = sum(
+        1 for p, _n, _c in todas
+        if p.riesgo_nivel == "CRITICO" and p.usuario_id in ids_activos)
+    altos_activos = sum(
+        1 for p, _n, _c in todas
+        if p.riesgo_nivel == "ALTO" and p.usuario_id in ids_activos)
 
     # Filas de la TABLA: con `buscar`, filtradas SERVER-SIDE (sin mayúsculas ni tildes).
     if buscar and buscar.strip():
@@ -790,6 +842,12 @@ def get_predictions_churn(
         )).all()
     else:
         filas = todas
+
+    # `solo_activos=true`: la TABLA se recorta a la base de activos (la MISMA
+    # que la tarjeta "Alumnos activos" y que `criticos_activos`/`altos_activos`).
+    # Los contadores globales de arriba no cambian.
+    if solo_activos:
+        filas = _filtrar_solo_activos(filas, ids_activos)
 
     ids = [p.usuario_id for p, _n, _c in filas]
     gestion = _gestion_por_alumno(db, tenant_id, ids)
@@ -814,6 +872,9 @@ def get_predictions_churn(
         )
         for p, nombre, correo in filas
     ]
+    # `activo` en cada fila: el filtro "Solo activos" de Fidelización lo usa
+    # junto con el riesgo, así el número de la tarjeta y las filas coinciden.
+    _marcar_activos(predicciones, ids_activos)
 
     # Snapshot VIEJO: la recomendación guardada ya no es la de HOY. Se marca la fila
     # (`desactualizada`, que ya devuelve `_fila_churn`) y se ENCOLA el recálculo de ese alumno
@@ -824,10 +885,19 @@ def get_predictions_churn(
 
     return {
         "predicciones": predicciones,
-        "total": len(todas),
+        # Con `solo_activos` el total es el de las predicciones activas; sin el
+        # flag sigue siendo el tamaño completo del box.
+        "total": (len(_filtrar_solo_activos(todas, ids_activos))
+                  if solo_activos else len(todas)),
         "criticos": criticos,
         "altos": altos,
         "medios": medios,
+        # Contadores para las tarjetas del Dashboard: SOLO alumnos activos (la
+        # base es la misma de "Alumnos activos"). `total_activos` es el total de
+        # esa base, no el tamaño de la tabla de predicciones.
+        "total_activos": len(ids_activos),
+        "criticos_activos": criticos_activos,
+        "altos_activos": altos_activos,
         # Resumen ejecutivo (1-2 frases + métricas que lo originan).
         "insight": _generar_insight(predicciones, dias_inactivo),
     }

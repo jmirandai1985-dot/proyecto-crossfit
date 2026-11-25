@@ -42,6 +42,11 @@ export const claves = {
     ingresoMes: ['admin', 'ingreso-mes'],
     membresiasMes: ['admin', 'membresias-mes'],
     mrr: ['admin', 'mrr'],
+    // Base de "Alumnos activos" (misma que usa el riesgo) y ocupación por clase
+    // (misma fórmula que la tarjeta). Cuelgan de `['admin']` para refrescarse
+    // con el resto del panel.
+    alumnosActivos: (limite) => ['admin', 'alumnos-activos', limite || 10],
+    ocupacionMes: (anio, mes) => ['admin', 'ocupacion-mes', anio, mes],
     alumnosNuevosMes: ['admin', 'alumnos-nuevos'],
     alumnosConvertidos: (anio, mes) => ['admin', 'alumnos-convertidos', anio, mes],
     alumnosEnRiesgo: (tenantId) => ['fidelizacion', 'tenant', tenantId, 'en-riesgo'],
@@ -61,7 +66,10 @@ export const claves = {
     // Cuelga de `['asistencia']`: confirmar la asistencia de hoy (que invalida la familia)
     // refresca también el mes que esté abierto en pantalla, sin claves de más.
     historialAsistencia: (anio, mes) => ['asistencia', 'historial', anio, mes],
-    churn: (tenantId, buscar) => ['kpis', 'churn', tenantId, buscar || ''],
+    // `soloActivos` forma parte de la clave: la lista filtrada y la completa son
+    // dos respuestas distintas del MISMO endpoint y no pueden compartir caché.
+    churn: (tenantId, buscar, soloActivos) =>
+        ['kpis', 'churn', tenantId, buscar || '', soloActivos ? 'activos' : 'todos'],
     segmentacion: (tenantId) => ['segmentacion', tenantId],
     sugerencias: (tenantId, ids) => ['fidelizacion', 'sugerencias', tenantId, ids],
     // ── Bloque ALUMNO (Fase 2): datos que comparten varias pantallas del alumno ──
@@ -360,6 +368,38 @@ export function useMrr() {
 }
 
 /**
+ * Alumnos ACTIVOS hoy: total + los últimos `limite` (para el panel de la
+ * tarjeta). La base es la misma que la del riesgo (`/kpis/churn`), así que el
+ * riesgo nunca puede superar a los activos.
+ */
+export function useAlumnosActivosResumen(limite = 10) {
+    return useQuery({
+        queryKey: claves.alumnosActivos(limite),
+        queryFn: async () => (await api.get('/api/v1/admin/alumnos-activos', {
+            params: { limite },
+        })).data,
+        staleTime: 60_000,
+    });
+}
+
+/**
+ * Ocupación del mes POR CLASE (`/admin/ocupacion-mes`). Usa la MISMA fórmula
+ * que la tarjeta (`metricas_service.ocupacion_promedio`): asistencias reales /
+ * cupo de las clases realizadas. Se pide sólo al abrir el panel.
+ */
+export function useOcupacionMes(anio, mes) {
+    return useQuery({
+        queryKey: claves.ocupacionMes(anio, mes),
+        queryFn: async () => (await api.get('/api/v1/admin/ocupacion-mes', {
+            params: { anio, mes },
+        })).data,
+        staleTime: 60_000,
+        enabled: Number.isInteger(anio) && Number.isInteger(mes)
+            && mes >= 1 && mes <= 12,
+    });
+}
+
+/**
  * Altas de alumnos del MES EN CURSO con su estado de conversión (`convertido`
  * + `plan_nombre`). Misma fuente que la pantalla `/admin/alumnos-prueba`.
  */
@@ -579,11 +619,14 @@ export function useRechazarPedido() {
 }
 
 // ── Fidelización: el churn lo publica un job del BI (corre de noche) ──
-export function useChurn(tenantId, buscar) {
+export function useChurn(tenantId, buscar, soloActivos = false) {
     return useQuery({
-        queryKey: claves.churn(tenantId, buscar),
+        queryKey: claves.churn(tenantId, buscar, soloActivos),
         queryFn: async () => (await api.get('/api/v1/kpis/churn', {
-            params: { buscar: buscar || undefined },
+            params: {
+                buscar: buscar || undefined,
+                solo_activos: soloActivos ? true : undefined,
+            },
         })).data,
         // 5 min: buscar un término y volver no cuesta otra request, y la pantalla no
         // parpadea al cambiar el filtro (`keepPreviousData` deja la tabla anterior).
