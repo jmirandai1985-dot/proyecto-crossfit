@@ -30,17 +30,12 @@ import { useAlumnosPrueba } from '../../hooks/useAlumnosPrueba';
 // (≥768px) y la pantalla /admin/pagos-del-dia. Acá se abre como accordion desde
 // el KPI "Ingresos de hoy" (no navega).
 import PagosDelDia from '../../components/pagos/PagosDelDia';
-// Gráfico de barras horizontales de las clases del día (una fila por clase, hora a la
-// izquierda y "reservas / cupo" a la derecha). Componente COMPARTIDO con el Dashboard
-// de escritorio: las dos vistas leen el mismo dato y dibujan la misma barra.
-import GraficoClasesHoy from '../../components/dashboard/GraficoClasesHoy';
 // Paneles de las tarjetas de Negocio/Ocupación: los MISMOS componentes del
 // escritorio (ingreso por día, ranking de planes, MRR y ocupación por clase).
 import {
     PanelAlumnosActivos, PanelAsistenciaHoy, PanelIngresoMes, PanelMembresiasMes,
     PanelMrr, PanelOcupacionConDatos, PanelVentasBazar,
 } from '../../components/dashboard/PanelesNegocio';
-import ResumenClasesHoy from '../../components/dashboard/ResumenClasesHoy';
 import { iniciales } from '../../utils/iniciales';
 // Pedidos listos para entrega (Bazar): qué fila se lista y qué dice cada una.
 // OJO: el CÓDIGO DE RETIRO no se muestra en la tarjeta —es la prueba de que el pedido
@@ -734,13 +729,6 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
     // hace falta el hook.
     const [mostrarPagos, setMostrarPagos] = useState(false);
 
-    // ── "Clases de hoy": el gráfico de barras del día ─────────────────────────
-    // La tarjeta muestra el gráfico (una fila por clase) y al tocarla se abre el
-    // panel con el MISMO gráfico más alto y desplazable. Ya NO hace scroll a la
-    // sección de asistencia (`#ub-asistencia`): el detalle de asistencia sigue abajo,
-    // pero la tarjeta no lleva ahí.
-    const [mostrarClases, setMostrarClases] = useState(false);
-
     // ── Paneles de Negocio del mes y Ocupación (mismos del escritorio) ────────
     // 'ingreso' | 'membresias' | 'mrr' | null; Ocupación tiene su propio estado.
     const [panelNegocio, setPanelNegocio] = useState(null);
@@ -874,60 +862,10 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                     {fechaCorta()} · resumen del día
                 </p>
 
-                {/* ── A. Resumen de HOY: 3 tarjetas ─────────────────────────
-                    Clases (gráfico de barras del día), asistentes (snapshot diario)
-                    e ingresos. "Pagos de hoy" SE ELIMINÓ: sus pagos se abren desde
-                    "Ingresos de hoy", que es la única tarjeta del día. ───────── */}
+                {/* ── A. Resumen de HOY: 2 tarjetas ─────────────────────────
+                    Asistentes e ingresos. "Pagos de hoy" SE ELIMINÓ: sus pagos se abren
+                    desde "Ingresos de hoy", que es la única tarjeta del día. ───────── */}
                 <section className="kpis" aria-label="Resumen de hoy">
-                    {/* "Clases de hoy": el número se reemplazó por el GRÁFICO. Cada fila
-                        es una clase del día (hora + barra + "reservas / cupo"), con el
-                        cupo REAL de esa clase. Tocar la tarjeta abre el panel del
-                        gráfico (antes hacía scroll a la asistencia). */}
-                    <TarjetaMovilConPanel
-                        abierto={mostrarClases}
-                        panel={(
-                            <section className="card" aria-labelledby="ub-clases-hoy">
-                                <div className="card-head">
-                                    <h2 id="ub-clases-hoy">Clases de hoy · reservas / cupo</h2>
-                                    <button type="button" className="link"
-                                        onClick={() => setMostrarClases(false)}>
-                                        Cerrar
-                                    </button>
-                                </div>
-                                <GraficoClasesHoy clases={clases} alto="55vh"
-                                    testid="grafico-clases-hoy-panel" />
-                                <p className="note">
-                                    Reservas confirmadas sobre el cupo de cada clase. Las clases
-                                    sin cupo muestran sólo sus reservas.
-                                </p>
-                            </section>
-                        )}>
-                        <div className="kpi k-activos kpi-grafico" role="button" tabIndex={0}
-                            aria-label="Clases de hoy: reservas confirmadas sobre el cupo de cada clase"
-                            aria-expanded={mostrarClases}
-                            data-testid="kpi-grafico-clases"
-                            onClick={() => setMostrarClases((v) => !v)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                    e.preventDefault();
-                                    setMostrarClases((v) => !v);
-                                }
-                            }}>
-                            <span className="kpi-top">
-                                <span className="chip"><Icono nombre="clock" /></span>
-                                <span className="kpi-label">Clases de hoy</span>
-                                <span className="kpi-go" aria-hidden="true">›</span>
-                            </span>
-                            {clasesError ? (
-                                <span className="kpi-error">{clasesError}</span>
-                            ) : clasesCargando ? (
-                                <span className="kpi-sub">Cargando las clases…</span>
-                            ) : (
-                                <ResumenClasesHoy clases={clases} max={4} />
-                            )}
-                            <span className="kpi-sub">{clasesRealizadasHoy} realizadas · Hoy</span>
-                        </div>
-                    </TarjetaMovilConPanel>
                     <TarjetaMovilConPanel
                         abierto={mostrarAsistencia}
                         panel={(
@@ -974,9 +912,6 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                     </TarjetaMovilConPanel>
                 </section>
 
-                {/* ── Clases de hoy: el gráfico abierto ─────────────────────
-                    Mismo gráfico que la tarjeta, más alto y desplazable (con muchas
-                    clases se recorre dentro del panel). Sin scroll a la asistencia. */}
                 {/* ── Pagos del día (accordion DEBAJO de la fila Hoy) ─────────
                     La tarjeta "Ingresos de hoy" alterna este panel en el mismo lugar,
                     sin navegar. El enlace "Ver detalle" conserva la pantalla completa
