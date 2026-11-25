@@ -53,7 +53,7 @@ const fmtFechaHora = (iso) => {
 
 // ── Filtros de la tabla ────────────────────────────────────────────────
 // Los activa la pestaña BI por query param (KPIs es solo lectura y manda
-// acá la lista ya enfocada): ?filtro=critico|alto|total|sin_actividad|plan_urgente y/o
+// acá la lista ya enfocada): ?filtro=critico|alto|total|riesgo_activos|sin_actividad|plan_urgente y/o
 // ?arquetipo=CODE. Es el MISMO panel (GET /kpis/churn), filtrado client-side
 // con los datos que la fila ya trae: no hay endpoint nuevo.
 const FILTROS = {
@@ -68,6 +68,16 @@ const FILTROS = {
     total: {
         etiqueta: 'En riesgo (todos)',
         test: (p) => ['ALTO', 'CRITICO'].includes(p.riesgo_nivel),
+    },
+    // Mismo criterio que la tarjeta "Alumnos en riesgo" del Dashboard:
+    // críticos + altos, pero SOLO alumnos con suscripción vigente hoy. El
+    // backend filtra la lista con `solo_activos=true` y cada fila trae
+    // `activo`; el `test` vuelve a exigirlo para que el filtro también
+    // funcione si la lista llegara sin recortar (backend viejo/caché).
+    riesgo_activos: {
+        etiqueta: 'En riesgo (activos)',
+        test: (p) => p.activo === true
+            && ['ALTO', 'CRITICO'].includes(p.riesgo_nivel),
     },
     sin_actividad: {
         // Misma condición que la tarjeta "Alumnos en Riesgo" del Dashboard:
@@ -126,7 +136,12 @@ const Fidelizacion = () => {
     // backend); los filtros de riesgo/arquetipo se combinan ENCIMA de su resultado.
     const [searchTerm, setSearchTerm] = useState('');
     const [buscar, setBuscar] = useState('');
-    const churnQ = useChurn(tenant_id, buscar);
+    // El filtro "En riesgo (activos)" necesita que el BACKEND recorte la lista
+    // a la base de activos (la misma del contador del Dashboard). Se deriva del
+    // query param antes de declarar `claveFiltro` para no romper el orden TDZ.
+    const filtroSolicitado = searchParams.get('filtro') || null;
+    const soloActivos = filtroSolicitado === 'riesgo_activos';
+    const churnQ = useChurn(tenant_id, buscar, soloActivos);
     const segQ = useSegmentacion(tenant_id);
     const churn = churnQ.data ?? null;
     const segmentacion = segQ.data ?? null;
@@ -351,6 +366,9 @@ const Fidelizacion = () => {
                                 { clave: 'critico', label: 'Abandono Crítico', valor: churn?.criticos ?? 0, icon: TriangleAlert, color: 'border-red-500', test: FILTROS.critico.test },
                                 { clave: 'alto', label: 'Riesgo alto', valor: churn?.altos ?? 0, icon: TriangleAlert, color: 'border-orange-500', test: FILTROS.alto.test },
                                 { clave: 'total', label: 'En riesgo (total)', valor: churn?.total ?? 0, icon: Users, color: 'border-yellow-500', test: FILTROS.total.test },
+                                // Mismo número que la tarjeta "Alumnos en riesgo" del Dashboard:
+                                // críticos + altos de alumnos con suscripción vigente hoy.
+                                { clave: 'riesgo_activos', label: 'Riesgo activos', valor: (churn?.criticos_activos ?? 0) + (churn?.altos_activos ?? 0), icon: Users, color: 'border-red-600', test: FILTROS.riesgo_activos.test },
                             ].map(({ clave, label, valor, icon, color, test }) => {
                                 // Los números de la tarjeta son los del BI; con un filtro puesto se
                                 // aclara cuántos de ese grupo quedan EN LA TABLA (el arquetipo y el
