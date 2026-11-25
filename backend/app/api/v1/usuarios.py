@@ -4,11 +4,11 @@ Router de endpoints para gestión de Usuarios
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request, Response
 from app.core.urls import url_frontend  # B.2
 import bcrypt
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Literal, Optional
 import logging
 import sentry_sdk
 
@@ -18,6 +18,7 @@ from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
 from app.schemas.usuario import UsuarioCreate, UsuarioUpdate, UsuarioResponse, UsuarioListItem
 from app.core.dependencies import get_current_user, get_current_admin
+from app.core.estados import dia_chile
 from app.core.rate_limit import limiter, LIMIT_CRITICO
 from app.services.asignaciones_clases import (
     hay_que_liberar_coach,
@@ -416,6 +417,12 @@ def listar_usuarios(
     estado: Optional[str] = Query(
         None, description="Filtra por estado: activo | pendiente_activacion | "
                           "rechazado | baja"),
+    # Alta del MES EN CURSO (Chile). Lo usa la tarjeta "Nuevos del mes" del
+    # Dashboard: antes abría `/admin/alumnos-prueba`, que es otra lista (pruebas
+    # vigentes), y el número del KPI no coincidía con las filas.
+    alta: Optional[Literal["mes"]] = Query(
+        None, description="Filtra por fecha de alta: 'mes' = creados este mes "
+                          "(America/Santiago)"),
     con_membresia: bool = Query(
         False, description="Agrega `membresia` (plan, cupo, vencimiento) y "
                            "`ultima_asistencia` a cada fila. Default false: los "
@@ -453,6 +460,14 @@ def listar_usuarios(
 
     if rol is not None:
         query = query.filter(Usuario.rol == rol)
+
+    if alta == "mes":
+        # Día CHILENO del alta (no el de la sesión UTC de Postgres): el 1° de
+        # mes a las 00:30 de Chile es el mes anterior en UTC y no puede quedar
+        # fuera del listado.
+        hoy = hoy_santiago()
+        query = query.filter(
+            dia_chile(Usuario.created_at) >= date(hoy.year, hoy.month, 1))
 
     if excluir_prueba:
         query = query.filter(Usuario.es_prueba.is_(False))

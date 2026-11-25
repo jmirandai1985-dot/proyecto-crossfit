@@ -83,7 +83,7 @@ export const badgeEstado = (usuario) => {
  */
 export const paramsAlumnos = ({
     rol = 'alumno', porPagina = 25, pagina = 1, buscar = '', estado = '',
-    excluirPrueba = false,
+    excluirPrueba = false, alta = '',
 } = {}) => ({
     rol,
     limit: porPagina,
@@ -92,6 +92,10 @@ export const paramsAlumnos = ({
     // `estado` es el filtro server-side del padrón (`GET /usuarios/?estado=`).
     // Sin filtro viaja `undefined` para no cambiar el request de siempre.
     estado: String(estado || '').trim() || undefined,
+    // `alta=mes` = creados en el mes en curso (Chile). Lo abre la tarjeta
+    // "Nuevos del mes" del Dashboard. Sólo se manda el valor que el backend
+    // valida (`Literal["mes"]`): un valor raro no viaja.
+    alta: String(alta || '').trim() === 'mes' ? 'mes' : undefined,
     // Opt-in: no altera los listados que ya consumen este helper.
     excluir_prueba: excluirPrueba ? true : undefined,
 });

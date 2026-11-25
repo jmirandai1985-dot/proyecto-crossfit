@@ -86,9 +86,19 @@ const Alumnos = () => {
     // desconocido en la URL no se manda al backend (allí no filtra nada).
     const estadoSolicitado = searchParams.get('estado');
     const estadoFiltro = ESTADOS_PADRON.has(estadoSolicitado) ? estadoSolicitado : '';
+    // Alta del MES EN CURSO: la abre la tarjeta "Nuevos del mes" del Dashboard
+    // (`?alta=mes`). Sólo se acepta el valor que valida el backend: otro texto
+    // en la URL no se manda y la tabla queda como siempre.
+    const altaFiltro = searchParams.get('alta') === 'mes' ? 'mes' : '';
     const quitarEstado = () => {
         const params = new URLSearchParams(searchParams);
         params.delete('estado');
+        setSearchParams(params, { replace: true });
+        setPagina(1);
+    };
+    const quitarAlta = () => {
+        const params = new URLSearchParams(searchParams);
+        params.delete('alta');
         setSearchParams(params, { replace: true });
         setPagina(1);
     };
@@ -100,6 +110,7 @@ const Alumnos = () => {
     // mientras llega la nueva (sin parpadeo).
     const { data: datos, isPending: cargandoAlumnos } = useAlumnosPaginados({
         porPagina, pagina, buscar: busqueda, estado: estadoFiltro, excluirPrueba,
+        alta: altaFiltro,
     });
     const alumnos = datos?.lista ?? SIN_DATOS;
     const totalAlumnos = datos?.total ?? 0;
@@ -447,21 +458,37 @@ const Alumnos = () => {
                 <div>
                     <h1 className="text-3xl font-bold text-zinc-100">Gestión de Alumnos</h1>
                     <p className="text-zinc-400 mt-1">Administra los miembros de tu box</p>
-                    {estadoFiltro && (
-                        <div className="mt-3 flex items-center gap-2 text-sm">
+                    {(estadoFiltro || altaFiltro) && (
+                        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
                             <span className="text-zinc-400">Filtro activo:</span>
-                            <span className="inline-flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/15 px-3 py-1 font-medium text-blue-300">
-                                Estado: {badgeEstado(estadoFiltro).texto}
-                                <button
-                                    type="button"
-                                    onClick={quitarEstado}
-                                    className="text-blue-200 hover:text-white"
-                                    aria-label="Quitar filtro de estado"
-                                    title="Quitar filtro"
-                                >
-                                    ✕
-                                </button>
-                            </span>
+                            {estadoFiltro && (
+                                <span className="inline-flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/15 px-3 py-1 font-medium text-blue-300">
+                                    Estado: {badgeEstado(estadoFiltro).texto}
+                                    <button
+                                        type="button"
+                                        onClick={quitarEstado}
+                                        className="text-blue-200 hover:text-white"
+                                        aria-label="Quitar filtro de estado"
+                                        title="Quitar filtro"
+                                    >
+                                        ✕
+                                    </button>
+                                </span>
+                            )}
+                            {altaFiltro && (
+                                <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 font-medium text-emerald-300">
+                                    Alta: este mes
+                                    <button
+                                        type="button"
+                                        onClick={quitarAlta}
+                                        className="text-emerald-200 hover:text-white"
+                                        aria-label="Quitar filtro de alta del mes"
+                                        title="Quitar filtro"
+                                    >
+                                        ✕
+                                    </button>
+                                </span>
+                            )}
                         </div>
                     )}
                 </div>
