@@ -29,8 +29,13 @@ from app.models.segmentacion_alumno import SegmentacionAlumno
 from app.models.usuario import Usuario
 from app.services import churn_service
 from app.services import plan_vencimiento
-from app.services.metricas_service import (MIN_BASE_RETENCION, sql_usuario_real,
-                                           sql_transaccion_real)
+from app.services.metricas_service import (MIN_BASE_RETENCION, ocupacion_promedio,
+                                           sql_usuario_real, sql_transaccion_real)
+# El embudo prueba→plan y la asistencia real del MES EN CURSO se calculan con las MISMAS
+# funciones que usa el job BI para publicar `monthly_kpis` (una sola definición de cada
+# métrica, sin duplicar SQL en el endpoint que lee el Dashboard).
+from app.api.v1.kpis_populate import (calcular_asistencia_mes,
+                                      calcular_embudo_conversion)
 from shared.estados import ESTADOS_USUARIO_SIN_MRR
 # La asistencia REAL del panel (`reservas.asistio` sobre la fecha de la clase): UNA sola definición
 # para el churn servido en vivo y para las dos consultas crudas de BI (`sql_cte_asistencias()`).
@@ -514,7 +519,51 @@ def get_kpis_mensual_periodos(
     }
 
 
-# ── 2c) GET /api/v1/kpis/estacionalidad (BI: perfil del año) ─────────────────
+# ── 2c) GET /api/v1/kpis/mes-en-curso (tarjetas del Dashboard) ─────────────
+@router.get("/mes-en-curso")
+def get_kpis_mes_en_curso(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """KPIs del MES EN CURSO (hoy en Chile), calculados EN VIVO.
+
+    POR QUÉ EXISTE: las tarjetas "Conversión", "Asistencia real" y "Ocupación" del
+    Dashboard admin mostraban el último mes CERRADO de `monthly_kpis` (lo publica el
+    job BI al cierre del mes). Ahora muestran el mes en curso, y el mes en curso
+    todavía no tiene fila en el data mart: se calcula al leer, con las MISMAS
+    funciones del populate (`calcular_embudo_conversion`, `calcular_asistencia_mes`,
+    `metricas_service.ocupacion_promedio`). Es un GET: no escribe nada.
+
+    Ventana: del día 1 del mes al DÍA DE HOY en America/Santiago. `asistencia_promedio`
+    son las reservas confirmadas CON asistencia marcada sobre las reservas confirmadas
+    de las clases realizadas del mes (misma definición del BI).
+    """
+    tenant_id = current_user["tenant_id"]
+    hoy = hoy_santiago()
+    inicio = date(hoy.year, hoy.month, 1)
+
+    embudo = calcular_embudo_conversion(db, tenant_id, inicio, hoy)
+    asistencia = calcular_asistencia_mes(db, tenant_id, inicio, hoy)
+    ocupacion = ocupacion_promedio(db, tenant_id, inicio, hoy)
+
+    return {
+        "year": hoy.year,
+        "month": hoy.month,
+        "desde": inicio.isoformat(),
+        "hasta": hoy.isoformat(),
+        "parcial": True,
+        "alumnos_prueba": embudo["alumnos_prueba"],
+        "alumnos_clase_prueba_ejecutada": embudo["alumnos_clase_prueba_ejecutada"],
+        "alumnos_plan_comprado": embudo["alumnos_plan_comprado"],
+        "conversion_rate": embudo["conversion_rate"],
+        "asistentes": asistencia["asistentes"],
+        "reservas_confirmadas": asistencia["reservas"],
+        "asistencia_promedio": asistencia["asistencia_promedio"],
+        "ocupacion_promedio": ocupacion,
+    }
+
+
+# ── 2d) GET /api/v1/kpis/estacionalidad (BI: perfil del año) ─────────────────
 # Meses CERRADOS con fila en `monthly_kpis` que hacen falta para publicar el
 # índice: con menos, cada mes del calendario se observa a lo sumo una vez y el
 # "perfil" es el ruido de unos pocos meses, no una estacionalidad.
