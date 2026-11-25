@@ -30,6 +30,10 @@ import { useAlumnosPrueba } from '../../hooks/useAlumnosPrueba';
 // (≥768px) y la pantalla /admin/pagos-del-dia. Acá se abre como accordion desde
 // el KPI "Ingresos de hoy" (no navega).
 import PagosDelDia from '../../components/pagos/PagosDelDia';
+// Gráfico de barras horizontales de las clases del día (una fila por clase, hora a la
+// izquierda y "reservas / cupo" a la derecha). Componente COMPARTIDO con el Dashboard
+// de escritorio: las dos vistas leen el mismo dato y dibujan la misma barra.
+import GraficoClasesHoy from '../../components/dashboard/GraficoClasesHoy';
 import { iniciales } from '../../utils/iniciales';
 // Pedidos listos para entrega (Bazar): qué fila se lista y qué dice cada una.
 // OJO: el CÓDIGO DE RETIRO no se muestra en la tarjeta —es la prueba de que el pedido
@@ -233,7 +237,9 @@ const Kpi = ({ clase, icono, label, valor, sub, error, cargando, dinero, pulso, 
  *
  * No reemplaza ninguna pantalla: resume y enlaza a las que ya existen (Pendientes,
  * Asistencia, Supervisión, Alumnos, Bazar). Los datos salen de los MISMOS endpoints que
- * usa el panel de escritorio, más `GET /finanzas/resumen-hoy` (caja del día).
+ * usa el panel de escritorio. "Ingresos de hoy" sale de los cobros de
+ * `GET /admin/pagos-del-dia` (la MISMA fuente que la lista que abre la tarjeta), no de
+ * la caja de `GET /finanzas/resumen-hoy`.
  *
  * Bloques: KPIs (A), accesos rápidos (B), "En revisión" (C), "Asistencia de hoy" (D) y
  * buscador de alumnos (E).
@@ -697,6 +703,13 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
     // hace falta el hook.
     const [mostrarPagos, setMostrarPagos] = useState(false);
 
+    // ── "Clases de hoy": el gráfico de barras del día ─────────────────────────
+    // La tarjeta muestra el gráfico (una fila por clase) y al tocarla se abre el
+    // panel con el MISMO gráfico más alto y desplazable. Ya NO hace scroll a la
+    // sección de asistencia (`#ub-asistencia`): el detalle de asistencia sigue abajo,
+    // pero la tarjeta no lleva ahí.
+    const [mostrarClases, setMostrarClases] = useState(false);
+
     const [tarjeta, setTarjeta] = useState(false);       // pantalla abierta
 
     const abrirTarjeta = () => {
@@ -823,17 +836,41 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                     {fechaCorta()} · resumen del día
                 </p>
 
-                {/* ── A. Resumen de HOY: 4 tarjetas ─────────────────────────
-                    Clases, asistentes (snapshot diario), ingresos y pagos.
-                    Los accesos rápidos y la semana vienen después. ────────── */}
+                {/* ── A. Resumen de HOY: 3 tarjetas ─────────────────────────
+                    Clases (gráfico de barras del día), asistentes (snapshot diario)
+                    e ingresos. "Pagos de hoy" SE ELIMINÓ: sus pagos se abren desde
+                    "Ingresos de hoy", que es la única tarjeta del día. ───────── */}
                 <section className="kpis" aria-label="Resumen de hoy">
-                    <Kpi
-                        clase="k-activos" icono="clock" label="Clases de hoy"
-                        valor={clasesCargando ? null : clases.length}
-                        error={clasesError} cargando={clasesCargando}
-                        sub={<>{clasesRealizadasHoy} realizadas · Hoy</>}
-                        chevron onClick={() => document.getElementById('ub-asistencia')?.scrollIntoView({ behavior: 'smooth' })}
-                    />
+                    {/* "Clases de hoy": el número se reemplazó por el GRÁFICO. Cada fila
+                        es una clase del día (hora + barra + "reservas / cupo"), con el
+                        cupo REAL de esa clase. Tocar la tarjeta abre el panel del
+                        gráfico (antes hacía scroll a la asistencia). */}
+                    <div className="kpi k-activos kpi-grafico" role="button" tabIndex={0}
+                        aria-label="Clases de hoy: reservas confirmadas sobre el cupo de cada clase"
+                        aria-expanded={mostrarClases}
+                        data-testid="kpi-grafico-clases"
+                        onClick={() => setMostrarClases((v) => !v)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setMostrarClases((v) => !v);
+                            }
+                        }}>
+                        <span className="kpi-top">
+                            <span className="chip"><Icono nombre="clock" /></span>
+                            <span className="kpi-label">Clases de hoy</span>
+                            <span className="kpi-go" aria-hidden="true">›</span>
+                        </span>
+                        {clasesError ? (
+                            <span className="kpi-error">{clasesError}</span>
+                        ) : clasesCargando ? (
+                            <span className="kpi-sub">Cargando las clases…</span>
+                        ) : (
+                            <GraficoClasesHoy clases={clases} alto="7rem"
+                                testid="grafico-clases-hoy-movil" />
+                        )}
+                        <span className="kpi-sub">{clasesRealizadasHoy} realizadas · Hoy</span>
+                    </div>
                     <Kpi
                         clase="k-venc" icono="users" label="Asistentes de hoy"
                         valor={resumenAdmin.asistentesHoy}
@@ -843,24 +880,41 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                     />
                     <Kpi
                         clase="k-caja" icono="caja" label="Ingresos de hoy" dinero
-                        valor={resumenAdmin.caja?.ingresos ?? null}
-                        error={resumenAdmin.errores.caja} cargando={resumenAdmin.cargando}
-                        sub="Hoy · caja del día"
-                        chevron onClick={() => setMostrarPagos((v) => !v)}
-                    />
-                    <Kpi
-                        clase="k-vouch" icono="voucher" label="Pagos de hoy"
-                        valor={resumenAdmin.caja?.pagos ?? null}
-                        error={resumenAdmin.errores.caja} cargando={resumenAdmin.cargando}
-                        sub="Hoy · pagos registrados"
+                        valor={resumenAdmin.ingresosHoy ?? null}
+                        error={resumenAdmin.errores.pagosDia}
+                        cargando={resumenAdmin.cargando || resumenAdmin.pagosDiaCargando}
+                        sub={resumenAdmin.cobrosHoy == null
+                            ? 'Hoy · cobros del día'
+                            : `Hoy · ${resumenAdmin.cobrosHoy} ${resumenAdmin.cobrosHoy === 1 ? 'cobro' : 'cobros'} · membresía y Bazar`}
                         chevron onClick={() => setMostrarPagos((v) => !v)}
                     />
                 </section>
 
+                {/* ── Clases de hoy: el gráfico abierto ─────────────────────
+                    Mismo gráfico que la tarjeta, más alto y desplazable (con muchas
+                    clases se recorre dentro del panel). Sin scroll a la asistencia. */}
+                {mostrarClases && (
+                    <section className="card" aria-labelledby="ub-clases-hoy">
+                        <div className="card-head">
+                            <h2 id="ub-clases-hoy">Clases de hoy · reservas / cupo</h2>
+                            <button type="button" className="link"
+                                onClick={() => setMostrarClases(false)}>
+                                Cerrar
+                            </button>
+                        </div>
+                        <GraficoClasesHoy clases={clases} alto="55vh"
+                            testid="grafico-clases-hoy-panel" />
+                        <p className="note">
+                            Reservas confirmadas sobre el cupo de cada clase (el de la propia
+                            clase). Las clases sin cupo muestran sólo sus reservas.
+                        </p>
+                    </section>
+                )}
+
                 {/* ── Pagos del día (accordion DEBAJO de la fila Hoy) ─────────
-                    La tarjeta "Pagos de hoy" (y "Ingresos de hoy") alterna este
-                    panel en el mismo lugar, sin navegar. El enlace "Ver detalle"
-                    conserva la pantalla completa /admin/pagos-del-dia. ─────── */}
+                    La tarjeta "Ingresos de hoy" alterna este panel en el mismo lugar,
+                    sin navegar. El enlace "Ver detalle" conserva la pantalla completa
+                    /admin/pagos-del-dia. ──────────────────────────────────── */}
                 {mostrarPagos && (
                     <section className="card" aria-labelledby="ub-pagos-dia">
                         <div className="card-head">
@@ -962,7 +1016,7 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                             valor={stats?.ingresoMensual ?? null}
                             error={errores.activos} cargando={cargando}
                             sub="Mes en curso · parcial · Clic para ver los movimientos"
-                            chevron onClick={() => navigate('/admin/reportes?seccion=movimientos')}
+                            chevron onClick={() => navigate('/admin/reportes?seccion=movimientos&tipo=ingreso')}
                         />
                         <Kpi
                             clase="k-activos" icono="chart" label="MRR" dinero
@@ -999,7 +1053,8 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                             clase="k-activos" icono="users" label="Alumnos activos"
                             valor={resumenAdmin.alumnosActivos}
                             error={resumenAdmin.errores.diario} cargando={resumenAdmin.cargando}
-                            sub="Hoy · snapshot diario"
+                            sub="Hoy · snapshot diario · Clic para ver el padrón activo"
+                            chevron onClick={() => navigate('/admin/alumnos?estado=activo')}
                         />
                         <Kpi
                             clase="k-venc" icono="clock" label="Alumnos en riesgo"
@@ -1007,7 +1062,8 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                             error={resumenAdmin.errores.churn} cargando={resumenAdmin.cargando}
                             sub={resumenAdmin.riesgoPendiente
                                 ? 'pendiente de reentrenar'
-                                : 'Hoy · crítico + alto'}
+                                : 'Hoy · crítico + alto · Clic para ver la lista filtrada'}
+                            chevron onClick={() => navigate('/admin/fidelizacion?filtro=total')}
                         />
                         <Kpi
                             clase="k-prueba" icono="users" label="Nuevos del mes"
@@ -1019,11 +1075,13 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                     </div>
                 </section>
 
-                {/* ── Conversión ───────────────────────────────────────────── */}
+                {/* ── Conversión (MES EN CURSO) ────────────────────────────── */}
                 <section className="card" aria-labelledby="ub-conversion" data-testid="admin-conversion-mock">
                     <div className="card-head">
                         <h2 id="ub-conversion">Conversión</h2>
-                        <span className="live">{resumenAdmin.periodoTexto || 'sin mes cerrado'}</span>
+                        <span className="live">{resumenAdmin.periodoTexto
+                            ? `mes en curso · ${resumenAdmin.periodoTexto}`
+                            : 'mes en curso'}</span>
                     </div>
                     <div className="kpis">
                         <Kpi
@@ -1032,17 +1090,18 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                                 ? null
                                 : `${resumenAdmin.conversionRate}%`}
                             error={resumenAdmin.errores.mensual} cargando={resumenAdmin.cargando}
-                            sub={`${resumenAdmin.conversionHint}${resumenAdmin.periodoTexto
-                                ? ` · ${resumenAdmin.periodoTexto}` : ''}`}
+                            sub={resumenAdmin.conversionHint}
                         />
                     </div>
                 </section>
 
-                {/* ── Ocupación real del mes cerrado ────────────────────────── */}
+                {/* ── Asistencia real y Ocupación (MES EN CURSO) ───────────── */}
                 <section className="card" aria-labelledby="ub-ocupacion" data-testid="admin-ocupacion-mock">
                     <div className="card-head">
                         <h2 id="ub-ocupacion">Ocupación</h2>
-                        <span className="live">{resumenAdmin.periodoTexto || 'sin mes cerrado'}</span>
+                        <span className="live">{resumenAdmin.periodoTexto
+                            ? `mes en curso · ${resumenAdmin.periodoTexto}`
+                            : 'mes en curso'}</span>
                     </div>
                     <div className="kpis">
                         <Kpi
@@ -1051,7 +1110,7 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                                 ? null
                                 : `${resumenAdmin.ocupacionReal}%`}
                             error={resumenAdmin.errores.mensual} cargando={resumenAdmin.cargando}
-                            sub={`Mes cerrado${resumenAdmin.periodoTexto ? ` · ${resumenAdmin.periodoTexto}` : ''} · asistencia real / cupo — Clic para ver el historial`}
+                            sub={`Mes en curso${resumenAdmin.periodoTexto ? ` · ${resumenAdmin.periodoTexto}` : ''} · asistencia real / cupo — Clic para ver el historial`}
                             chevron onClick={() => navigate('/admin/historial')}
                         />
                         <Kpi
@@ -1060,7 +1119,7 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                                 ? null
                                 : `${resumenAdmin.asistenciaReal}%`}
                             error={resumenAdmin.errores.mensual} cargando={resumenAdmin.cargando}
-                            sub={`Mes cerrado${resumenAdmin.periodoTexto ? ` · ${resumenAdmin.periodoTexto}` : ''} · reservas confirmadas`}
+                            sub={`Mes en curso${resumenAdmin.periodoTexto ? ` · ${resumenAdmin.periodoTexto}` : ''} · reservas confirmadas con asistencia marcada`}
                         />
                     </div>
                 </section>

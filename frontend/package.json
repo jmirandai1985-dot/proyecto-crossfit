@@ -18,6 +18,7 @@
     "test:reservas-estadisticas": "node scripts/test-reservas-estadisticas.mjs",
     "test:filtro": "node scripts/test-filtro-disciplina.mjs",
     "test:filtro-movimientos": "node scripts/test-filtro-movimientos.mjs",
+    "test:ingresos-hoy": "node scripts/test-ingresos-hoy.mjs",
     "test:rotulo": "node scripts/test-rotulo-creditos.mjs",
     "test:franjas": "node scripts/test-franjas-asistencia.mjs",
     "test:asistencia-franjas": "node scripts/test-asistencia-franjas.mjs",

@@ -7,16 +7,24 @@
  *  - Alumnos en riesgo: críticos + altos del snapshot de churn. Si el modelo
  *    no tiene datos reales (0) o la consulta falla, se devuelve null y la UI
  *    muestra n/d + "pendiente de reentrenar"; nunca un número inventado.
- *  - Conversión: sólo se publica con una base de 5 alumnos de prueba.
- *  - Ocupación: asistencia real sobre cupo de clases pasadas. Se deriva del
- *    snapshot mensual (asistencia real / reservas × reservas / cupo), sin
- *    mezclar reservas con asistencia en el texto.
+ *  - Conversión, asistencia real y ocupación: MES EN CURSO (hoy en Chile),
+ *    calculado EN VIVO por `GET /kpis/mes-en-curso` — el mes en curso todavía no
+ *    tiene fila en `monthly_kpis` (el job BI publica al cierre), y las tarjetas
+ *    del Dashboard ya no muestran el mes cerrado: ése sigue en la pestaña KPIs.
+ *  - Conversión: SIN mínimo de base. Se publica el porcentaje y el conteo
+ *    ("2 de 3 pagaron") con los alumnos que empezaron prueba este mes.
+ *  - Ocupación: se MANTIENE el cálculo que ya existía
+ *    (asistencia real / reservas × ocupación). ⚠️ PENDIENTE de decisión humana:
+ *    `metricas_service.ocupacion_promedio` (backend) mide asistencias reales /
+ *    cupo, mientras `detallesKpi` ('bi:ocupacion') la define como reservas /
+ *    cupo. No se cambia la fórmula ni la definición acá (ver reporte).
  */
 import { useCallback, useEffect, useState } from 'react';
 import api from '../../services/api';
 import { fechaSolaAInstante, hoyChileStr } from '../../utils/fecha';
+import { resumenPagosDelDia } from '../../utils/pagosDelDia';
+import { usePagosDelDia } from '../../hooks/queries';
 
-const MIN_BASE_CONVERSION = 5;
 const MESES_LARGOS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
     'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
@@ -53,17 +61,31 @@ async function cargarUltimoDiario() {
 
 export function useResumenAdmin() {
     const [datos, setDatos] = useState({
-        diario: null, churn: null, mensual: null, periodo: null, caja: null,
+        diario: null, churn: null, mesCurso: null, caja: null,
     });
     const [errores, setErrores] = useState({});
     const [cargando, setCargando] = useState(true);
 
+    // ── "Ingresos de hoy": los MISMOS cobros de "Pagos del día" ──────────────
+    // La tarjeta ya no lee la caja de `transacciones_financieras`
+    // (`/finanzas/resumen-hoy`): esa tabla se quedaba en $0 cuando el webhook no
+    // escribía la transacción. Ahora el valor es la suma de los cobros del día que
+    // pinta la lista (membresías + Bazar). `usePagosDelDia` es el hook que usa
+    // `PagosDelDia`: misma queryKey y misma caché, así que la tarjeta y el
+    // desglose no pueden discrepar.
+    const pagosDiaQ = usePagosDelDia();
+    const resumenPagosDia = resumenPagosDelDia(pagosDiaQ.data);
+    const hayPagosDia = pagosDiaQ.data != null;
+
     const cargar = useCallback(async () => {
         setCargando(true);
-        const [diarioRes, churnRes, periodosRes, cajaRes] = await Promise.allSettled([
+        const [diarioRes, churnRes, mesRes, cajaRes] = await Promise.allSettled([
             cargarUltimoDiario(),
             api.get('/api/v1/kpis/churn'),
-            api.get('/api/v1/kpis/mensual/periodos'),
+            // MES EN CURSO calculado en vivo (embudo de prueba→plan, asistencia real y
+            // ocupación del mes a la fecha). NO se pide `/kpis/mensual`: el mes en curso
+            // todavía no tiene fila en `monthly_kpis` y respondería 404.
+            api.get('/api/v1/kpis/mes-en-curso'),
             api.get('/api/v1/finanzas/resumen-hoy'),
         ]);
 
@@ -81,26 +103,12 @@ export function useResumenAdmin() {
         const caja = cajaRes.status === 'fulfilled' ? cajaRes.value.data : null;
         if (cajaRes.status === 'rejected') errs.caja = motivoError(cajaRes.reason);
 
-        let periodo = null;
-        let mensual = null;
-        if (periodosRes.status === 'fulfilled') {
-            const cerrados = (periodosRes.value.data?.periodos || []).filter((p) => !p.parcial);
-            periodo = cerrados.length ? cerrados[cerrados.length - 1] : null;
-            if (periodo) {
-                try {
-                    const rMes = await api.get('/api/v1/kpis/mensual', {
-                        params: { year: periodo.year, month: periodo.month },
-                    });
-                    mensual = rMes.data;
-                } catch (error) {
-                    errs.mensual = motivoError(error);
-                }
-            }
-        } else {
-            errs.mensual = motivoError(periodosRes.reason);
-        }
+        // La clave del error sigue siendo `mensual`: es la que leen las tres tarjetas
+        // del bloque mensual (Conversión, Asistencia real, Ocupación).
+        const mesCurso = mesRes.status === 'fulfilled' ? mesRes.value.data : null;
+        if (mesRes.status === 'rejected') errs.mensual = motivoError(mesRes.reason);
 
-        setDatos({ diario, churn, mensual, periodo, caja });
+        setDatos({ diario, churn, mesCurso, caja });
         setErrores(errs);
         setCargando(false);
     }, []);
@@ -117,28 +125,44 @@ export function useResumenAdmin() {
     const alumnosRiesgo = sumaRiesgo && sumaRiesgo > 0 ? sumaRiesgo : null;
     const riesgoPendiente = alumnosRiesgo === null;
 
-    const baseConversion = numOrNull(datos.mensual?.alumnos_prueba);
-    const conversionConBase = baseConversion !== null && baseConversion >= MIN_BASE_CONVERSION;
-    const conversionRate = conversionConBase ? numOrNull(datos.mensual?.conversion_rate) : null;
-    const conversionHint = conversionConBase
-        ? `Base de ${baseConversion} alumnos`
-        : `n/d · base de ${baseConversion ?? 'n/d'}, mínimo ${MIN_BASE_CONVERSION}`;
+    // ── Conversión prueba→plan del MES EN CURSO ──────────────────────────────
+    // SIN mínimo de base: con 1 alumno en prueba ya se publica (antes se ocultaba
+    // hasta llegar a 5 y el admin veía "n/d" aunque hubiera datos). El texto dice
+    // SIEMPRE el conteo ("2 de 3 pagaron") además del porcentaje.
+    const baseConversion = numOrNull(datos.mesCurso?.alumnos_prueba);
+    const conversionRate = numOrNull(datos.mesCurso?.conversion_rate);
+    const planComprado = numOrNull(datos.mesCurso?.alumnos_plan_comprado);
+    const clasePrueba = numOrNull(datos.mesCurso?.alumnos_clase_prueba_ejecutada);
+    const conversionHint = baseConversion === null
+        ? 'Sin alumnos en prueba este mes'
+        : `${planComprado ?? 0} de ${baseConversion} pagaron plan`
+            + ` · ${clasePrueba ?? 0} hicieron clase de prueba`;
 
-    const asistenciaReal = numOrNull(datos.mensual?.asistencia_promedio);
-    const reservasSobreCupo = numOrNull(datos.mensual?.ocupacion_promedio);
-    // asistencia real / reservas × reservas / cupo = asistencia real / cupo.
+    // Asistencia real del mes: reservas confirmadas de clases realizadas CON
+    // asistencia marcada / reservas confirmadas de esas mismas clases
+    // (`kpis_populate.calcular_asistencia_mes`, la MISMA definición del BI).
+    const asistenciaReal = numOrNull(datos.mesCurso?.asistencia_promedio);
+    const reservasSobreCupo = numOrNull(datos.mesCurso?.ocupacion_promedio);
+    // ⚠️ FÓRMULA SIN CAMBIOS (ver PENDIENTE en el docstring del módulo):
+    // asistencia real / reservas × ocupación. El texto de la tarjeta es el mismo
+    // que acompaña a este cálculo ("asistencia real / cupo").
     const ocupacionReal = asistenciaReal !== null && reservasSobreCupo !== null
         ? Math.round(((asistenciaReal * reservasSobreCupo) / 100) * 10) / 10
         : null;
 
-    const periodoTexto = datos.periodo
-        ? `${MESES_LARGOS[datos.periodo.month - 1]} ${datos.periodo.year}`
+    // Período de las tarjetas: el MES EN CURSO en Chile (no el último mes cerrado).
+    const hoy = hoyChileStr();
+    const [anioHoy, mesHoy] = String(hoy).split('-').map(Number);
+    const periodoTexto = Number.isFinite(mesHoy) && mesHoy >= 1 && mesHoy <= 12
+        ? `${MESES_LARGOS[mesHoy - 1]} ${anioHoy}`
         : null;
+
+    const pagosDiaError = pagosDiaQ.error ? motivoError(pagosDiaQ.error) : '';
 
     return {
         ...datos,
         cargando,
-        errores,
+        errores: pagosDiaError ? { ...errores, pagosDia: pagosDiaError } : errores,
         recargar: cargar,
         alumnosActivos,
         asistentesHoy,
@@ -152,6 +176,12 @@ export function useResumenAdmin() {
         asistenciaReal,
         ocupacionReal,
         periodoTexto,
+        // "Ingresos de hoy" = total de los cobros que lista "Pagos del día".
+        // Mientras la consulta no tiene datos se devuelve null (la tarjeta pinta
+        // "n/d"), nunca un 0 que se lea como "no entró plata".
+        ingresosHoy: hayPagosDia ? resumenPagosDia.totalClp : null,
+        cobrosHoy: hayPagosDia ? resumenPagosDia.cantidad : null,
+        pagosDiaCargando: pagosDiaQ.isPending,
     };
 }
 

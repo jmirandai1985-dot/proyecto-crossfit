@@ -180,6 +180,22 @@
     color: var(--tint);
 }
 
+/* "Clases de hoy": la tarjeta muestra el GRÁFICO (una fila por clase) en lugar del
+   número. Es un <div role="button"> —un <button> no admite el <div> del gráfico—,
+   así que el cursor y el foco de teclado se declaran acá. */
+.ub-admin .kpi-grafico {
+    cursor: pointer;
+}
+
+.ub-admin .kpi-grafico:focus-visible {
+    outline: 2px solid var(--ub-teal);
+    outline-offset: 2px;
+}
+
+.ub-admin .kpi-grafico .kpi-go {
+    margin-left: auto;
+}
+
 /* A1: la tarjeta "Alumnos activos" dejó de ser un KPI (es el subtítulo de
    "Asistencia"), así que su tinte (`.k-activos`) ya no se usa. El bloque KPI queda:
    Vouchers por aprobar · Vencen en 5 días · Alumnos nuevos y en prueba (ancha) ·
