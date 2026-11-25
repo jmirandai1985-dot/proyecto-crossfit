@@ -3,9 +3,10 @@
 #   1) Web Service Docker (imagen combinada: nginx + uvicorn).
 #   2) Los 5 Cron Jobs de automatización de PROD (auditoría B4, 2026-10-28)
 #      + la expiración horaria de pagos online no cobrados (migración 067)
-#      + la activación diaria de planes pagados EN COLA (MercadoPago, 2026-11-22)
+#      + la activación diaria de planes pagados EN COLA (MercadoPago, 2026-11-22;
+#        a las 00:01 CLT desde el 2026-11-25 con `box-crossfit-activar-planes-prod`)
 #      + los 3 de RETENCIÓN de TEST (B8) en modo ENSAYO (`DRY_RUN=1`)
-#      + los 3 de RETENCIÓN de PROD (B8) en modo ENSAYO (`DRY_RUN=1`) = 13 `type: cron`.
+#      + los 3 de RETENCIÓN de PROD (B8) en modo ENSAYO (`DRY_RUN=1`) = 14 `type: cron`.
 # La BD es externa (Neon) → NO se declara database en este archivo.
 # n8n queda FUERA de este blueprint (corre fuera de Render).
 # Los pasos manuales, los env groups y la verificación de los Cron Jobs están en
@@ -255,6 +256,37 @@ services:
     plan: starter
     region: oregon
     schedule: "30 6 * * *"                      # 03:30 CLT (verano) / 02:30 CLT (invierno)
+    dockerfilePath: backend/Dockerfile.cola
+    dockerContext: backend
+    dockerCommand: python -m maintenance.activar_planes_en_cola
+    envVars:
+      # Sin ENVIRONMENT=production, app/core/config.py cae al fail-safe de TEST
+      # (intenta cargar .env.test, que no existe en la imagen). No es un secreto.
+      - key: ENVIRONMENT
+        value: production
+      # Se pega en el dashboard de Render (Environment → Secret Files/Vars).
+      - key: DATABASE_URL
+        sync: false
+
+  # 5d) Activación de planes EN COLA — corrida DIARIA a las 00:01 de Chile.
+  #     Mismo comando que `box-crossfit-activar-cola` (arriba); lo que cambia es la
+  #     hora: 03:01 UTC = 00:01 CLT, para que un plan en cola se active apenas
+  #     empieza el día y no 2-3 h después (el alumno con `creditos_disponibles = 0`
+  #     no puede reservar hasta que el plan nuevo esté activo).
+  #     La imagen TIENE que ser `backend/Dockerfile.cola`: `Dockerfile.cron` es
+  #     mínima (no copia `app/`) y este script importa SQLAlchemy +
+  #     `services.aprobacion_planes`; con la imagen de mantenimiento el job muere
+  #     con "No module named 'app'" / "No module named 'maintenance.activar_...'".
+  #     Escribe en PROD ⇒ `DATABASE_URL` es la de la APP (rol de escritura), como
+  #     secreto del servicio (`sync: false`). No usa los grupos de
+  #     `mantenimiento-prod`: `MAINT_DB_URL` es el rol `maint_rw` y no ve la app.
+  #     Sin `DRY_RUN`: el script no lo implementa (siempre aplica y commitea).
+  - type: cron
+    name: box-crossfit-activar-planes-prod
+    runtime: docker
+    plan: starter
+    region: oregon
+    schedule: "1 3 * * *"                       # 00:01 CLT (UTC-3) — diario
     dockerfilePath: backend/Dockerfile.cola
     dockerContext: backend
     dockerCommand: python -m maintenance.activar_planes_en_cola
