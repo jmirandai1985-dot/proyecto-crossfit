@@ -41,6 +41,7 @@ from app.services.alertas_email_service import (
 )
 from app.services.auditoria_service import registrar_auditoria
 from app.services import aprobacion_planes
+from app.services import dashboard_admin as dashboard_svc
 from app.services import email_service
 from app.services import pagos_del_dia as pagos_dia_svc
 from app.services import referidos_service as svc
@@ -944,4 +945,57 @@ def pagos_del_dia(
     """
     return pagos_dia_svc.resumen_del_dia(
         db, current_user["tenant_id"], dia=dia)
+
+# ── Tarjetas "Negocio del mes" del dashboard ────────────────────────────────
+# Las tres leen `pagos` (no `transacciones_financieras`, que es caja) y usan el
+# mes calendario de America/Santiago. `tenant_id` sale SIEMPRE del token.
+@router.get("/ingreso-mes")
+def ingreso_mes(
+    anio: Optional[int] = Query(
+        None, ge=2000, le=2100, description="Año (default: el del mes en curso)"),
+    mes: Optional[int] = Query(
+        None, ge=1, le=12, description="Mes 1-12 (default: el mes en curso)"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Cobros APROBADOS del mes agrupados por día (todos los planes + Bazar).
+
+    `dias` trae cada día del mes con su total (0 incluido) y `total_clp` es la
+    suma del mes. Reutiliza la serialización de "Pagos del día": la lista de
+    cobros del mes y la del día no pueden describir el mismo pago distinto.
+    """
+    return dashboard_svc.resumen_ingreso_mes(
+        db, current_user["tenant_id"], anio=anio, mes=mes)
+
+
+@router.get("/membresias-mes")
+def membresias_mes(
+    anio: Optional[int] = Query(
+        None, ge=2000, le=2100, description="Año (default: el del mes en curso)"),
+    mes: Optional[int] = Query(
+        None, ge=1, le=12, description="Mes 1-12 (default: el mes en curso)"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Ranking de planes PAGADOS más vendidos del mes (`pagos` aprobados).
+
+    Sólo planes con `precio_clp > 0`: el plan de prueba gratis no es una
+    membresía vendida y no aparece en el ranking.
+    """
+    return dashboard_svc.ranking_planes_mes(
+        db, current_user["tenant_id"], anio=anio, mes=mes)
+
+
+@router.get("/mrr")
+def mrr(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """MRR de HOY: membresías activas agrupadas por plan.
+
+    "Activa" = la MISMA regla de `_plan_vigente_usable`: estado activo, plan
+    pagado (`precio_clp > 0`), vigente por día chileno y créditos `> 0` o
+    `NULL`. Devuelve alumnos, precio mensual y total por plan.
+    """
+    return dashboard_svc.mrr_por_plan(db, current_user["tenant_id"])
 
