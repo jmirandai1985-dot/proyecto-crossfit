@@ -9,16 +9,18 @@ Cubre las funciones PURAS de `services/dashboard_admin.py`:
   precios 0.
 
 Y fija, sobre el código, que la fuente es `pagos` aprobados (no
-`transacciones_financieras`) y que el MRR usa la misma regla de vigencia y
-créditos que `aprobacion_planes._plan_vigente_usable`.
+`transacciones_financieras`) y que el MRR cuenta sólo membresías con fecha
+vigente y créditos disponibles; una membresía sin créditos NO cuenta.
 
 Correr aislado (sin servidor ni suite completa):
     cd backend && py -3.12 -m pytest tests/test_dashboard_admin.py -q --noconftest
 """
 import sys
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
@@ -160,6 +162,97 @@ def test_mrr_no_cuenta_planes_gratis():
     assert mrr == {"alumnos": 0, "total_clp": 0, "planes": []}
 
 
+class _ConsultaCredito:
+    """Doble de consulta que aplica el filtro de créditos de `_filas_mrr`.
+
+    Los demás filtros no se evalúan: este test aísla la regla que importa,
+    `creditos_disponibles IS NULL OR creditos_disponibles > 0`.
+    """
+
+    def __init__(self, filas):
+        self.filas = list(filas)
+
+    def join(self, *args, **kwargs):
+        return self
+
+    def filter(self, *criterios):
+        if any("creditos_disponibles" in str(c) for c in criterios):
+            self.filas = [
+                (s, p) for s, p in self.filas
+                if getattr(s, "creditos_disponibles", None) is None
+                or s.creditos_disponibles > 0
+            ]
+        return self
+
+    def order_by(self, *args, **kwargs):
+        return self
+
+    def all(self):
+        return list(self.filas)
+
+
+class _SesionCredito:
+    def __init__(self, filas):
+        self.filas = filas
+
+    def query(self, *modelos):
+        return _ConsultaCredito(self.filas)
+
+
+def _membresia(usuario_id, creditos_disponibles, suscripcion_id=1):
+    hoy = svc.hoy_santiago()
+    return (
+        SimpleNamespace(
+            id=suscripcion_id, usuario_id=usuario_id, estado="activo",
+            fecha_inicio=hoy - timedelta(days=30),
+            fecha_expiracion=hoy + timedelta(days=30),
+            creditos_disponibles=creditos_disponibles,
+        ),
+        _plan(2, "Plan Full", 40000),
+    )
+
+
+def test_mrr_actual_no_cuenta_membresia_vigente_con_creditos_agotados():
+    filas = [
+        _membresia(3, 0, suscripcion_id=10),
+        _membresia(4, 5, suscripcion_id=11),
+    ]
+
+    resultado = svc.mrr_por_plan(_SesionCredito(filas), 1)
+
+    assert resultado["actual"]["alumnos"] == 1
+    assert resultado["actual"]["total_clp"] == 40000
+    assert [p["plan_nombre"] for p in resultado["planes"]] == ["Plan Full"]
+
+
+def test_mrr_por_plan_no_devuelve_cierre_ni_variacion():
+    resultado = svc.mrr_por_plan(
+        _SesionCredito([_membresia(4, 5)]), 1)
+
+    assert "mes_anterior" not in resultado
+    assert "variacion_clp" not in resultado
+    assert "variacion_pct" not in resultado
+    assert resultado["actual"] == {
+        "total_clp": 40000, "alumnos": 1,
+        "fecha_corte": svc.hoy_santiago().isoformat()}
+
+
+def test_mrr_por_plan_rechaza_fecha_pasada():
+    with pytest.raises(ValueError, match="snapshot de créditos"):
+        svc.mrr_por_plan(
+            None, 1, fecha=svc.hoy_santiago() - timedelta(days=1))
+
+
+def test_mrr_usa_la_regla_de_creditos_de_plan_vigente_usable():
+    fuente = (BACKEND / "app" / "services" / "dashboard_admin.py").read_text(
+        encoding="utf-8")
+
+    assert 'Suscripcion.estado == "activo"' in fuente
+    assert "vigente_hoy(Suscripcion.fecha_expiracion" in fuente
+    assert "Suscripcion.creditos_disponibles.is_(None)" in fuente
+    assert "Suscripcion.creditos_disponibles > 0" in fuente
+
+
 # ── La fuente, en el código ────────────────────────────────────────────────
 def test_la_fuente_es_pagos_aprobados_y_no_la_caja():
     fuente = (BACKEND / "app" / "services" / "dashboard_admin.py").read_text(
@@ -179,14 +272,7 @@ def test_la_fuente_es_pagos_aprobados_y_no_la_caja():
         "el ranking también resuelve los cobros recurrentes (referencia=suscripción)")
 
 
-def test_mrr_usa_la_misma_regla_que_plan_vigente_usable():
-    fuente = (BACKEND / "app" / "services" / "dashboard_admin.py").read_text(
-        encoding="utf-8")
 
-    assert 'Suscripcion.estado == "activo"' in fuente
-    assert "vigente_hoy(Suscripcion.fecha_expiracion" in fuente
-    assert "Suscripcion.creditos_disponibles.is_(None)" in fuente
-    assert "Suscripcion.creditos_disponibles > 0" in fuente
 
 
 

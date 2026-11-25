@@ -583,7 +583,7 @@ const AdminDashboard = () => {
                                 icon={Banknote}
                                 color="border-emerald-500"
                                 hint={resumenAdmin.mrrError
-                                    || `Hoy · ${resumenAdmin.mrr?.alumnos ?? 0} alumnos con membresía de pago — Clic para ver el detalle por plan`}
+                                    || `MRR · corte de hoy (${resumenAdmin.mrr?.actual?.fecha_corte || resumenAdmin.mrr?.fecha || '—'}) · ${resumenAdmin.mrr?.alumnos ?? 0} alumnos con membresía de pago — Clic para ver el detalle por plan`}
                                 onDetalle={() => alternarPanel('mrr')}
                                 chevron
                             />

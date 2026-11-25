@@ -1034,7 +1034,7 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                                 valor={resumenAdmin.mrr?.total_clp ?? null}
                                 error={resumenAdmin.mrrError}
                                 cargando={resumenAdmin.mrrCargando}
-                                sub={`Hoy · ${resumenAdmin.mrr?.alumnos ?? 0} alumnos con membresía de pago · Clic para ver el detalle`}
+                                sub={`MRR · corte de hoy (${resumenAdmin.mrr?.actual?.fecha_corte || resumenAdmin.mrr?.fecha || '—'}) · ${resumenAdmin.mrr?.alumnos ?? 0} alumnos con membresía de pago · Clic para ver el detalle`}
                                 chevron
                                 onClick={() => setPanelNegocio((v) => (v === 'mrr' ? null : 'mrr'))}
                             />

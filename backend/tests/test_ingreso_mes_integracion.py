@@ -13,9 +13,12 @@ Correr aislado:
     cd backend && py -3.12 -m pytest tests/test_ingreso_mes_integracion.py -q --noconftest
 """
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
 
 BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
@@ -172,13 +175,18 @@ def test_mrr_integra_y_excluye_planes_de_prueba():
          _plan(id=6, nombre="Plan Básico", precio_clp=25000)),
     ]
 
-    resultado = svc.mrr_por_plan(
-        _Sesion(filas), 1, hoy=date(2026, 11, 25))
+    hoy = svc.hoy_santiago()
+    resultado = svc.mrr_por_plan(_Sesion(filas), 1, fecha=hoy)
 
-    assert resultado["fecha"] == "2026-11-25"
+    assert resultado["fecha"] == hoy.isoformat()
     assert resultado["alumnos"] == 1          # el alumno 3 se cuenta UNA vez
     assert resultado["total_clp"] == 40000
     assert [p["plan_nombre"] for p in resultado["planes"]] == ["Plan Full"]
+    assert resultado["actual"] == {
+        "total_clp": 40000, "alumnos": 1, "fecha_corte": hoy.isoformat()}
+    assert "mes_anterior" not in resultado
+    assert "variacion_clp" not in resultado
+    assert "variacion_pct" not in resultado
 
 
 # ── Contrato: rutas nuevas y guard de ADMIN ─────────────────────────────────
@@ -190,4 +198,34 @@ def test_los_endpoints_existen_y_exigen_admin():
         dependencias = [d.call for d in rutas[path].dependant.dependencies]
         assert get_current_admin in dependencias, (
             f"{path} debe exigir el token de administrador")
+
+    assert "fecha" in {p.name for p in rutas["/mrr"].dependant.query_params}, (
+        "/mrr debe aceptar la fecha de corte opcional")
+
+
+def test_mrr_pasa_la_fecha_de_hoy_al_servicio(monkeypatch):
+    visto = {}
+    hoy = svc.hoy_santiago()
+
+    def falso(db, tenant_id, fecha=None):
+        visto.update(tenant_id=tenant_id, fecha=fecha)
+        return {"ok": True}
+
+    monkeypatch.setattr(svc, "mrr_por_plan", falso)
+
+    respuesta = api_admin.mrr(
+        fecha=hoy, db=object(), current_user={"tenant_id": 7})
+
+    assert respuesta == {"ok": True}
+    assert visto == {"tenant_id": 7, "fecha": hoy}
+
+
+def test_mrr_rechaza_una_fecha_pasada_con_mensaje_claro():
+    with pytest.raises(HTTPException) as error:
+        api_admin.mrr(
+            fecha=svc.hoy_santiago() - timedelta(days=1), db=object(),
+            current_user={"tenant_id": 7})
+
+    assert error.value.status_code == 400
+    assert "snapshot de créditos" in error.value.detail
 

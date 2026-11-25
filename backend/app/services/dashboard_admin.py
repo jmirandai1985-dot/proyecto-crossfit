@@ -10,11 +10,14 @@ Fuente de verdad de las tarjetas de NEGOCIO del mes:
 * **Membresías del mes** es el ranking de PLANES PAGADOS vendidos en el mes
   (`pagos` de membresía aprobados + `planes.precio_clp > 0`). El plan de prueba
   gratis NO es una venta: sus alumnos son "alumnos en prueba", no una membresía.
-* **MRR** son las membresías ACTIVAS HOY agrupadas por plan. "Activa" usa el
-  MISMO criterio que `aprobacion_planes._plan_vigente_usable`: `estado='activo'`,
-  `planes.precio_clp > 0`, vigente por día chileno y créditos `> 0` o `NULL`
-  (ilimitado). Se cuenta UN plan por alumno (el que vence más tarde), igual que
-  la regla de "plan vigente usable", para no sumar dos veces a la misma persona.
+* **MRR** son las membresías de pago vigentes HOY, agrupadas por plan. Una
+  membresía deja de contar cuando vence su fecha O cuando se agotan sus
+  créditos: se exige `estado='activo'`, fecha vigente en día chileno,
+  `creditos_disponibles > 0` (o `NULL` si es ilimitada),
+  `planes.precio_clp > 0` y se excluyen los planes de prueba. No hay
+  comparación con meses anteriores porque no existe snapshot histórico de
+  créditos. Se cuenta UN plan por alumno (el que vence más tarde) para no sumar
+  dos veces a la misma persona.
 * **Planes de prueba**: no son membresías. No hay un flag dedicado en `planes`
   (`es_comercial` sigue en True para "Prueba"), así que se excluyen por NOMBRE
   (`prueba`/`test`/`trial`) tanto en el ranking como en el MRR: el plan de
@@ -212,8 +215,8 @@ def agrupar_mrr_por_plan(filas: Sequence) -> dict:
 
     `filas` = `[(Suscripcion, Plan)]` ya filtradas por la consulta (activas,
     pagadas, vigentes y con créditos). La consulta viene ordenada por alumno y
-    vencimiento descendente, así que "el primero de cada alumno" es la misma
-    membresía que elegiría `_plan_vigente_usable`.
+    vencimiento descendente, así que "el primero de cada alumno" es la
+    membresía que vence más tarde.
     """
     vistos = set()
     por_plan = {}
@@ -390,8 +393,13 @@ def ranking_planes_mes(db: Session, tenant_id: int,
 def _filas_mrr(db: Session, tenant_id: int, hoy: date):
     """Suscripciones que cumplen la regla de `_plan_vigente_usable` HOY.
 
+    Una membresía deja de contar cuando vence su fecha O cuando se agotan sus
+    créditos. Por eso se exige `estado='activo'`, fecha vigente en día chileno
+    y `creditos_disponibles > 0` (o `NULL` si el plan es ilimitado). También se
+    excluyen los planes de prueba por nombre.
+
     Se ordena por alumno y vencimiento descendente para que el primer registro
-    de cada alumno sea el que "manda" (misma elección que la regla de cola).
+    de cada alumno sea el que "manda" (el que vence más tarde).
     """
     return (
         db.query(Suscripcion, Plan)
@@ -419,13 +427,37 @@ def _filas_mrr(db: Session, tenant_id: int, hoy: date):
 
 
 def mrr_por_plan(db: Session, tenant_id: int,
-                 hoy: Optional[date] = None) -> dict:
-    """`GET /admin/mrr`: membresías activas HOY agrupadas por plan."""
-    hoy = hoy or hoy_santiago()
-    filas = _filas_mrr(db, tenant_id, hoy)
-    resultado = agrupar_mrr_por_plan(filas)
-    resultado.update({"fecha": hoy.isoformat()})
-    return resultado
+                 fecha: Optional[date] = None) -> dict:
+    """`GET /admin/mrr`: MRR de HOY, con fecha vigente y créditos disponibles.
+
+    No hay comparación con el mes anterior: el saldo de créditos es actual y no
+    existe un snapshot histórico, así que cualquier cierre pasado sería
+    incomparable. Por eso `fecha` sólo admite hoy; una fecha distinta levanta
+    un `ValueError` con el motivo para que el endpoint responda 400.
+
+    Mantiene los campos de primer nivel (`fecha`, `total_clp`, `alumnos`,
+    `planes`) para compatibilidad y agrega `actual` con el mismo corte.
+    """
+    hoy = hoy_santiago()
+    if fecha is not None and fecha != hoy:
+        raise ValueError("el MRR histórico requiere snapshot de créditos")
+    fecha = fecha or hoy
+    filas = _filas_mrr(db, tenant_id, hoy=fecha)
+    resumen = agrupar_mrr_por_plan(filas)
+    fecha_corte = fecha.isoformat()
+    return {
+        # Compatibilidad con la tarjeta/panel anterior.
+        "fecha": fecha_corte,
+        "fecha_corte": fecha_corte,
+        "total_clp": resumen["total_clp"],
+        "alumnos": resumen["alumnos"],
+        "planes": resumen["planes"],
+        "actual": {
+            "total_clp": resumen["total_clp"],
+            "alumnos": resumen["alumnos"],
+            "fecha_corte": fecha_corte,
+        },
+    }
 
 
 

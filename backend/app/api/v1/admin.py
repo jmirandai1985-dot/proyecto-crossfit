@@ -988,16 +988,30 @@ def membresias_mes(
 
 @router.get("/mrr")
 def mrr(
+    fecha: Optional[date] = Query(
+        None,
+        description=("Fecha de corte en Chile (YYYY-MM-DD). Sólo se admite "
+                     "hoy: el MRR histórico requiere snapshot de créditos.")),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """MRR de HOY: membresías activas agrupadas por plan.
+    """MRR de HOY: membresías vigentes y con créditos disponibles.
 
     "Activa" = la MISMA regla de `_plan_vigente_usable`: estado activo, plan
     pagado (`precio_clp > 0`), vigente por día chileno y créditos `> 0` o
-    `NULL`. Devuelve alumnos, precio mensual y total por plan.
+    `NULL` (ilimitado). Se excluyen los planes de prueba.
+
+    No se compara con el cierre del mes anterior: no hay snapshot histórico
+    de créditos. Una `fecha` distinta de hoy responde 400.
     """
-    return dashboard_svc.mrr_por_plan(db, current_user["tenant_id"])
+    try:
+        return dashboard_svc.mrr_por_plan(
+            db, current_user["tenant_id"], fecha=fecha)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error),
+        ) from error
 
 
 

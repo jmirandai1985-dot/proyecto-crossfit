@@ -6,7 +6,7 @@
  *
  *  - Ingreso del mes  → `GET /admin/ingreso-mes` (pagos aprobados por día).
  *  - Membresías mes   → `GET /admin/membresias-mes` (ranking de planes pagados).
- *  - MRR              → `GET /admin/mrr` (membresías activas por plan).
+ *  - MRR              → `GET /admin/mrr` (membresías vigentes con créditos, por plan).
  *  - Ocupación        → `GET /admin/ocupacion-mes` (una fila por clase, misma
  *                       fórmula que la tarjeta: asistencias reales / cupo).
  *
@@ -17,7 +17,7 @@
 import React from 'react';
 import { useOcupacionMes } from '../../hooks/queries';
 import { mensajeError } from '../../services/queryClient';
-import { fmtFechaCortaChile } from '../../utils/fecha';
+import { fmtFechaChile, fmtFechaCortaChile } from '../../utils/fecha';
 
 const TZ_CHILE = 'America/Santiago';
 
@@ -197,52 +197,67 @@ export function PanelMembresiasMes({ ranking, cargando, error, onCerrar }) {
 }
 
 
-// ── MRR del día ────────────────────────────────────────────────────────────
+// ── MRR actual (corte de hoy) ──────────────────────────────────────────────
 export function PanelMrr({ mrr, cargando, error, onCerrar }) {
     const planes = Array.isArray(mrr?.planes) ? mrr.planes : [];
+    // Compatibilidad: si el backend aún no manda `actual`, se usa el nivel raíz.
+    const actual = mrr?.actual || {
+        total_clp: mrr?.total_clp,
+        alumnos: mrr?.alumnos,
+        fecha_corte: mrr?.fecha,
+    };
+
     return (
         <PanelDetalle
             id="dashboard-mrr"
-            titulo="MRR · membresías activas hoy"
-            subtitulo="Membresías de pago activas, vigentes y con créditos. Un plan por alumno (el que vence más tarde). Los planes de prueba no cuentan. Precio de LISTA (no se prorratean los planes largos)."
+            titulo="MRR · corte de hoy"
+            subtitulo="Membresías de pago con fecha vigente hoy y créditos disponibles. Un plan por alumno, sin planes de prueba y sin prorrateo."
             onCerrar={onCerrar}>
             <EstadoCarga cargando={cargando} error={error}>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <KpiResumen label="MRR" valor={clp(mrr?.total_clp)}
-                        detalle={`${mrr?.alumnos ?? 0} alumnos con plan pagado`} />
-                    <KpiResumen label="Fecha de corte" valor={mrr?.fecha || '—'}
-                        detalle="Día de Chile" />
+                    <KpiResumen label="MRR actual (hasta hoy)"
+                        valor={clp(actual?.total_clp)}
+                        detalle={`Corte: ${actual?.fecha_corte ? fmtFechaChile(actual.fecha_corte) : '—'} · ${actual?.alumnos ?? 0} alumnos`} />
+                    <KpiResumen label="Fecha de corte"
+                        valor={actual?.fecha_corte ? fmtFechaChile(actual.fecha_corte) : '—'}
+                        detalle={`${actual?.alumnos ?? 0} alumnos con plan vigente`} />
                 </div>
                 {planes.length === 0 ? (
                     <p className="text-sm text-zinc-500">
-                        No hay membresías de pago activas hoy. Los planes de prueba
-                        (gratis o de precio simbólico) no cuentan para el MRR.
+                        No hay membresías de pago vigentes con créditos disponibles hoy.
+                        Los planes de prueba (gratis o de precio simbólico) no cuentan
+                        para el MRR.
                     </p>
                 ) : (
-                    <div className="rounded-lg border border-zinc-800 overflow-hidden">
-                        <table className="w-full text-sm">
-                            <thead className="bg-zinc-900">
-                                <tr className="text-left text-[11px] uppercase tracking-wide text-zinc-500">
-                                    <th className="px-3 py-2">Plan</th>
-                                    <th className="px-3 py-2 text-right">Alumnos</th>
-                                    <th className="px-3 py-2 text-right">Precio plan</th>
-                                    <th className="px-3 py-2 text-right">Total</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {planes.map((plan) => (
-                                    <tr key={plan.plan_id}
-                                        className="border-t border-zinc-800/70">
-                                        <td className="px-3 py-2 text-zinc-200">{plan.plan_nombre}</td>
-                                        <td className="px-3 py-2 text-right text-zinc-300">{plan.alumnos}</td>
-                                        <td className="px-3 py-2 text-right text-zinc-400">{clp(plan.precio_clp)}</td>
-                                        <td className="px-3 py-2 text-right font-semibold text-zinc-100">
-                                            {clp(plan.total_clp)}
-                                        </td>
+                    <div className="space-y-2">
+                        <p className="text-[11px] uppercase tracking-wide text-zinc-500">
+                            Detalle por plan · corte de hoy
+                        </p>
+                        <div className="rounded-lg border border-zinc-800 overflow-hidden">
+                            <table className="w-full text-sm">
+                                <thead className="bg-zinc-900">
+                                    <tr className="text-left text-[11px] uppercase tracking-wide text-zinc-500">
+                                        <th className="px-3 py-2">Plan</th>
+                                        <th className="px-3 py-2 text-right">Alumnos</th>
+                                        <th className="px-3 py-2 text-right">Precio plan</th>
+                                        <th className="px-3 py-2 text-right">Total</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    {planes.map((plan) => (
+                                        <tr key={plan.plan_id}
+                                            className="border-t border-zinc-800/70">
+                                            <td className="px-3 py-2 text-zinc-200">{plan.plan_nombre}</td>
+                                            <td className="px-3 py-2 text-right text-zinc-300">{plan.alumnos}</td>
+                                            <td className="px-3 py-2 text-right text-zinc-400">{clp(plan.precio_clp)}</td>
+                                            <td className="px-3 py-2 text-right font-semibold text-zinc-100">
+                                                {clp(plan.total_clp)}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 )}
             </EstadoCarga>
