@@ -6,7 +6,7 @@
 #      + la activación diaria de planes pagados EN COLA (MercadoPago, 2026-11-22;
 #        a las 00:01 CLT desde el 2026-11-25 con `box-crossfit-activar-planes-prod`)
 #      + los 3 de RETENCIÓN de TEST (B8) en modo ENSAYO (`DRY_RUN=1`)
-#      + los 3 de RETENCIÓN de PROD (B8) en modo ENSAYO (`DRY_RUN=1`) = 14 `type: cron`.
+#      + los 3 de RETENCIÓN de PROD (B8) en modo ENSAYO (`DRY_RUN=1`) = 13 `type: cron`.
 # La BD es externa (Neon) → NO se declara database en este archivo.
 # n8n queda FUERA de este blueprint (corre fuera de Render).
 # Los pasos manuales, los env groups y la verificación de los Cron Jobs están en
@@ -238,39 +238,11 @@ services:
       - key: DIRECT_URL
         sync: false                             # conexión DIRECTA de Neon (sin -pooler)
 
-  # 5c) Activación de planes pagados EN COLA (MercadoPago).
-  #     Cuando el alumno compra un plan teniendo otra membresía PAGADA vigente
-  #     (fecha + créditos), la solicitud queda `en_cola` y se activa sola recién
-  #     cuando la actual termina (por fecha o por créditos). Esa activación la
-  #     hace `maintenance.activar_planes_en_cola`, que hasta ahora sólo corría en
-  #     `run_daily.py` dentro del contenedor compose `maintenance` — NO desplegado
-  #     en Render. Resultado: las compras pagadas con tarjeta quedaban sin activar.
-  #     Caso real: solicitud 170, pagada el 21/11/2026, plan vigente hasta el 03/12/2026.
-  #     El script NO tiene DRY_RUN: siempre escribe (crea Suscripción y Notificación),
-  #     por eso DATABASE_URL debe ser la de la APP (rol de escritura, host -pooler),
-  #     NO MAINT_DB_URL ni una URL de sólo lectura. Va como secreto del servicio
-  #     (`sync: false`), igual que en el web service: el repo no lleva el valor.
-  - type: cron
-    name: box-crossfit-activar-cola
-    runtime: docker
-    plan: starter
-    region: oregon
-    schedule: "30 6 * * *"                      # 03:30 CLT (verano) / 02:30 CLT (invierno)
-    dockerfilePath: backend/Dockerfile.cola
-    dockerContext: backend
-    dockerCommand: python -m maintenance.activar_planes_en_cola
-    envVars:
-      # Sin ENVIRONMENT=production, app/core/config.py cae al fail-safe de TEST
-      # (intenta cargar .env.test, que no existe en la imagen). No es un secreto.
-      - key: ENVIRONMENT
-        value: production
-      # Se pega en el dashboard de Render (Environment → Secret Files/Vars).
-      - key: DATABASE_URL
-        sync: false
-
-  # 5d) Activación de planes EN COLA — corrida DIARIA a las 00:01 de Chile.
-  #     Mismo comando que `box-crossfit-activar-cola` (arriba); lo que cambia es la
-  #     hora: 03:01 UTC = 00:01 CLT, para que un plan en cola se active apenas
+  # 5c) Activación de planes EN COLA — ÚNICO job, DIARIO a las 00:01 de Chile.
+  #     (El duplicado de las 03:30 CLT, `box-crossfit-activar-cola`, se quitó el
+  #     2026-11-25: mismo comando, misma imagen y mismas variables; sólo corría
+  #     3 h más tarde.)
+  #     03:01 UTC = 00:01 CLT, para que un plan en cola se active apenas
   #     empieza el día y no 2-3 h después (el alumno con `creditos_disponibles = 0`
   #     no puede reservar hasta que el plan nuevo esté activo).
   #     La imagen TIENE que ser `backend/Dockerfile.cola`: `Dockerfile.cron` es
