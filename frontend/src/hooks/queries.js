@@ -35,6 +35,13 @@ export const claves = {
     pendientesActivacion: ['alumnos', 'pendientes-activacion'],
     countPendientesActivacion: ['alumnos', 'pendientes-activacion', 'count'],
     stats: (tenantId) => ['reportes', tenantId],
+    // ── Tarjetas "Negocio del mes" del Dashboard (todo desde `pagos`) ─────────
+    // Fuente única: `GET /admin/ingreso-mes`, `/admin/membresias-mes` y
+    // `/admin/mrr`. Cuelgan de `['admin']`, la familia que ya invalida el panel
+    // cuando cambia un cobro o un plan, así las tres tarjetas se refrescan juntas.
+    ingresoMes: ['admin', 'ingreso-mes'],
+    membresiasMes: ['admin', 'membresias-mes'],
+    mrr: ['admin', 'mrr'],
     alumnosNuevosMes: ['admin', 'alumnos-nuevos'],
     alumnosConvertidos: (anio, mes) => ['admin', 'alumnos-convertidos', anio, mes],
     alumnosEnRiesgo: (tenantId) => ['fidelizacion', 'tenant', tenantId, 'en-riesgo'],
@@ -218,9 +225,9 @@ export const claves = {
     // alumno refresca la tabla sin que la pantalla vuelva a pedirla a mano. El rol,
     // el tamaño de página, la página y el término de búsqueda van en la clave porque
     // cambian el resultado; el tenant lo pone el token.
-    alumnosPaginados: (rol, porPagina, pagina, buscar, estado, excluirPrueba) =>
+    alumnosPaginados: (rol, porPagina, pagina, buscar, estado, excluirPrueba, alta) =>
         ['usuarios', 'alumnos', rol, porPagina, pagina, buscar || '', estado || '',
-         excluirPrueba ? 'sin-prueba' : 'con-prueba'],
+         excluirPrueba ? 'sin-prueba' : 'con-prueba', alta || ''],
     // Suscripciones ACTIVAS del box (`GET /suscripciones?estado=activo`): de acá salen
     // la columna "Plan Activo", los créditos de cada fila y el "¿ya tiene plan?" del
     // comprobante. Familia propia `['suscripciones']` (distinta de `['membresia']`,
@@ -317,6 +324,38 @@ export function useStatsDashboard(tenantId) {
         // otra vez al ir a otra pantalla y volver.
         staleTime: 60_000,
         enabled: Boolean(tenantId),
+    });
+}
+
+/**
+ * Cobros APROBADOS del mes por día (`pagos`: todos los planes + Bazar).
+ * Es la MISMA fuente que "Pagos del día"; NO la caja de
+ * `transacciones_financieras` (esa se queda en $0 cuando el webhook no escribió
+ * la transacción). `dias` trae cada día del mes con su total.
+ */
+export function useIngresoMes() {
+    return useQuery({
+        queryKey: claves.ingresoMes,
+        queryFn: async () => (await api.get('/api/v1/admin/ingreso-mes')).data,
+        staleTime: 60_000,
+    });
+}
+
+/** Ranking de planes PAGADOS vendidos este mes (el plan de prueba no entra). */
+export function useMembresiasMes() {
+    return useQuery({
+        queryKey: claves.membresiasMes,
+        queryFn: async () => (await api.get('/api/v1/admin/membresias-mes')).data,
+        staleTime: 60_000,
+    });
+}
+
+/** MRR de hoy: membresías activas agrupadas por plan (alumnos, precio y total). */
+export function useMrr() {
+    return useQuery({
+        queryKey: claves.mrr,
+        queryFn: async () => (await api.get('/api/v1/admin/mrr')).data,
+        staleTime: 60_000,
     });
 }
 
@@ -2261,15 +2300,15 @@ export function useDescargarReporteVentas() {
 // es el que alimentan el pie ("Mostrando A-B de N") y el cálculo de páginas.
 export function useAlumnosPaginados({
     rol = 'alumno', porPagina = 25, pagina = 1, buscar = '', estado = '',
-    excluirPrueba = false,
+    excluirPrueba = false, alta = '',
 } = {}) {
     return useQuery({
         queryKey: claves.alumnosPaginados(
-            rol, porPagina, pagina, buscar, estado, excluirPrueba),
+            rol, porPagina, pagina, buscar, estado, excluirPrueba, alta),
         queryFn: async () => {
             const resp = await api.get('/api/v1/usuarios/', {
                 params: paramsAlumnos({
-                    rol, porPagina, pagina, buscar, estado, excluirPrueba,
+                    rol, porPagina, pagina, buscar, estado, excluirPrueba, alta,
                 }),
             });
             return {

@@ -34,6 +34,11 @@ import PagosDelDia from '../../components/pagos/PagosDelDia';
 // izquierda y "reservas / cupo" a la derecha). Componente COMPARTIDO con el Dashboard
 // de escritorio: las dos vistas leen el mismo dato y dibujan la misma barra.
 import GraficoClasesHoy from '../../components/dashboard/GraficoClasesHoy';
+// Paneles de las tarjetas de Negocio/Ocupación: los MISMOS componentes del
+// escritorio (ingreso por día, ranking de planes, MRR y ocupación por clase).
+import {
+    PanelIngresoMes, PanelMembresiasMes, PanelMrr, PanelOcupacionConDatos,
+} from '../../components/dashboard/PanelesNegocio';
 import { iniciales } from '../../utils/iniciales';
 // Pedidos listos para entrega (Bazar): qué fila se lista y qué dice cada una.
 // OJO: el CÓDIGO DE RETIRO no se muestra en la tarjeta —es la prueba de que el pedido
@@ -502,6 +507,11 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
         ? { ...resumenesSemana, [hoy]: resumenFranja(clases) }
         : resumenesSemana;
     const clasesRealizadasHoy = clases.filter((c) => c?.estado === 'realizada').length;
+    // "Asistencia de hoy" = asistencias registradas en las clases del día
+    // (`asistentes_confirmados`). Sin snapshot ni retroceso de días: si todavía
+    // no se marcó a nadie, es 0; si la consulta falló, la tarjeta dice "s/d".
+    const asistenciaHoy = clasesError ? null
+        : clases.reduce((total, c) => total + (Number(c?.asistentes_confirmados) || 0), 0);
 
     // Clases del día elegido: si es HOY, la franja seleccionada (como siempre); si es
     // otro día, el día completo con la lista pelada (sin franjas, sin botón Marcar).
@@ -710,6 +720,11 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
     // pero la tarjeta no lleva ahí.
     const [mostrarClases, setMostrarClases] = useState(false);
 
+    // ── Paneles de Negocio del mes y Ocupación (mismos del escritorio) ────────
+    // 'ingreso' | 'membresias' | 'mrr' | null; Ocupación tiene su propio estado.
+    const [panelNegocio, setPanelNegocio] = useState(null);
+    const [mostrarOcupacion, setMostrarOcupacion] = useState(false);
+
     const [tarjeta, setTarjeta] = useState(false);       // pantalla abierta
 
     const abrirTarjeta = () => {
@@ -872,10 +887,10 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                         <span className="kpi-sub">{clasesRealizadasHoy} realizadas · Hoy</span>
                     </div>
                     <Kpi
-                        clase="k-venc" icono="users" label="Asistentes de hoy"
-                        valor={resumenAdmin.asistentesHoy}
-                        error={resumenAdmin.errores.diario} cargando={resumenAdmin.cargando}
-                        sub="Hoy · snapshot diario — Clic para ver la asistencia"
+                        clase="k-venc" icono="users" label="Asistencia de hoy"
+                        valor={asistenciaHoy}
+                        error={clasesError} cargando={clasesCargando && !clases.length}
+                        sub="Hoy · asistencias registradas — Clic para ver la asistencia"
                         chevron onClick={() => navigate('/admin/asistencia')}
                     />
                     <Kpi
@@ -1013,33 +1028,73 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                     <div className="kpis">
                         <Kpi
                             clase="k-caja" icono="caja" label="Ingreso del mes" dinero
-                            valor={stats?.ingresoMensual ?? null}
-                            error={errores.activos} cargando={cargando}
-                            sub="Mes en curso · parcial · Clic para ver los movimientos"
-                            chevron onClick={() => navigate('/admin/reportes?seccion=movimientos&tipo=ingreso')}
+                            valor={resumenAdmin.ingresoMes?.total_clp ?? null}
+                            error={resumenAdmin.ingresoMesError}
+                            cargando={resumenAdmin.ingresoMesCargando}
+                            sub={`Mes en curso · ${resumenAdmin.ingresoMes?.cantidad ?? 0} cobros aprobados · Clic para ver el desglose`}
+                            chevron
+                            onClick={() => setPanelNegocio((v) => (v === 'ingreso' ? null : 'ingreso'))}
                         />
                         <Kpi
                             clase="k-activos" icono="chart" label="MRR" dinero
-                            valor={stats?.mrr ?? null}
-                            error={errores.activos} cargando={cargando}
-                            sub="Hoy · precio de lista · Clic para ver los planes"
-                            chevron onClick={() => navigate('/admin/planes')}
+                            valor={resumenAdmin.mrr?.total_clp ?? null}
+                            error={resumenAdmin.mrrError}
+                            cargando={resumenAdmin.mrrCargando}
+                            sub={`Hoy · ${resumenAdmin.mrr?.alumnos ?? 0} alumnos con plan pagado · Clic para ver el detalle`}
+                            chevron
+                            onClick={() => setPanelNegocio((v) => (v === 'mrr' ? null : 'mrr'))}
                         />
                         <Kpi
                             clase="k-venc" icono="cart" label="Ventas Bazar" dinero
-                            valor={stats?.ventasBazar ?? null}
-                            error={errores.activos} cargando={cargando}
-                            sub="Mes en curso · parcial · Clic para ver los pedidos"
+                            valor={resumenAdmin.ventasBazar ?? null}
+                            error={resumenAdmin.ventasBazarError}
+                            cargando={resumenAdmin.ventasBazarCargando}
+                            sub={`Mes en curso · ${resumenAdmin.ventasBazarPedidos ?? 0} pedidos cobrados · Clic para ver los pedidos`}
                             chevron onClick={() => navigate('/admin/pedidos')}
                         />
                         <Kpi
                             clase="k-vouch" icono="users" label="Membresías"
-                            valor={stats?.totalSuscripcionesMes ?? null}
-                            error={errores.activos} cargando={cargando}
-                            sub="Mes en curso · parcial · Clic para ver las suscripciones"
-                            chevron onClick={() => navigate('/admin/reportes?seccion=membresias')}
+                            valor={resumenAdmin.membresiasMes?.total_altas ?? null}
+                            error={resumenAdmin.membresiasMesError}
+                            cargando={resumenAdmin.membresiasMesCargando}
+                            sub="Mes en curso · planes pagados (precio > $0) · Clic para ver el ranking"
+                            chevron
+                            onClick={() => setPanelNegocio((v) => (v === 'membresias' ? null : 'membresias'))}
                         />
                     </div>
+
+                    {/* Panel de la tarjeta tocada: se abre dentro de la MISMA
+                        sección (no navega a Reportes). */}
+                    {panelNegocio === 'ingreso' && (
+                        <div style={{ marginTop: '0.75rem' }}>
+                            <PanelIngresoMes
+                                resumen={resumenAdmin.ingresoMes}
+                                cargando={resumenAdmin.ingresoMesCargando}
+                                error={resumenAdmin.ingresoMesError}
+                                onCerrar={() => setPanelNegocio(null)}
+                            />
+                        </div>
+                    )}
+                    {panelNegocio === 'membresias' && (
+                        <div style={{ marginTop: '0.75rem' }}>
+                            <PanelMembresiasMes
+                                ranking={resumenAdmin.membresiasMes}
+                                cargando={resumenAdmin.membresiasMesCargando}
+                                error={resumenAdmin.membresiasMesError}
+                                onCerrar={() => setPanelNegocio(null)}
+                            />
+                        </div>
+                    )}
+                    {panelNegocio === 'mrr' && (
+                        <div style={{ marginTop: '0.75rem' }}>
+                            <PanelMrr
+                                mrr={resumenAdmin.mrr}
+                                cargando={resumenAdmin.mrrCargando}
+                                error={resumenAdmin.mrrError}
+                                onCerrar={() => setPanelNegocio(null)}
+                            />
+                        </div>
+                    )}
                 </section>
 
                 {/* ── Alumnos ──────────────────────────────────────────────── */}
@@ -1051,9 +1106,9 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                     <div className="kpis">
                         <Kpi
                             clase="k-activos" icono="users" label="Alumnos activos"
-                            valor={resumenAdmin.alumnosActivos}
+                            valor={stats?.alumnosActivos ?? resumenAdmin.alumnosActivos}
                             error={resumenAdmin.errores.diario} cargando={resumenAdmin.cargando}
-                            sub="Hoy · snapshot diario · Clic para ver el padrón activo"
+                            sub="Hoy · suscripciones vigentes (en vivo) · Clic para ver el padrón activo"
                             chevron onClick={() => navigate('/admin/alumnos?estado=activo')}
                         />
                         <Kpi
@@ -1069,8 +1124,8 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                             clase="k-prueba" icono="users" label="Nuevos del mes"
                             valor={stats?.nuevosAlumnosMes ?? null}
                             error={errores.activos} cargando={cargando}
-                            sub="Mes en curso · parcial"
-                            chevron onClick={abrirTarjeta}
+                            sub="Mes en curso · alumnos creados este mes · Clic para ver el padrón filtrado"
+                            chevron onClick={() => navigate('/admin/alumnos?alta=mes')}
                         />
                     </div>
                 </section>
@@ -1090,7 +1145,8 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                                 ? null
                                 : `${resumenAdmin.conversionRate}%`}
                             error={resumenAdmin.errores.mensual} cargando={resumenAdmin.cargando}
-                            sub={resumenAdmin.conversionHint}
+                            sub={`${resumenAdmin.conversionHint} · Clic para ver los convertidos`}
+                            chevron onClick={() => navigate('/admin/alumnos-convertidos')}
                         />
                     </div>
                 </section>
@@ -1110,8 +1166,8 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                                 ? null
                                 : `${resumenAdmin.ocupacionReal}%`}
                             error={resumenAdmin.errores.mensual} cargando={resumenAdmin.cargando}
-                            sub={`Mes en curso${resumenAdmin.periodoTexto ? ` · ${resumenAdmin.periodoTexto}` : ''} · asistencia real / cupo — Clic para ver el historial`}
-                            chevron onClick={() => navigate('/admin/historial')}
+                            sub={`Mes en curso${resumenAdmin.periodoTexto ? ` · ${resumenAdmin.periodoTexto}` : ''} · asistencia real / cupo — Clic para ver la ocupación por clase`}
+                            chevron onClick={() => setMostrarOcupacion((v) => !v)}
                         />
                         <Kpi
                             clase="k-activos" icono="check" label="Asistencia real"
@@ -1122,6 +1178,16 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                             sub={`Mes en curso${resumenAdmin.periodoTexto ? ` · ${resumenAdmin.periodoTexto}` : ''} · reservas confirmadas con asistencia marcada`}
                         />
                     </div>
+
+                    {mostrarOcupacion && (
+                        <div style={{ marginTop: '0.75rem' }}>
+                            <PanelOcupacionConDatos
+                                anio={Number(hoy.slice(0, 4))}
+                                mes={Number(hoy.slice(5, 7))}
+                                onCerrar={() => setMostrarOcupacion(false)}
+                            />
+                        </div>
+                    )}
                 </section>
 
                 <section className="card" aria-labelledby="ub-revision" data-testid="admin-revision">
@@ -1211,8 +1277,8 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
 
 
                 {/* ── D. "Asistencia": HOY por franja + la semana en curso ─────
-                    El subtítulo de alumnos activos usa el snapshot diario del BI
-                    (misma fuente que la tarjeta "Alumnos activos" del bloque A).
+                    El subtítulo de alumnos activos usa el conteo EN VIVO de
+                    `/reportes/` (misma fuente que la tarjeta "Alumnos activos" del bloque A).
                     A3: rejilla de los 7 días (L-D) con el total de reservas y el
                         % de ocupación de cada uno. El día elegido manda en la
                         lista de abajo; HOY conserva las franjas y los botones
@@ -1232,7 +1298,7 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                         vuelven a navegar con el MISMO destino que las tarjetas del panel
                         de escritorio (paridad móvil):
                           · "N alumnos activos" -> /admin/alumnos?estado=activo
-                          · "+N nuevos este mes" -> /admin/alumnos-prueba
+                          · "+N nuevos este mes" -> /admin/alumnos?alta=mes
                         Antes el subtítulo era sólo texto. Van como DOS botones HERMANOS
                         (un botón dentro de otro no es HTML válido ni se anuncia bien en
                         lectores de pantalla) y cada uno con `aria-label`, porque el texto
@@ -1248,12 +1314,12 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                             <button type="button" className="att-link"
                                 onClick={() => navigate('/admin/alumnos?estado=activo')}
                                 aria-label="Ver el padrón de alumnos activos">
-                                <b className="num">{resumenAdmin.cargando ? '…' : (resumenAdmin.alumnosActivos ?? 'n/d')}</b> alumnos activos
+                                <b className="num">{resumenAdmin.cargando ? '…' : (stats?.alumnosActivos ?? resumenAdmin.alumnosActivos ?? 'n/d')}</b> alumnos activos
                             </button>
                         )}
                         {!resumenAdmin.cargando && stats?.nuevosAlumnosMes != null && (
                             <button type="button" className="att-link"
-                                onClick={() => navigate('/admin/alumnos-prueba')}
+                                onClick={() => navigate('/admin/alumnos?alta=mes')}
                                 aria-label="Ver los alumnos nuevos de este mes">
                                 · <em>+{stats.nuevosAlumnosMes}</em> nuevos este mes
                             </button>

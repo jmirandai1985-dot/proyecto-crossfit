@@ -11,7 +11,7 @@ import { useAuth } from '../../context/AuthContext';
 // que el Inicio del alumno: en ≥768px esta pantalla queda EXACTAMENTE como hoy.
 import InicioMobileAdmin from './InicioMobileAdmin';
 import api from '../../services/api';
-import { horaChileStr } from '../../utils/fecha';
+import { horaChileStr, hoyChileStr } from '../../utils/fecha';
 // Filtros del modal "Membresías del Mes": buscador por alumno, tipo de plan (con la
 // opción de sacar las pruebas) y orden por fecha. Lógica en JS puro y testeable.
 import {
@@ -24,6 +24,11 @@ import PagosDelDia from '../../components/pagos/PagosDelDia';
 // Gráfico de barras horizontales de las clases del día (una fila por clase: hora,
 // barra y "reservas / cupo"). MISMO componente que el Inicio móvil.
 import GraficoClasesHoy from '../../components/dashboard/GraficoClasesHoy';
+// Paneles de las tarjetas de NEGOCIO y de OCUPACIÓN: se abren DEBAJO de la fila
+// de KPIs (no navegan a Reportes). Los datos los trae `useResumenAdmin`.
+import {
+    PanelIngresoMes, PanelMembresiasMes, PanelMrr, PanelOcupacionConDatos,
+} from '../../components/dashboard/PanelesNegocio';
 // Aviso REUTILIZABLE (secciones + Reintentar) para las tarjetas que pueden fallar.
 import AvisoCarga from '../../components/AvisoCarga';
 import { KpiCard } from '../../components/kpis/KpiCard';
@@ -104,7 +109,7 @@ const AdminDashboard = () => {
     const solicitudes = solicitudesQ.data || [];
     const countPendientes = registrosQ.data || 0;
     const stats = statsQ.data ?? null;
-    const resumenAdmin = useResumenAdmin();
+    const resumenAdmin = useResumenAdmin(tenant_id);
     const registrosError = registrosQ.error
         ? mensajeError(registrosQ.error, 'No se pudo cargar el dato') : '';
     const solicitudesError = solicitudesQ.error
@@ -140,6 +145,14 @@ const AdminDashboard = () => {
     const clasesDiaLoading = clasesDiaQ.isLoading;
     const clasesDiaError = clasesDiaQ.error
         ? mensajeError(clasesDiaQ.error, 'No se pudieron cargar las clases de hoy') : '';
+    // "Asistencia de hoy" = asistencias REGISTRADAS hoy (suma de
+    // `asistentes_confirmados` de las clases del día). Sin retroceso de días ni
+    // snapshot del BI: si la consulta no llegó, la tarjeta dice "n/d".
+    const asistenciaHoy = clasesDiaQ.data
+        ? clasesDia.reduce((total, c) => total + (Number(c.asistentes_confirmados) || 0), 0)
+        : null;
+    // Año/mes del calendario de Chile para el panel de Ocupación.
+    const [anioActual, mesActual] = String(hoyChileStr()).split('-').map(Number);
     const ultimaActualizacion = clasesHoyQ.dataUpdatedAt
         ? new Date(clasesHoyQ.dataUpdatedAt) : null;
     // Detalle de una clase (modal): reservas de la clase desde /asistencia/clases/{id}/alumnos.
@@ -152,6 +165,12 @@ const AdminDashboard = () => {
     // "Clases de hoy": panel con el GRÁFICO del día (una fila por clase: hora, barra y
     // "reservas / cupo"), abierto desde la tarjeta. Arranca cerrado.
     const [clasesAbierto, setClasesAbierto] = useState(false);
+    // "Negocio del mes": panel abierto ('ingreso' | 'membresias' | 'mrr') o null.
+    // Cada tarjeta abre SU panel debajo de la fila (antes Ingreso, MRR y
+    // Membresías navegaban a Reportes/Planes y el detalle no coincidía).
+    const [panelNegocio, setPanelNegocio] = useState(null);
+    // "Ocupación": panel con la ocupación del mes por clase (`/asistencia/historial`).
+    const [ocupacionAbierto, setOcupacionAbierto] = useState(false);
     // Fidelización — modal membresías del mes
     const [fidelizacionModal, setFidelizacionModal] = useState(null); // 'membresias'
     // Filtros del listado de membresías: un mes normal trae 263 filas y sin buscador
@@ -482,11 +501,11 @@ const AdminDashboard = () => {
                             </p>
                         </div>
                         <KpiCard
-                            label="Asistentes de hoy"
-                            value={resumenAdmin.asistentesHoy}
+                            label="Asistencia de hoy"
+                            value={asistenciaHoy}
                             icon={Users}
                             color="border-purple-500"
-                            hint="Hoy · último snapshot diario — Clic para ver la asistencia"
+                            hint="Hoy · asistencias registradas en las clases del día — Clic para ver la asistencia"
                             onDetalle={() => navigate('/admin/asistencia')}
                         />
                         {/* "Ingresos de hoy" es la ÚNICA tarjeta del día: muestra el total
@@ -572,40 +591,79 @@ const AdminDashboard = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                         <KpiCard
                             label="Ingreso del mes"
-                            value={stats?.ingresoMensual ?? null}
-                            unit="CLP"
+                            value={resumenAdmin.ingresoMesCargando ? '…'
+                                : (resumenAdmin.ingresoMes?.total_clp ?? null)}
+                            unit={resumenAdmin.ingresoMesCargando ? '' : 'CLP'}
                             icon={DollarSign}
                             color="border-amber-500"
-                            hint="Mes en curso · parcial · comparación: n/d — Clic para ver los movimientos"
-                            onDetalle={() => navigate('/admin/reportes?seccion=movimientos&tipo=ingreso')}
+                            hint={resumenAdmin.ingresoMesError
+                                || `Mes en curso · ${resumenAdmin.ingresoMes?.cantidad ?? 0} cobros aprobados (membresías + Bazar) — Clic para ver el desglose por día`}
+                            onDetalle={() => setPanelNegocio((v) => (v === 'ingreso' ? null : 'ingreso'))}
+                            chevron
                         />
                         <KpiCard
                             label="MRR"
-                            value={stats?.mrr ?? null}
-                            unit="CLP"
+                            value={resumenAdmin.mrrCargando ? '…'
+                                : (resumenAdmin.mrr?.total_clp ?? null)}
+                            unit={resumenAdmin.mrrCargando ? '' : 'CLP'}
                             icon={Banknote}
                             color="border-emerald-500"
-                            hint="Hoy · precio de lista — Clic para ver los planes"
-                            onDetalle={() => navigate('/admin/planes')}
+                            hint={resumenAdmin.mrrError
+                                || `Hoy · ${resumenAdmin.mrr?.alumnos ?? 0} alumnos con plan pagado — Clic para ver el detalle por plan`}
+                            onDetalle={() => setPanelNegocio((v) => (v === 'mrr' ? null : 'mrr'))}
+                            chevron
                         />
                         <KpiCard
                             label="Ventas Bazar"
-                            value={stats?.ventasBazar ?? null}
-                            unit="CLP"
+                            value={resumenAdmin.ventasBazarCargando ? '…'
+                                : (resumenAdmin.ventasBazar ?? null)}
+                            unit={resumenAdmin.ventasBazarCargando ? '' : 'CLP'}
                             icon={ShoppingCart}
                             color="border-teal-500"
-                            hint="Mes en curso · parcial — Clic para ver los pedidos"
+                            hint={resumenAdmin.ventasBazarError
+                                || `Mes en curso · ${resumenAdmin.ventasBazarPedidos ?? 0} pedidos cobrados — Clic para ver los pedidos`}
                             onDetalle={() => navigate('/admin/pedidos')}
+                            chevron
                         />
                         <KpiCard
                             label="Membresías del mes"
-                            value={stats?.totalSuscripcionesMes ?? null}
+                            value={resumenAdmin.membresiasMesCargando ? '…'
+                                : (resumenAdmin.membresiasMes?.total_altas ?? null)}
                             icon={Users}
                             color="border-green-500"
-                            hint="Mes en curso · parcial — Clic para ver las suscripciones"
-                            onDetalle={() => navigate('/admin/reportes?seccion=membresias')}
+                            hint={resumenAdmin.membresiasMesError
+                                || 'Mes en curso · planes pagados (precio > $0) — Clic para ver el ranking'}
+                            onDetalle={() => setPanelNegocio((v) => (v === 'membresias' ? null : 'membresias'))}
+                            chevron
                         />
                     </div>
+
+                    {/* Paneles de las tarjetas: se abren DEBAJO de la fila, en el
+                        mismo lugar (no navegan a Reportes). Sólo uno a la vez. */}
+                    {panelNegocio === 'ingreso' && (
+                        <PanelIngresoMes
+                            resumen={resumenAdmin.ingresoMes}
+                            cargando={resumenAdmin.ingresoMesCargando}
+                            error={resumenAdmin.ingresoMesError}
+                            onCerrar={() => setPanelNegocio(null)}
+                        />
+                    )}
+                    {panelNegocio === 'membresias' && (
+                        <PanelMembresiasMes
+                            ranking={resumenAdmin.membresiasMes}
+                            cargando={resumenAdmin.membresiasMesCargando}
+                            error={resumenAdmin.membresiasMesError}
+                            onCerrar={() => setPanelNegocio(null)}
+                        />
+                    )}
+                    {panelNegocio === 'mrr' && (
+                        <PanelMrr
+                            mrr={resumenAdmin.mrr}
+                            cargando={resumenAdmin.mrrCargando}
+                            error={resumenAdmin.mrrError}
+                            onCerrar={() => setPanelNegocio(null)}
+                        />
+                    )}
                 </section>
 
                 <section aria-labelledby="dashboard-alumnos" className="space-y-3">
@@ -619,7 +677,7 @@ const AdminDashboard = () => {
                             value={resumenAdmin.alumnosActivos}
                             icon={Users}
                             color="border-sky-500"
-                            hint="Hoy · snapshot diario — Clic para ver el padrón activo"
+                            hint="Hoy · suscripciones vigentes (en vivo) — Clic para ver el padrón activo"
                             onDetalle={() => navigate('/admin/alumnos?estado=activo')}
                         />
                         <KpiCard
@@ -634,10 +692,12 @@ const AdminDashboard = () => {
                         />
                         <KpiCard
                             label="Nuevos del mes"
-                            value={stats?.nuevosAlumnosMes ?? null}
+                            value={nuevosMesQ.data ? totalNuevosMes : null}
                             icon={UserPlus}
                             color="border-green-500"
-                            hint="Mes en curso · parcial"
+                            hint="Mes en curso · alumnos creados este mes — Clic para ver el padrón filtrado"
+                            onDetalle={() => navigate('/admin/alumnos?alta=mes')}
+                            chevron
                         />
                     </div>
                 </section>
@@ -659,7 +719,9 @@ const AdminDashboard = () => {
                             icon={TrendingUp}
                             color="border-green-500"
                             hint={`${resumenAdmin.conversionHint}${resumenAdmin.periodoTexto
-                                ? ` · ${resumenAdmin.periodoTexto}` : ''}`}
+                                ? ` · ${resumenAdmin.periodoTexto}` : ''} — Clic para ver los convertidos`}
+                            onDetalle={() => navigate('/admin/alumnos-convertidos')}
+                            chevron
                         />
                     </div>
                 </section>
@@ -680,9 +742,10 @@ const AdminDashboard = () => {
                             icon={Target}
                             color="border-amber-500"
                             hint={resumenAdmin.periodoTexto
-                                ? `Mes en curso · ${resumenAdmin.periodoTexto} · asistencia real / cupo — Clic para ver el historial`
-                                : 'Mes en curso · asistencia real / cupo'}
-                            onDetalle={() => navigate('/admin/historial')}
+                                ? `Mes en curso · ${resumenAdmin.periodoTexto} · asistencia real / cupo — Clic para ver la ocupación por clase`
+                                : 'Mes en curso · asistencia real / cupo — Clic para ver la ocupación por clase'}
+                            onDetalle={() => setOcupacionAbierto((v) => !v)}
+                            chevron
                         />
                         <KpiCard
                             label="Asistencia real"
@@ -695,6 +758,16 @@ const AdminDashboard = () => {
                                 : 'Mes en curso · reservas confirmadas con asistencia marcada'}
                         />
                     </div>
+
+                    {/* Panel de Ocupación: una fila por clase realizada con cupo
+                        (asistencia marcada / cupo). Se pide al abrir. */}
+                    {ocupacionAbierto && (
+                        <PanelOcupacionConDatos
+                            anio={anioActual}
+                            mes={mesActual}
+                            onCerrar={() => setOcupacionAbierto(false)}
+                        />
+                    )}
                 </section>
 
                 <div className="pt-3 border-t border-zinc-800">
@@ -958,19 +1031,19 @@ const AdminDashboard = () => {
                             <button onClick={() => navigate('/admin/alumnos?estado=activo')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-blue-600 hover:shadow-md hover:border-blue-700 transition-all cursor-pointer text-left">
                                 <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos Activos</p>
                                 <p className="text-3xl font-bold text-blue-400 mt-1">{resumenAdmin.alumnosActivos ?? 'n/d'}</p>
-                                <p className="text-xs text-zinc-500 mt-1">Hoy · snapshot diario — Clic para ver el padrón activo</p>
+                                <p className="text-xs text-zinc-500 mt-1">Hoy · suscripciones vigentes (en vivo) — Clic para ver el padrón activo</p>
                             </button>
                             <button onClick={() => setFidelizacionModal('membresias')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-green-600 hover:shadow-md hover:border-green-700 transition-all cursor-pointer text-left">
                                 <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Membresías Mensuales</p>
                                 <p className="text-3xl font-bold text-green-700 mt-1">{stats.totalSuscripcionesMes || 0}</p>
-                                <p className="text-xs text-zinc-500 mt-1">Suscripciones iniciadas este mes — Clic para ver detalle</p>
+                                <p className="text-xs text-zinc-500 mt-1">Suscripciones iniciadas este mes (incluye pruebas) — Clic para ver detalle</p>
                             </button>
                             <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-amber-600">
                                 <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Ingreso Mensual</p>
                                 <p className="text-3xl font-bold text-amber-700 mt-1">
-                                    ${(stats.ingresoMensual || 0).toLocaleString('es-CL')}
+                                    ${(resumenAdmin.ingresoMes?.total_clp || 0).toLocaleString('es-CL')}
                                 </p>
-                                <p className="text-xs text-zinc-500 mt-1">Mes en curso · parcial</p>
+                                <p className="text-xs text-zinc-500 mt-1">Mes en curso · cobros aprobados (pagos)</p>
                                 <p className="text-xs font-bold text-zinc-500 mt-1"
                                     title="El mes en curso no se compara contra un mes completo: no es el mismo tramo.">
                                     comparación: n/d
@@ -986,10 +1059,10 @@ const AdminDashboard = () => {
                             <button onClick={() => navigate('/admin/pedidos')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-teal-600 hover:shadow-md hover:border-teal-700 transition-all cursor-pointer text-left">
                                 <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Ventas Bazar (mes)</p>
                                 <p className="text-3xl font-bold text-teal-600 mt-1">
-                                    ${(stats.ventasBazar || 0).toLocaleString('es-CL')}
+                                    ${(resumenAdmin.ventasBazar || 0).toLocaleString('es-CL')}
                                 </p>
                                 <p className="text-xs text-zinc-500 mt-1">
-                                    {stats.ventasBazarPedidos || 0} pedido{(stats.ventasBazarPedidos || 0) === 1 ? '' : 's'} cobrado{(stats.ventasBazarPedidos || 0) === 1 ? '' : 's'} del mes
+                                    {resumenAdmin.ventasBazarPedidos || 0} pedido{(resumenAdmin.ventasBazarPedidos || 0) === 1 ? '' : 's'} cobrado{(resumenAdmin.ventasBazarPedidos || 0) === 1 ? '' : 's'} del mes vía pagos
                                     {' · comparación: n/d (mes parcial)'}
                                 </p>
                             </button>
