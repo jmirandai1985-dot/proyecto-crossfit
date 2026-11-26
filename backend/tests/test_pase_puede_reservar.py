@@ -91,17 +91,36 @@ def test_c3_el_orm_y_el_sql_del_mantenimiento_leen_la_misma_lista():
 
 
 def test_c4_las_dos_puertas_de_reservas_usan_ese_predicado_y_no_el_estado():
-    """Fuente de `reservas.py`: reservar (POST) y devolver el crédito (DELETE) comparten la MISMA
-    puerta, y ya no hay ninguna comparación de estado escrita a mano."""
-    fuente = (BACKEND / "app/api/v1/reservas.py").read_text(encoding="utf-8-sig")
+    """Reservar (POST) y devolver el crédito (DELETE) comparten la MISMA puerta.
 
-    # TRES usos desde la migración 059: el POST, y en el DELETE la búsqueda por el
-    # DATO (`reserva.suscripcion_id`, la membresía que pagó) + el fallback cuando ese
-    # dato no existe (reserva anterior a la 059) o el plan ya no da acceso.
-    assert fuente.count("da_acceso_hoy(Suscripcion.estado, Suscripcion.fecha_expiracion)") == 3, (
-        "las dos puertas (reservar / reembolsar) tienen que usar `da_acceso_hoy`")
-    for escrito_a_mano in ('Suscripcion.estado == "activo"', "Suscripcion.estado == 'activo'"):
-        assert escrito_a_mano not in fuente, f"quedó el filtro comercial: {escrito_a_mano}"
+    El DELETE ya no replica el SQL: delega en `reservas_service.reembolsar_credito_reserva`,
+    que usa `da_acceso_hoy` en la búsqueda por el DATO (`reserva.suscripcion_id`) y en
+    el fallback. Por eso la regla se verifica por DELEGACIÓN (una sola definición),
+    no contando literales en `reservas.py`.
+    """
+    fuente = (BACKEND / "app/api/v1/reservas.py").read_text(encoding="utf-8-sig")
+    servicio = (BACKEND / "app/services/reservas_service.py").read_text(
+        encoding="utf-8-sig")
+
+    # POST: la puerta directa sigue en el endpoint.
+    assert fuente.count(
+        "da_acceso_hoy(Suscripcion.estado, Suscripcion.fecha_expiracion)") >= 1
+
+    # DELETE: delega en el servicio compartido (misma regla que la suspensión).
+    assert "reembolsar_credito_reserva(" in fuente, (
+        "el DELETE tiene que delegar en `reembolsar_credito_reserva`")
+    assert "def reembolsar_credito_reserva(" in servicio
+
+    # El servicio usa `da_acceso_hoy` en las DOS búsquedas (dato + fallback).
+    assert servicio.count(
+        "da_acceso_hoy(Suscripcion.estado, Suscripcion.fecha_expiracion)") == 2, (
+        "el servicio tiene que usar `da_acceso_hoy` en la membresía del dato y en "
+        "el fallback")
+
+    for texto in (fuente, servicio):
+        for escrito_a_mano in ('Suscripcion.estado == "activo"',
+                               "Suscripcion.estado == 'activo'"):
+            assert escrito_a_mano not in texto, f"quedó el filtro comercial: {escrito_a_mano}"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

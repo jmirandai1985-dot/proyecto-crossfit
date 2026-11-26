@@ -81,6 +81,7 @@ def test_b1_mes_en_curso_usa_semanas_transcurridas_y_reservas_realizadas(db):
     from app.api.v1.kpis_populate import _upsert_mes_monthly
     from app.models.clase import Clase
     from app.models.reserva import Reserva
+    from app.models.usuario import RolUsuario, Usuario
     from app.services import metricas_service as metricas
     from app.services.clases_service import sql_clase_realizada
     from app.utils.santiago import hoy_santiago
@@ -91,14 +92,32 @@ def test_b1_mes_en_curso_usa_semanas_transcurridas_y_reservas_realizadas(db):
 
     valores = _upsert_mes_monthly(db, TENANT_ID, hoy.year, hoy.month)["valores"]
 
-    asistentes = db.query(func.coalesce(func.sum(Clase.asistentes_confirmados), 0)).filter(
-        Clase.tenant_id == TENANT_ID, Clase.fecha >= inicio, Clase.fecha <= fin,
+    # Asistencia REAL: `reservas.asistio`, la MISMA fuente de `calcular_asistencia_mes`
+    # (no el contador `clases.asistentes_confirmados`, que mide reservas/cupos).
+    asistentes = db.query(func.count(Reserva.id)).join(
+        Clase, Reserva.clase_id == Clase.id
+    ).join(
+        Usuario, Usuario.id == Reserva.alumno_id
+    ).filter(
+        Reserva.tenant_id == TENANT_ID,
+        Usuario.tenant_id == TENANT_ID,
+        Usuario.rol == RolUsuario.alumno,
+        Usuario.es_prueba.is_(False),
+        Clase.fecha >= inicio, Clase.fecha <= fin,
+        Reserva.asistio.is_(True),
         text(sql_clase_realizada("clases"))).scalar() or 0
     reservas_real = db.query(func.count(Reserva.id)).join(
         Clase, Reserva.clase_id == Clase.id
+    ).join(
+        Usuario, Usuario.id == Reserva.alumno_id
     ).filter(
-        Reserva.tenant_id == TENANT_ID, Clase.fecha >= inicio, Clase.fecha <= fin,
-        Reserva.estado == "confirmada", text(sql_clase_realizada("clases"))).scalar() or 0
+        Reserva.tenant_id == TENANT_ID,
+        Usuario.tenant_id == TENANT_ID,
+        Usuario.rol == RolUsuario.alumno,
+        Usuario.es_prueba.is_(False),
+        Clase.fecha >= inicio, Clase.fecha <= fin,
+        Reserva.estado == "confirmada",
+        text(sql_clase_realizada("clases"))).scalar() or 0
     activos = metricas.alumnos_vigentes(db, TENANT_ID, inicio)
     semanas = _semanas_transcurridas(inicio, fin, hoy)
 
@@ -107,7 +126,12 @@ def test_b1_mes_en_curso_usa_semanas_transcurridas_y_reservas_realizadas(db):
     assert valores["asistencia_promedio"] == (
         round(asistentes / reservas_real * 100, 2) if reservas_real else 0)
 
-    # Mientras el mes siga en curso, el divisor del mes completo da OTRO número.
+    # Mientras el mes siga en curso, el divisor del mes completo da OTRO número
+    # exacto. Se comparan SIN redondear: con pocos asistentes ambos redondeos
+    # pueden coincidir en 0,03 (dos decimales) y la comparación de enteros
+    # redondeados daría un falso fallo.
     if hoy < fin:
         full = ((fin - inicio).days + 1) / 7.0
-        assert round(asistentes / (activos * full), 2) != valores["frecuencia_semanal"]
+        exacto_transcurrido = asistentes / (activos * semanas)
+        exacto_mes_completo = asistentes / (activos * full)
+        assert exacto_mes_completo != pytest.approx(exacto_transcurrido)

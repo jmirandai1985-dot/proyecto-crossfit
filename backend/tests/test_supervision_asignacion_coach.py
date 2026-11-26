@@ -89,12 +89,36 @@ def _admin_activo():
 
 
 def _horario_con_coach(tenant_id=None):
-    """Plantilla (tabla `horarios`) de una disciplina que requiere coach."""
-    return _one(
+    """Plantilla LIBRE de una disciplina que el coach activo SÍ dicta.
+
+    No sirve cualquier horario: el residuo de la carga K6 (clases de hoy
+    asignadas a otro coach) hacía que `tomar alcance=horario` respondiera 409.
+    Se elige un horario sin clases futuras con coach, sin vigencia abierta y de
+    una disciplina del coach (el demo no dicta todas), así el test mide la regla
+    y no el dato residual ni un 403 de disciplina.
+    """
+    coach_id = _coach_activo().id
+    horario = _one(
         "SELECT h.id, h.disciplina_id, h.hora_inicio, h.hora_fin, h.cupo_maximo "
         "FROM horarios h JOIN disciplinas d ON d.id = h.disciplina_id "
         "WHERE h.tenant_id = :t AND h.activo = true AND d.activo = true "
-        "AND d.requiere_coach = true ORDER BY h.id LIMIT 1", t=tenant_id or TENANT_ID)
+        "AND d.requiere_coach = true "
+        "AND EXISTS (SELECT 1 FROM coach_disciplinas cd "
+        "            WHERE cd.coach_id = :coach "
+        "              AND cd.disciplina_id = h.disciplina_id AND cd.activo) "
+        "AND NOT EXISTS (SELECT 1 FROM clases c "
+        "                WHERE c.horario_base_id = h.id "
+        "                  AND c.tenant_id = h.tenant_id AND c.fecha >= :hoy "
+        "                  AND c.cancelada = false AND c.coach_id IS NOT NULL) "
+        "AND NOT EXISTS (SELECT 1 FROM horarios_coach hc "
+        "                WHERE hc.horario_id = h.id "
+        "                  AND hc.tenant_id = h.tenant_id "
+        "                  AND hc.vigente_hasta IS NULL) "
+        "ORDER BY (h.dia_semana = :dia) DESC, h.id LIMIT 1",
+        t=tenant_id or TENANT_ID, hoy=HOY, dia=HOY.weekday(), coach=coach_id)
+    if horario is None:
+        pytest.skip("No hay horario libre (sin coach futuro) en TEST")
+    return horario
 
 
 def _crear_clase(fecha, horario):
@@ -134,9 +158,17 @@ def _borrar_vigencias(horario_id):
           t=TENANT_ID, h=horario_id)
 
 
-def _clase_api(clase_id, headers):
-    r = requests.get(f"{BASE}/clases/", params={"fecha_desde": str(HOY),
-                                                "fecha_hasta": str(HOY + timedelta(days=30)),
+def _clase_api(clase_id, headers, fecha=None):
+    """La clase en GET /clases. Si se conoce la fecha, se filtra ESE día.
+
+    Sin el filtro, el listado de 30 días se corta en `limit=200` y una clase
+    creada al final del rango puede quedar fuera (era el fallo del test, no del
+    endpoint).
+    """
+    desde = fecha or HOY
+    hasta = fecha or (HOY + timedelta(days=30))
+    r = requests.get(f"{BASE}/clases/", params={"fecha_desde": str(desde),
+                                                "fecha_hasta": str(hasta),
                                                 "limit": 200}, headers=headers)
     assert r.status_code == 200, r.text
     for c in r.json():
@@ -231,7 +263,8 @@ def test_tomar_horario_recurrente_hace_backfill_y_vigencia():
                          "AND cancelada = false AND coach_id IS NULL",
                          t=TENANT_ID, h=horario.id, hoy=HOY)
         assert sin_coach.n == 0
-        assert _clase_api(clase_id, headers)["marca"] == "coach"
+        assert _clase_api(clase_id, headers,
+                          fecha=HOY + timedelta(days=4))["marca"] == "coach"
     finally:
         _borrar_vigencias(horario.id)
         _borrar_clase(clase_id)
@@ -543,7 +576,7 @@ def test_cambiar_la_disciplina_del_horario_libera_el_coach():
                       params={"alcance": "horario"},
                       headers=_token(coach, "coach"))
         r = requests.put(f"{BASE}/horarios/{horario.id}",
-                         params={"disciplina_id": otra.id},
+                         json={"disciplina_id": otra.id},
                          headers=_token(admin, "administrador"))
         assert r.status_code == 200, r.text
         assert r.json()["disciplina_id"] == otra.id

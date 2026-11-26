@@ -162,6 +162,9 @@ def _payload_registro(correo: str) -> dict:
         "correo": correo,
         "rut": _rut_valido(),
         "tenant_id": TENANT_ID,
+        # Alta del autoservicio: T&C y declaración de salud son obligatorios.
+        "acepta_tyc": True,
+        "acepta_salud": True,
         # D2: el alta exige peso y género (validación real en el endpoint).
         "sexo": "F",
         "peso": 60,

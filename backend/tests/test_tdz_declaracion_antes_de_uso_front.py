@@ -37,7 +37,10 @@ _RE_COMENTARIO_LINEA = re.compile(r"(^|[^:])//[^\n]*")
 _RE_COMILLA_SIMPLE = re.compile(r"'[^'\n]*'")
 _RE_COMILLA_DOBLE = re.compile(r'"[^"\n]*"')
 _RE_TEMPLATE = re.compile(r"`[^`]*`")
-_RE_TEXTO_JSX = re.compile(r">[^<>{}]*<")
+# Texto JSX en UNA línea y sin operadores de código: `m > 12) ...; i < x` NO es
+# texto JSX. Antes `[^<>{}]*` cruzaba líneas y borraba código real (p. ej. el
+# `let i = 0` de un `for`), inventando un TDZ que no existía.
+_RE_TEXTO_JSX = re.compile(r">[^<>{};=()\n]*<")
 _RE_LLAVE_ABRE = re.compile(r"\{")
 _RE_LLAVE_CIERRA = re.compile(r"\}")
 _RE_IDENTIFICADOR = re.compile(r"[A-Za-z_$][\w$]*")
@@ -45,11 +48,46 @@ _RE_DECLARACION = re.compile(
     r"\b(const|let)\s+(\[[^\]]*\]|\{[^}]*\}|[A-Za-z_$][\w$]*)\s*=")
 
 
+def _nombres_declarados(grupo: str) -> list:
+    """Variables que DECLARA el patrón de un `const`/`let`.
+
+    En un objeto, `{ data: panel }` declara `panel`, NO `data` (esa es la clave
+    de la propiedad). Tratar la clave como binding inventaba un TDZ cuando ya
+    existía un `data` anterior. En un array, todos los identificadores son
+    bindings; `...rest` también.
+    """
+    grupo = (grupo or "").strip()
+    if grupo.startswith("{") and grupo.endswith("}"):
+        nombres = []
+        for parte in grupo[1:-1].split(","):
+            parte = parte.strip()
+            if not parte or parte.startswith("..."):
+                continue
+            if ":" in parte:                 # clave: alias
+                parte = parte.split(":", 1)[1]
+            parte = parte.split("=", 1)[0].strip()   # alias = default
+            match = re.match(r"[A-Za-z_$][\w$]*", parte)
+            if match:
+                nombres.append(match.group(0))
+        return nombres
+    if grupo.startswith("["):
+        return [n for n in _RE_IDENTIFICADOR.findall(grupo)
+                if n not in RESERVADAS]
+    match = re.match(r"[A-Za-z_$][\w$]*", grupo)
+    return [match.group(0)] if match else []
+
+
 def _vaciar(match: "re.Match") -> str:
-    """Vacía el contenido conservando el largo (así las posiciones siguen siendo las del
-    fuente original)."""
+    """Vacía el contenido conservando el largo Y los saltos de línea.
+
+    Conservar los `\n` es lo que mantiene los números de línea del reporte
+    iguales a los del fuente (un template multilínea antes los borraba).
+    """
     texto = match.group(0)
-    return texto[0] + " " * (len(texto) - 2) + texto[-1]
+    if len(texto) < 2:
+        return texto
+    cuerpo = "".join(("\n" if c == "\n" else " ") for c in texto[1:-1])
+    return texto[0] + cuerpo + texto[-1]
 
 
 def _limpiar(texto: str) -> str:
@@ -112,14 +150,26 @@ def hallazgos(texto: str):
 
     salida = []
     ya = set()
+    # Sólo la PRIMERA declaración de cada nombre en el ámbito puede tener usos
+    # anteriores. Un segundo `let i` (otro `for` del mismo bloque) veía los usos
+    # del primero y los marcaba como TDZ.
+    primeras = {}
     for decl in _RE_DECLARACION.finditer(limpio):
         mi_ambito = ambito.get(decl.start())
-        for nombre in _RE_IDENTIFICADOR.findall(decl.group(2)):
+        for nombre in _nombres_declarados(decl.group(2)):
+            if nombre in RESERVADAS:
+                continue
+            primeras.setdefault((nombre, mi_ambito), decl.start())
+    for decl in _RE_DECLARACION.finditer(limpio):
+        mi_ambito = ambito.get(decl.start())
+        for nombre in _nombres_declarados(decl.group(2)):
             if nombre in RESERVADAS:
                 continue
             clave = (nombre, mi_ambito)
             if clave in ya:
                 continue
+            if primeras.get(clave) != decl.start():
+                continue                  # no es la primera declaración del ámbito
             for pos in posiciones.get(nombre, []):
                 if pos >= decl.start():
                     break
@@ -220,10 +270,18 @@ def hallazgos_en_funciones(texto: str) -> list:
     cuerpos = _cuerpos(limpio)
 
     declaraciones = []
+    ya_decl = {}
     for decl in _RE_DECLARACION.finditer(limpio):
-        for nombre in _RE_IDENTIFICADOR.findall(decl.group(2)):
-            if nombre not in RESERVADAS:
-                declaraciones.append((nombre, decl.start()))
+        dueno = _cuerpo_dueno(decl.start(), cuerpos)
+        clave_dueno = dueno[0] if dueno else None
+        for nombre in _nombres_declarados(decl.group(2)):
+            if nombre in RESERVADAS:
+                continue
+            clave = (nombre, clave_dueno)
+            if clave in ya_decl:
+                continue
+            ya_decl[clave] = decl.start()
+            declaraciones.append((nombre, decl.start()))
 
     salida = []
     for ini, fin, nombre_f, _flecha in cuerpos:
@@ -364,6 +422,8 @@ def test_e_ningun_archivo_llama_antes_a_una_funcion_que_usa_un_const_posterior()
 
     fuente = _fuente(FIDELIZACION)
     assert "const [buscar, setBuscar] = useState('');" in fuente
+    llamada_churn = "const churnQ = useChurn(tenant_id, buscar, soloActivos);"
+    assert llamada_churn in fuente, "cambió la llamada real de Fidelizacion.jsx"
     assert fuente.index("const [buscar, setBuscar] = useState('');") < fuente.index(
-        "const churnQ = useChurn(tenant_id, buscar);")
+        llamada_churn)
     assert hallazgos(fuente) == []

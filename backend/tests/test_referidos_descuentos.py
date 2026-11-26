@@ -285,12 +285,25 @@ def _codigo_de(db, usuario_id: int):
 
 
 def _ultima_tx(db, usuario_id: int):
-    """La última transacción de membresía del alumno: (monto, suscripción)."""
+    """La última transacción de MEMBRESÍA del alumno: (monto, suscripción).
+
+    Se busca por la REFERENCIA del dinero + categoría, no por el texto de
+    `descripcion` (que ahora muestra el nombre del alumno; la matrícula es otra
+    categoría y no debe tomarse como “la última de membresía”).
+    """
     db.rollback()
-    return db.execute(text(
-        "SELECT monto, referencia_id FROM transacciones_financieras "
-        "WHERE descripcion LIKE :d ORDER BY id DESC LIMIT 1"),
-        {"d": f"%(usuario #{usuario_id})%"}).first()
+    return db.execute(text("""
+        SELECT t.monto, t.referencia_id
+        FROM transacciones_financieras t
+        WHERE t.categoria = 'membresia'
+          AND ((t.referencia_tipo = 'suscripcion'
+                AND t.referencia_id IN (
+                    SELECT id FROM suscripciones WHERE usuario_id = :u))
+            OR (t.referencia_tipo = 'solicitud_plan'
+                AND t.referencia_id IN (
+                    SELECT id FROM solicitudes_planes WHERE alumno_id = :u)))
+        ORDER BY t.id DESC LIMIT 1
+    """), {"u": usuario_id}).first()
 
 
 def _referido_de(db, usuario_invitado_id: int):

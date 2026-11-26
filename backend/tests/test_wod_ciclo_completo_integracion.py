@@ -102,8 +102,8 @@ def escenario(db):
         horario = db.execute(text("""
             INSERT INTO horarios (tenant_id, disciplina_id, dia_semana,
                                   hora_inicio, hora_fin, activo)
-            VALUES (:t, :d, 0, '00:00', '01:00', true) RETURNING id"""),
-            {"t": t, "d": disc}).scalar()
+            VALUES (:t, :d, :dia, '00:00', '01:00', true) RETURNING id"""),
+            {"t": t, "d": disc, "dia": hoy.weekday()}).scalar()
         db.execute(text("""
             INSERT INTO coach_disciplinas (tenant_id, coach_id, disciplina_id, activo)
             VALUES (:t, :c, :d, true)"""),

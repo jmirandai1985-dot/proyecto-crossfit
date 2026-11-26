@@ -21,6 +21,18 @@ from tests.conftest import (BASE, ALUMNO_ID, COACH_ID, MOTIVO_SIN_SEED,
 requiere_seed = pytest.mark.skipif(not SEED_DISPONIBLE, reason=MOTIVO_SIN_SEED)
 
 
+def _hay_lugar(clase) -> bool:
+    """¿La clase admite una reserva más?
+
+    `cupo_maximo is NULL` = SIN TOPE (Musculación / Open Box, migración 066):
+    siempre hay lugar. Restar un NULL era el `NoneType - int` del fixture.
+    """
+    cupo = clase.get("cupo_maximo")
+    if cupo is None:
+        return True
+    return cupo - (clase.get("asistentes_confirmados") or 0) > 0
+
+
 # ── Estado compartido entre tests (se llena en orden) ──
 class Shared:
     membresia = None      # respuesta de membresia-activa
@@ -136,8 +148,7 @@ def test_07_reserva_clase_futura():
     assert Shared.clases_7dias is not None, "Depende de test_06"
     # Buscar clase futura con cupo
     futuras = [c for c in Shared.clases_7dias
-               if c.get("fecha", "") > HOY_STR
-               and (c.get("cupo_maximo", 0) - c.get("asistentes_confirmados", 0)) > 0]
+               if c.get("fecha", "") > HOY_STR and _hay_lugar(c)]
     if not futuras:
         pytest.skip("No hay clases futuras con cupo disponible")
     clase = futuras[0]
@@ -189,8 +200,7 @@ def test_09_reserva_cancelacion_clase_hoy():
     if Shared.clases_7dias is None:
         pytest.skip("No se obtuvieron clases en test_06")
     hoy_clases = [c for c in Shared.clases_7dias
-                  if c.get("fecha", "") == HOY_STR
-                  and (c.get("cupo_maximo", 0) - c.get("asistentes_confirmados", 0)) > 0]
+                  if c.get("fecha", "") == HOY_STR and _hay_lugar(c)]
     if not hoy_clases:
         pytest.skip("No hay clases de HOY con cupo")
     clase_hoy = hoy_clases[0]

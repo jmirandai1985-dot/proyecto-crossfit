@@ -234,11 +234,19 @@ def _borrar_usuario(db, usuario_id: int) -> None:
     db.execute(text(
         "DELETE FROM referidos_aplicados WHERE usuario_invitador_id = :u "
         "OR usuario_invitado_id = :u"), {"u": usuario_id})
+    # Transacciones ANTES de borrar solicitudes/suscripciones: se buscan por
+    # REFERENCIA + categoría (la descripción ahora usa el nombre del alumno).
+    db.execute(text("""
+        DELETE FROM transacciones_financieras t
+        WHERE (t.referencia_tipo = 'suscripcion'
+               AND t.referencia_id IN (
+                   SELECT id FROM suscripciones WHERE usuario_id = :u))
+           OR (t.referencia_tipo = 'solicitud_plan'
+               AND t.referencia_id IN (
+                   SELECT id FROM solicitudes_planes WHERE alumno_id = :u))
+    """), {"u": usuario_id})
     db.execute(text("DELETE FROM solicitudes_planes WHERE alumno_id = :u"),
                {"u": usuario_id})
-    db.execute(text(
-        "DELETE FROM transacciones_financieras WHERE descripcion LIKE :d"),
-        {"d": f"%(usuario #{usuario_id})%"})
     for tabla, columna in (("notificaciones", "alumno_id"),
                            ("notificaciones_enviadas", "alumno_id"),
                            ("codigos_referido", "usuario_id"),
@@ -634,10 +642,20 @@ def test_descuento_extra_crea_credito_y_se_consume_en_la_siguiente_compra(
     assert credito_usado.descuento_aplicado_clp == 10000   # 50.000 * 20 %
     assert credito_usado.suscripcion_id == suscripcion.id
 
-    tx = db.execute(text(
-        "SELECT monto, referencia_id FROM transacciones_financieras "
-        "WHERE descripcion LIKE :d ORDER BY id DESC LIMIT 1"),
-        {"d": f"%(usuario #{alumno['id']})%"}).first()
+    # La transacción se busca por REFERENCIA + categoría, no por el texto de la
+    # descripción (que ahora muestra el nombre del alumno).
+    tx = db.execute(text("""
+        SELECT t.monto, t.referencia_id
+        FROM transacciones_financieras t
+        WHERE t.categoria = 'membresia'
+          AND ((t.referencia_tipo = 'suscripcion'
+                AND t.referencia_id IN (
+                    SELECT id FROM suscripciones WHERE usuario_id = :u))
+            OR (t.referencia_tipo = 'solicitud_plan'
+                AND t.referencia_id IN (
+                    SELECT id FROM solicitudes_planes WHERE alumno_id = :u)))
+        ORDER BY t.id DESC LIMIT 1
+    """), {"u": alumno["id"]}).first()
     assert tx is not None
     assert tx.monto == 40000
     assert tx.referencia_id == suscripcion.id
