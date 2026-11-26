@@ -13,7 +13,8 @@ Guard de fuente del FRONTEND (sin red y sin base):
      el caso "sin desenlace" cae en `MSG_TIMEOUT` (no en un detalle técnico).
   B. Existe `reintentar()` y el reloj vuelve a correr al reintentar.
   C. La hoja móvil y el modal de escritorio muestran el motivo + Reintentar.
-  D. El tile "Vouchers por aprobar" ya no le pasa el EVENTO a `abrirRevision`.
+  D. La sección "En revisión" abre el comprobante de CADA voucher listado
+     (`abrirRevision(v)`), no un tile KPI separado.
 
 Correr (aislado):
     cd backend && py -3.12 -m pytest tests/test_voucher_preview_sin_desenlace_front.py -q --noconftest
@@ -78,11 +79,26 @@ def test_c_las_dos_pantallas_muestran_el_motivo_y_ofrecen_reintentar():
     assert "{voucherPreview.error}" in escritorio
 
 
-def test_d_el_tile_no_le_pasa_el_evento_a_abrir_revision():
+def test_d_la_seccion_en_revision_abre_el_comprobante_de_cada_voucher():
+    """La puerta de revisión del Inicio móvil es la sección "En revisión".
+
+    No hay un tile KPI aparte: la sección lista los vouchers pendientes y cada
+    fila abre SU comprobante (`abrirRevision(v)`). El handler sigue aceptando una
+    fila concreta y conserva el fallback a la primera (`vouchers[0]`).
+    """
     movil = _fuente(MOVIL)
-    assert "onClick={() => abrirRevision()}" in movil, \
-        "el tile del KPI tiene que abrir la PRIMERA solicitud, no recibir el evento"
+
+    # La sección existe y es accesible (encabezado asociado + testid del panel).
+    assert 'aria-labelledby="ub-revision"' in movil
+    assert 'data-testid="admin-revision"' in movil
+    assert '<h2 id="ub-revision">' in movil
+
+    # Lista los vouchers y cada fila abre el suyo (no recibe el evento).
+    assert "vouchers.slice(0, 2).map((v) => (" in movil
+    assert "onClick={() => abrirRevision(v)}" in movil
+    assert "aria-label={`Revisar comprobante de ${v.alumno_nombre}`}" in movil
     assert "onClick={abrirRevision}" not in movil
-    # El handler sigue aceptando una fila concreta (la lista y el tile comparten puerta).
+
+    # El handler acepta una fila concreta y el fallback sigue siendo la primera.
     assert "const abrirRevision = (solicitud) => {" in movil
     assert "setRevision(solicitud || vouchers[0] || null);" in movil
