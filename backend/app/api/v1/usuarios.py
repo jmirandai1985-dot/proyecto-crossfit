@@ -16,7 +16,8 @@ from app.db.database import get_db
 from app.models.usuario import Usuario, RolUsuario
 from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
-from app.schemas.usuario import UsuarioCreate, UsuarioUpdate, UsuarioResponse, UsuarioListItem
+from app.schemas.usuario import (UsuarioCreate, UsuarioUpdate, UsuarioResponse,
+                                UsuarioListItem, nombre_mostrado)
 from app.core.dependencies import get_current_user, get_current_admin
 from app.core.estados import dia_chile
 from app.core.rate_limit import limiter, LIMIT_CRITICO
@@ -69,7 +70,6 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(password_bytes, hashed_bytes)
 
 
-@router.put("/cambiar-password", status_code=status.HTTP_200_OK)
 def _normalizar_nombre_coach(nombre: str, rol, es_prueba: bool = False,
                              correo: str = "") -> str:
     """Capitaliza el nombre de un coach; no toca cuentas demo ni de prueba."""
@@ -80,6 +80,7 @@ def _normalizar_nombre_coach(nombre: str, rol, es_prueba: bool = False,
     return " ".join((nombre or "").strip().split()).title()
 
 
+@router.put("/cambiar-password", status_code=status.HTTP_200_OK)
 def cambiar_password(
     datos: CambiarPasswordRequest,
     current_user: dict = Depends(get_current_user),
@@ -176,8 +177,7 @@ def crear_usuario(
     db_usuario = Usuario(
         tenant_id=usuario_data.tenant_id,
         rut=usuario_data.rut,
-        nombre=_normalizar_nombre_coach(
-            usuario_data.nombre, usuario_data.rol, correo=usuario_data.correo),
+        nombre=usuario_data.nombre,
         telefono=usuario_data.telefono,
         correo=usuario_data.correo,
         password_hash=hash_password(usuario_data.password),
@@ -274,7 +274,7 @@ def crear_usuario(
             # tests pueden parchear `email_service` en tiempo de ejecución.
             from app.services.email_service import enviar_email_activacion_alumno
             enviar_email_activacion_alumno(
-                {"id": db_usuario.id, "nombre": db_usuario.nombre,
+                {"id": db_usuario.id, "nombre": nombre_mostrado(db_usuario.nombre),
                  "correo": db_usuario.correo},
                 usuario_data.password,
             )
@@ -547,16 +547,6 @@ def actualizar_usuario(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Ya existe otro usuario con el correo {update_data['correo']} en este box"
             )
-
-    # Coaches: capitalizar el nombre al guardar. Se resuelve con el rol FINAL
-    # (por si el PUT cambia rol y nombre a la vez) y se omite en demo/prueba.
-    if "nombre" in update_data:
-        rol_para_nombre = update_data.get("rol", usuario.rol)
-        update_data["nombre"] = _normalizar_nombre_coach(
-            update_data["nombre"], rol_para_nombre,
-            es_prueba=bool(getattr(usuario, "es_prueba", False)),
-            correo=update_data.get("correo", usuario.correo),
-        )
 
     for field, value in update_data.items():
         setattr(usuario, field, value)

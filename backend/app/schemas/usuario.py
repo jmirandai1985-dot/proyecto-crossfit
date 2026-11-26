@@ -2,10 +2,22 @@
 Esquemas Pydantic para Usuario
 Define la estructura de datos para requests y responses
 """
-from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
+from pydantic import (BaseModel, EmailStr, Field, ConfigDict, field_serializer,
+                      field_validator)
 from typing import Optional
 from datetime import datetime, date
 from app.models.usuario import RolUsuario
+
+
+def nombre_mostrado(nombre: str) -> str:
+    """Title Case SOLO para mostrar; la base guarda el nombre tal como se escribió.
+
+    Es la capa de salida elegida (respuestas de la API) para no tocar el dato
+    guardado ni cada pantalla del frontend: `UsuarioResponse` y `UsuarioListItem`
+    la aplican al serializar. `usuarios.py` la usa además para el nombre que va
+    en el correo de credenciales (también es texto que ve la persona).
+    """
+    return " ".join((nombre or "").strip().split()).title()
 
 
 # Schema base con campos comunes
@@ -121,6 +133,11 @@ class UsuarioResponse(UsuarioBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @field_serializer("nombre")
+    def _nombre_title_case(self, valor: str) -> str:
+        """El nombre se guarda tal como se escribió; la API lo muestra en Title Case."""
+        return nombre_mostrado(valor)
+
 
 # Schema del resumen de membresía (extras OPTATIVOS del listado)
 class MembresiaResumenItem(BaseModel):
@@ -162,4 +179,9 @@ class UsuarioListItem(BaseModel):
     ultima_asistencia: Optional[date] = None
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True, serialize_by_alias=True)
+
+    @field_serializer("nombre")
+    def _nombre_title_case(self, valor: str) -> str:
+        """Listado del panel: misma regla de salida que `UsuarioResponse`."""
+        return nombre_mostrado(valor)
 

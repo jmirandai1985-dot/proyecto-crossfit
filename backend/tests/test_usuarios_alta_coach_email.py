@@ -127,10 +127,16 @@ def _en_bd(db, usuario_id):
     """Fila COMMITEADA del usuario (rollback para no leer caché de la sesión)."""
     db.rollback()
     fila = db.execute(text("""
-        SELECT rol::text AS rol, estado, activo, cambiar_password_al_login
+        SELECT nombre, rol::text AS rol, estado, activo, cambiar_password_al_login
         FROM usuarios WHERE id = :i
     """), {"i": usuario_id}).first()
     return dict(fila._mapping) if fila else None
+
+
+def _titulo(nombre):
+    """La regla de la CAPA DE SALIDA (Title Case). El nombre se guarda tal como se
+    escribió; la API (y el correo de credenciales) lo muestran capitalizado."""
+    return " ".join((nombre or "").strip().split()).title()
 
 
 # ── 1. El alta del coach SÍ intenta enviarle sus credenciales ────────────────
@@ -153,10 +159,14 @@ def test_el_alta_de_coach_intenta_enviar_sus_credenciales(cliente, box,
 
     assert len(llamadas) == 1, "el coach tiene que recibir sus credenciales"
     destino, password = llamadas[0]
-    assert destino == {"id": creado["id"], "nombre": nombre, "correo": correo}
+    assert destino == {"id": creado["id"], "nombre": _titulo(nombre), "correo": correo}
+    assert creado["nombre"] == _titulo(nombre), \
+        "la API MUESTRA el nombre en Title Case"
     assert password == CLAVE
 
     fila = _en_bd(box["db"], creado["id"])
+    assert fila["nombre"] == nombre, \
+        "la base guarda el nombre TAL COMO lo escribió el admin (sin normalizar)"
     assert fila["rol"] == "coach"
     assert fila["estado"] == "activo"
     assert fila["cambiar_password_al_login"] is True, (
@@ -185,3 +195,30 @@ def test_si_el_correo_falla_el_coach_se_crea_igual(cliente, box, monkeypatch):
     assert fila["rol"] == "coach"
     assert fila["estado"] == "activo"
     assert fila["cambiar_password_al_login"] is True
+
+
+# ── 3. El control de identidad es el RUT (UNIQUE por tenant) ─────────────────
+def test_un_alta_con_rut_repetido_se_rechaza(cliente, box, monkeypatch):
+    """No se puede crear un segundo usuario con el MISMO RUT en el mismo box.
+
+    Es el control que ya existe (`uq_rut_por_tenant` + validación del alta). La
+    regla del "tercer ingreso con el mismo nombre" NO se implementa: el nombre no
+    identifica a nadie, el RUT sí.
+    """
+    monkeypatch.setattr(
+        "app.services.email_service.enviar_email_activacion_alumno",
+        lambda coach, password: True)
+
+    payload, _nombre, _correo = _datos_coach(box)
+    primero = cliente.post(API, headers=box["admin"], json=payload)
+    assert primero.status_code == 201, primero.text
+
+    repetido = dict(payload)
+    repetido["correo"] = f"coach.repetido.{uuid.uuid4().hex[:10]}@example.com"
+    segundo = cliente.post(API, headers=box["admin"], json=repetido)
+
+    assert segundo.status_code == 400, segundo.text
+    detalle = segundo.json().get("detail", "")
+    assert "RUT" in detalle, detalle
+    assert payload["rut"] in detalle, detalle
+    print(f"\n[OK] RUT repetido rechazado: {detalle}")
