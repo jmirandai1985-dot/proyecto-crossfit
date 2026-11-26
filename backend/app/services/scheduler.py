@@ -138,6 +138,8 @@ LATIDO_MIN = 5
 # semanal del modelo de churn con la fuente real de asistencia).
 # Desde la Fase 5 de Referidos son 9: se sumó `detectar_promociones_referidos`
 # (23:55 CLT), que detecta umbrales de promociones por volumen y avisa al admin.
+# Con los Tramos de Referidos son 10: `evaluar_tramos_referidos` corre todos los
+# días a las 00:20 CLT y aplica los premios de los ciclos cerrados.
 IDS_NEGOCIO = ("generar_clases_diarias", "alerta_urgencia_renovacion",
                "alerta_renovacion", "alerta_inactividad", "alerta_ultimo_credito",
                "alerta_sin_creditos", "cierre_mes", "reentrenar_churn",
@@ -149,7 +151,7 @@ TENANT_ML = 1
 
 
 def _programar_jobs_de_negocio():
-    """Agenda los 9 jobs de negocio (sólo la líder). Idempotente: `replace_existing`.
+    """Agenda los 10 jobs de negocio (sólo la líder). Idempotente: `replace_existing`.
 
     Se vuelve a llamar cuando la instancia recupera el liderazgo. El catch-up de
     `_programar` + el lock (job, día) cubren el hueco de los minutos sin líder.
@@ -201,6 +203,15 @@ def _programar_jobs_de_negocio():
                "detectar_promociones_referidos",
                "Detecta umbrales de promociones de referidos y avisa al admin",
                ahora)
+    # ── Tramos de referidos (todos los días 00:20 CLT) ──
+    # Evalúa los ciclos cerrados y aplica los premios confirmados. El lock
+    # (job, día) de `job_evaluar_tramos_referidos` evita duplicados entre
+    # instancias; 00:20 no se pisa con cierre_mes ni generar_clases (00:05).
+    _programar(job_evaluar_tramos_referidos,
+               CronTrigger(hour=0, minute=20, timezone=tz),
+               "evaluar_tramos_referidos",
+               "Evalúa los tramos de referidos y aplica los premios del ciclo",
+               ahora)
     return list(IDS_NEGOCIO)
 
 
@@ -216,8 +227,8 @@ def _quitar_jobs_de_negocio():
         try:
             scheduler.remove_job(job_id)
             quitados.append(job_id)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("[Scheduler] no se pudo quitar el job %s: %s", job_id, _exc)
     return quitados
 
 
@@ -431,8 +442,8 @@ def _enviar_alerta_bloqueante(tipo: str) -> None:
                 try:
                     import sentry_sdk
                     sentry_sdk.capture_exception(e)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("[Scheduler] sentry_sdk no disponible: %s", _exc)
 
         logger.info(
             f"✅ [Scheduler] Alerta {tipo}: {len(tenants)} tenants, "
@@ -444,8 +455,8 @@ def _enviar_alerta_bloqueante(tipo: str) -> None:
         try:
             import sentry_sdk
             sentry_sdk.capture_exception(e)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("[Scheduler] sentry_sdk no disponible: %s", _exc)
     finally:
         db.close()
 
@@ -556,8 +567,8 @@ def _cierre_mes_bloqueante() -> None:
                 try:
                     import sentry_sdk
                     sentry_sdk.capture_exception(e)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("[Scheduler] sentry_sdk no disponible: %s", _exc)
 
         logger.info(
             f"✅ [Scheduler] Cierre de mes {anio}-{mes:02d} completado: "
@@ -571,8 +582,8 @@ def _cierre_mes_bloqueante() -> None:
         try:
             import sentry_sdk
             sentry_sdk.capture_exception(e)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("[Scheduler] sentry_sdk no disponible: %s", _exc)
     finally:
         db.close()
 
@@ -615,8 +626,8 @@ def _reentrenar_churn_impl():
         try:
             import sentry_sdk
             sentry_sdk.capture_exception(e)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("[Scheduler] sentry_sdk no disponible: %s", _exc)
         return None
     finally:
         db.close()
@@ -666,8 +677,8 @@ def _detectar_promociones_referidos_impl():
         try:
             import sentry_sdk
             sentry_sdk.capture_exception(e)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("[Scheduler] sentry_sdk no disponible: %s", _exc)
         return None
     finally:
         db.close()
@@ -726,8 +737,8 @@ def _evaluar_tramos_referidos_impl():
         try:
             import sentry_sdk
             sentry_sdk.capture_exception(e)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("[Scheduler] sentry_sdk no disponible: %s", _exc)
         return None
     finally:
         db.close()
