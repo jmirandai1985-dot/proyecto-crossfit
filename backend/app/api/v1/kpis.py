@@ -631,6 +631,11 @@ def _indice_estacional(filas: list) -> dict:
     queda como guarda genérica: un box sin historia sigue sin serie.
     """
     por_mes = {m: [] for m in range(1, 13)}
+    # Decisión 2026-11-26: la estacionalidad se calcula con los ÚLTIMOS 12 MESES
+    # CERRADOS. Antes se usaba TODA la historia cargada: con 13+ meses (un mes del
+    # calendario repetido) el promedio global y el valor por mes se mezclaban y la
+    # suma de índices dejaba de dar 12. La lista llega en orden cronológico.
+    filas = list(filas)[-12:]
     for f in filas:
         valor = f.get("valor")
         if valor is None:
@@ -712,6 +717,10 @@ def get_estacionalidad(
     # Sólo meses CERRADOS: el mes en curso no cerró y sus números son parciales.
     cerradas = [f for f in filas_bd
                 if (f.year, f.month) != (hoy.year, hoy.month)]
+    # Ventana publicada: los ÚLTIMOS 12 meses cerrados (misma decisión que
+    # `_indice_estacional`). Así `meses_con_datos`, `ventana` y los índices
+    # describen el MISMO conjunto y la suma de índices da 12.
+    cerradas = cerradas[-12:]
 
     ingresos = _indice_estacional(
         [{"month": f.month, "valor": float(f.ingresos_total)} for f in cerradas])

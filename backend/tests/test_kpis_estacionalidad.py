@@ -145,6 +145,23 @@ def test_e_los_meses_sin_observaciones_quedan_en_none():
         [1, 2, 4, 5, 6, 7, 9, 10, 11, 12]   # sólo marzo (3) y agosto (8) tienen dato
 
 
+# ── E2. UNIT: con 13 meses cargados se usan los ÚLTIMOS 12 ───────────────────
+def test_e2_trece_meses_usa_solo_los_ultimos_doce():
+    """TEST tiene 13 meses cerrados (oct-2025..oct-2026, octubre repetido).
+
+    La ventana es de 12: se descarta el más viejo, cada mes del calendario queda
+    una sola vez y la suma de índices vuelve a dar 12 (el invariante publicado).
+    """
+    meses = [10, 11, 12] + list(range(1, 11))          # oct-25 .. oct-26 (13)
+    filas = [{"month": m, "valor": (i + 1) * 1000} for i, m in enumerate(meses)]
+
+    r = _idx(filas)
+
+    assert r["observaciones"] == 12
+    assert all(x["muestras"] == 1 for x in r["meses"])
+    assert round(sum(x["indice"] for x in r["meses"]), 6) == 12.0
+
+
 # ── F. INTEGRACIÓN: 12 filas y la fórmula publicada (valor / promedio) ───────
 def test_f_el_indice_publicado_es_valor_sobre_promedio(estacionalidad):
     assert estacionalidad["fuente"] == "monthly_kpis (meses cerrados)"
@@ -153,7 +170,9 @@ def test_f_el_indice_publicado_es_valor_sobre_promedio(estacionalidad):
     assert estacionalidad["suficiente"] is True, (
         "TEST tiene los 12 meses del backfill; si no, correr "
         "POST /kpis/populate/monthly?backfill=12")
-    assert estacionalidad["meses_con_datos"] >= 12
+    assert estacionalidad["meses_con_datos"] == 12, (
+        "la ventana publicada son los ÚLTIMOS 12 meses cerrados; con 13+ meses "
+        "cargados la suma de índices deja de dar 12")
 
     promedio = estacionalidad["promedios"]["ingresos"]
     assert estacionalidad["ingresos"]["promedio"] == promedio
