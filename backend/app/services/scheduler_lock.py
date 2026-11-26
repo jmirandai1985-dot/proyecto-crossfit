@@ -70,8 +70,10 @@ Lo vigila `tests/test_scheduler_lock_sql.py` (unitario) y
 import logging
 from contextlib import contextmanager
 
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import NullPool
 
+from app.core.config import settings
 from app.utils.santiago import hoy_santiago
 
 logger = logging.getLogger("uvicorn.scheduler")
@@ -99,15 +101,28 @@ CLAVES_JOB = {
 
 _conexion_lider = None
 
+# Engine DEDICADO del lock de líder: DIRECT_URL (sin "-pooler") + NullPool.
+# El advisory lock de líder es de SESIÓN: tiene que vivir en UNA conexión lógica
+# que no comparta backend con otras. Con la URL "-pooler" (pgbouncer en modo
+# transacción) el backend no queda fijado a la conexión, el lock se perdía y otra
+# conexión podía re-tomarlo (medido en test_scheduler_lock_integracion.py).
+# Se crea en el primer uso: importar este módulo no abre conexiones ni exige que
+# DIRECT_URL esté seteada (si faltara, el error queda en el try de quien conecta).
+_engine_lider = None
+
 
 def _nueva_conexion():
-    """Abre una conexión NUEVA del pool (no una compartida por request).
+    """Abre una conexión NUEVA y DIRECTA (sin pooler) para el lock de líder.
 
-    Único punto que toca la BD en este módulo: en los tests se dobla para no
-    abrir ninguna conexión ni hablar con Postgres.
+    Usa el engine dedicado de `DIRECT_URL` con NullPool: cada llamada abre su
+    propia conexión y `close()` la cierra de verdad (no vuelve a un pool que la
+    pueda reasignar). Único punto que toca la BD en este módulo: en los tests se
+    dobla para no abrir ninguna conexión ni hablar con Postgres.
     """
-    from app.db.database import engine
-    return engine.connect()
+    global _engine_lider
+    if _engine_lider is None:
+        _engine_lider = create_engine(settings.DIRECT_URL, poolclass=NullPool)
+    return _engine_lider.connect()
 
 
 def clave_dia(dia=None) -> int:
@@ -156,14 +171,14 @@ def tomar_lock_lider() -> bool:
         logger.warning(f"[scheduler-lock] pg_try_advisory_lock(líder) falló: {e}")
         try:
             conn.close()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("[scheduler-lock] no se pudo cerrar la conexión: %s", _exc)
         return False
     if not obtenido:
         try:
             conn.close()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("[scheduler-lock] no se pudo cerrar la conexión: %s", _exc)
         return False
     _conexion_lider = conn
     logger.info("[scheduler-lock] esta instancia ES la líder del scheduler")
@@ -216,8 +231,8 @@ def olvidar_lock_lider() -> None:
         return
     try:
         conn.close()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("[scheduler-lock] no se pudo cerrar la conexión: %s", _exc)
     logger.warning("[scheduler-lock] se suelta la conexión del lock de líder "
                    "(se perdió el liderazgo; se devuelve la ranura al pool)")
 
@@ -232,13 +247,13 @@ def soltar_lock_lider() -> None:
     try:
         conn.execute(text("SELECT pg_advisory_unlock(CAST(:clave AS bigint))"),
                      {"clave": CLAVE_LIDER})
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("[scheduler-lock] no se pudo liberar el lock de líder: %s", _exc)
     finally:
         try:
             conn.close()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("[scheduler-lock] no se pudo cerrar la conexión: %s", _exc)
         logger.info("[scheduler-lock] lock de líder liberado")
 
 
@@ -288,11 +303,11 @@ def lock_de_job(job_id: str, dia=None, conexion=None):
                 conn.execute(
                     text("SELECT pg_advisory_unlock(CAST(:k AS int), CAST(:d AS int))"),
                     {"k": clave, "d": clave2})
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("[scheduler-lock] no se pudo liberar el lock del job: %s", _exc)
         if propia and conn is not None:
             try:
                 conn.close()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("[scheduler-lock] no se pudo cerrar la conexión: %s", _exc)
 

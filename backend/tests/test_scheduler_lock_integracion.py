@@ -155,17 +155,33 @@ def test_el_latido_recupera_el_liderazgo_tras_perder_el_lock():
 
 
 def test_olvidar_lock_lider_devuelve_la_ranura_al_pool():
-    """La conexión muerta se quedaba ocupando 1 de 15 ranuras para siempre."""
-    antes = engine.pool.checkedout()
+    """Al olvidar el lock, la conexión del líder se cierra y no queda nada colgado.
+
+    Antes se medía `engine.pool.checkedout()` (la ranura del pool de la app), que
+    era la premisa del diseño viejo. El líder ahora usa su propio engine
+    (`DIRECT_URL` + NullPool) y NO ocupa una ranura de ese pool; lo que importa
+    —y se verifica acá— es que hay sesión al tomar el lock, que desaparece al
+    olvidarlo y que no queda el advisory lock de líder.
+    """
     assert sl.tomar_lock_lider() is True
-    assert engine.pool.checkedout() == antes + 1
     pid = _pid_de(sl._conexion_lider)
+    assert pid, "la conexión del líder no tiene sesión en Postgres"
+
     _matar_sesion(pid)
     assert sl.verificar_lock_lider() is False
 
     sl.olvidar_lock_lider()
 
     assert sl.es_lider() is False
-    assert engine.pool.checkedout() == antes, (
-        "la ranura de la conexión muerta no volvió al pool: se pierde 1 de 15 por "
-        "instancia hasta el reinicio de la app")
+    assert _estado_de(pid) is None, (
+        "la sesión del líder sigue en pg_stat_activity después de olvidarla: "
+        "la conexión no se cerró")
+
+    with engine.connect() as otra:
+        colgados = otra.execute(
+            text("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' "
+                 "AND objsubid = 1 AND objid = CAST(:clave AS int) AND granted"),
+            {"clave": sl.CLAVE_LIDER}).scalar()
+        otra.rollback()
+    assert colgados == 0, (
+        f"quedaron {colgados} advisory lock(s) de CLAVE_LIDER colgados")
