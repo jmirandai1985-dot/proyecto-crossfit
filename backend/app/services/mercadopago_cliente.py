@@ -26,6 +26,7 @@ import logging
 from typing import Optional
 
 from app.core.config import settings
+from app.core.urls import url_frontend
 from app.utils.rut import normalizar_rut, validar_rut
 
 logger = logging.getLogger(__name__)
@@ -123,7 +124,7 @@ def configuracion() -> dict:
         "webhook_secret": (settings.MERCADOPAGO_WEBHOOK_SECRET or "").strip(),
         "notification_url": (settings.MERCADOPAGO_NOTIFICATION_URL or "").strip(),
         "back_url_base": (settings.MERCADOPAGO_BACK_URL_BASE
-                          or settings.FRONTEND_URL or "").strip().rstrip("/"),
+                          or url_frontend() or "").strip().rstrip("/"),
     }
 
 

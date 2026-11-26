@@ -61,6 +61,8 @@ def smtp_falso(monkeypatch):
 # ── B.1: el From se sanea (una env var mal pegada ya no rompe TODOS los correos) ──
 
 def test_from_saneado_con_env_var_malformada(smtp_falso, monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "EMAIL_MODO", email_service.MODO_REAL)
     monkeypatch.setattr(settings, "GMAIL_SMTP_USER", "  usuario@test.com\n")
     monkeypatch.setattr(settings, "GMAIL_SMTP_APP_PASSWORD", "clave-de-prueba")
 
