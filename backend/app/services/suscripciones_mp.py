@@ -67,6 +67,7 @@ IDEMPOTENCIA
 ⚠️ El access token no se loguea ni se guarda en `detalle_json`.
 """
 import logging
+import os
 import re
 from datetime import datetime
 from typing import Optional, Tuple
@@ -514,6 +515,27 @@ MENSAJE_EN_PROCESO = ("Ya hay una suscripción en proceso para este plan. "
                       "Espera unos segundos y revisa tu suscripción antes de "
                       "reintentar.")
 
+# ── Interruptor del COBRO AUTOMÁTICO (decisión de negocio 2026-11-26) ─────────
+# `POST /pagos/suscripcion` crea un `preapproval` de Mercado Pago: el alumno
+# autoriza que MP le cobre SOLO todos los meses. Esa función se deja en el
+# código (no se borra) pero APAGADA por defecto: el cobro automático no se ofrece
+# hasta que el negocio lo habilite explícitamente con
+# `MP_SUSCRIPCION_RECURRENTE_HABILITADA=true`. El pago único (`/pagos/membresia`)
+# no depende de esta bandera.
+BANDERA_RECURRENTE = "MP_SUSCRIPCION_RECURRENTE_HABILITADA"
+MENSAJE_RECURRENTE_APAGADA = ("El cobro automático no está habilitado en este box. "
+                              "Paga tu plan con el checkout normal.")
+
+
+def suscripcion_recurrente_habilitada() -> bool:
+    """¿Está habilitado el cobro automático? **Apagado por defecto** (fail-closed).
+
+    Se lee la variable de entorno en CADA llamada (no se captura al importar) para
+    poder encenderla sin tocar código; cualquier valor distinto de `true/1/si/yes`
+    mantiene la puerta cerrada.
+    """
+    return os.getenv(BANDERA_RECURRENTE, "").strip().lower() in {"1", "true", "si", "yes", "on"}
+
 
 def _abrir_periodo(db: Session, suscripcion: Suscripcion) -> None:
     """Reinicia la ventana del plan en el momento en que MP lo autoriza.
@@ -641,6 +663,12 @@ def crear_suscripcion_mp(db: Session, *, current_user: dict, plan_id: int) -> di
     el `transaction_amount` autorizado, así que congelar un descuento de una sola vez
     lo regalaría para siempre (y el crédito de referido se consume una única vez).
     """
+    if not suscripcion_recurrente_habilitada():
+        # Fail-closed ANTES de tocar la base o Mercado Pago (decisión 2026-11-26):
+        # no nace una fila `pendiente` ni se emite un `preapproval`, así que no hay
+        # forma de iniciar un cobro automático con la bandera apagada.
+        raise ErrorSuscripcion(MENSAJE_RECURRENTE_APAGADA, 503)
+
     config = mp.configuracion()  # fail-fast: sin pasarela no se escribe nada
     tenant_id = current_user["tenant_id"]
     alumno_id = current_user["usuario_id"]

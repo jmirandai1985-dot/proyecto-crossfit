@@ -46,6 +46,9 @@ from app.services import mercadopago_cliente as mp  # noqa: E402
 
 TENANT_ID = 1
 PRECIO_LISTA = 50000
+# Matrícula del box en TEST (`tenants.matricula_monto_clp`): se suma COMPLETA al
+# total que cobra Mercado Pago, después del descuento del plan (decisión 2026-11-26).
+MATRICULA_CLP = 25000
 PCT_INVITADO = Decimal("10.00")
 PCT_INVITADOR = Decimal("15.00")
 DESCUENTO_INVITADO = 5000                 # 50.000 * 10%
@@ -428,12 +431,13 @@ def _ultima_tx(db, usuario_id: int):
     return db.execute(text("""
         SELECT t.monto, t.referencia_id
         FROM transacciones_financieras t
-        WHERE (t.referencia_tipo = 'suscripcion'
-               AND t.referencia_id IN (
-                   SELECT id FROM suscripciones WHERE usuario_id = :u))
-           OR (t.referencia_tipo = 'solicitud_plan'
-               AND t.referencia_id IN (
-                   SELECT id FROM solicitudes_planes WHERE alumno_id = :u))
+        WHERE t.categoria = 'membresia'
+          AND ((t.referencia_tipo = 'suscripcion'
+                AND t.referencia_id IN (
+                    SELECT id FROM suscripciones WHERE usuario_id = :u))
+            OR (t.referencia_tipo = 'solicitud_plan'
+                AND t.referencia_id IN (
+                    SELECT id FROM solicitudes_planes WHERE alumno_id = :u)))
         ORDER BY t.id DESC LIMIT 1
     """), {"u": usuario_id}).first()
 
@@ -478,9 +482,9 @@ def test_mp_cobra_el_precio_con_descuento_de_referido(
     assert respuesta.status_code == 200, respuesta.text
     cobro = respuesta.json()
 
-    assert cobro["monto_clp"] == PRECIO_CON_CREDITO, (
-        "MP tiene que cobrar el precio CON el crédito del referido: si acá sale "
-        f"{PRECIO_LISTA} el alumno paga la lista y el descuento aparece tarde")
+    assert cobro["monto_clp"] == PRECIO_CON_CREDITO + MATRICULA_CLP, (
+        "MP cobra el plan CON el crédito del referido y le suma la matrícula "
+        "completa: la matrícula no lleva descuento")
     assert cobro["init_point"] == "https://mp/sandbox", \
         "en modo test se devuelve el sandbox_init_point"
 
@@ -488,14 +492,14 @@ def test_mp_cobra_el_precio_con_descuento_de_referido(
     preferencia = mercadopago_falso._preferencia.payload
     assert preferencia is not None, "se tiene que haber creado la preferencia"
     item = preferencia["items"][0]
-    assert item["unit_price"] == PRECIO_CON_CREDITO, \
-        "el unit_price es lo que MP cobra de verdad"
+    assert item["unit_price"] == PRECIO_CON_CREDITO + MATRICULA_CLP, \
+        "el unit_price es lo que MP cobra de verdad (plan + matrícula)"
     assert isinstance(item["unit_price"], int), "CLP no tiene decimales"
     assert item["currency_id"] == "CLP"
 
     pago = _pago_de(db, cobro["pago_id"])
     assert pago is not None, "el pago tiene que quedar guardado"
-    assert pago.monto_clp == PRECIO_CON_CREDITO
+    assert pago.monto_clp == PRECIO_CON_CREDITO + MATRICULA_CLP
     assert pago.concepto == "membresia"
     assert pago.estado == "iniciado", (
         "el clic no es un cobro: el pago queda 'iniciado' (invisible para el "
@@ -586,14 +590,14 @@ def test_mp_cobra_precio_de_lista_sin_referido(
     assert respuesta.status_code == 200, respuesta.text
     cobro = respuesta.json()
 
-    assert cobro["monto_clp"] == PRECIO_LISTA, \
-        "sin referido pendiente MP cobra el precio de lista completo"
+    assert cobro["monto_clp"] == PRECIO_LISTA + MATRICULA_CLP, \
+        "sin referido MP cobra el precio de lista + la matrícula completa"
 
     preferencia = mercadopago_falso._preferencia.payload
-    assert preferencia["items"][0]["unit_price"] == PRECIO_LISTA
+    assert preferencia["items"][0]["unit_price"] == PRECIO_LISTA + MATRICULA_CLP
 
     pago = _pago_de(db, cobro["pago_id"])
-    assert pago.monto_clp == PRECIO_LISTA
+    assert pago.monto_clp == PRECIO_LISTA + MATRICULA_CLP
 
     solicitud = _solicitud_de(db, pago.referencia_id)
     assert solicitud.origen_pago == "mercadopago"

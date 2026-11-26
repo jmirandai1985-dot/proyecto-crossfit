@@ -34,6 +34,7 @@ TENANT_ID = 1
 PRECIO_LISTA = 40000
 DESCUENTO_PCT = 25
 CLASES_PLAN = 10
+MATRICULA_CLP = 25000          # matrícula del box en TEST (decisión 2026-11-26)
 T0 = datetime(2026, 9, 29, 12, 0, tzinfo=SANTIAGO)
 
 
@@ -347,13 +348,30 @@ def test_b4_la_aprobacion_cobra_el_precio_final(cliente, tokens, db, escenario):
     assert aprobada.status_code == 200, aprobada.text
     monto = db.execute(text("""
         SELECT monto FROM transacciones_financieras
-        WHERE (referencia_tipo = 'suscripcion'
-               AND referencia_id IN (SELECT id FROM suscripciones WHERE usuario_id = :a))
-           OR (referencia_tipo = 'solicitud_plan' AND referencia_id = :s)
+        WHERE categoria = 'membresia'
+          AND ((referencia_tipo = 'suscripcion'
+                AND referencia_id IN (SELECT id FROM suscripciones WHERE usuario_id = :a))
+               OR (referencia_tipo = 'solicitud_plan' AND referencia_id = :s))
         ORDER BY id DESC LIMIT 1"""),
         {"a": escenario["alumno_id"], "s": creada["id"]}).scalar()
     assert monto == _esperado_final(), \
         "cobrar la lista sería cobrarle el descuento que el box le regaló"
+
+    # La MATRÍCULA es un ingreso SEPARADO (categoría propia) y NO hereda el
+    # descuento del plan. Decisión 2026-11-26: el SELECT de arriba filtra
+    # `categoria='membresia'` y esta consulta fija la otra mitad del contrato.
+    matricula = db.execute(text("""
+        SELECT monto, categoria FROM transacciones_financieras
+        WHERE categoria = 'matricula'
+          AND referencia_tipo = 'suscripcion'
+          AND referencia_id IN (SELECT id FROM suscripciones WHERE usuario_id = :a)
+        ORDER BY id DESC LIMIT 1"""),
+        {"a": escenario["alumno_id"]}).first()
+    assert matricula is not None, \
+        "el alumno nuevo tiene que pagar la matrícula en una transacción aparte"
+    assert matricula.categoria == "matricula"
+    assert int(matricula.monto) == MATRICULA_CLP, \
+        "la matrícula queda en su monto fijo (25.000), sin descuento de membresía"
 
 
 def test_b5_el_descuento_no_se_usa_dos_veces(cliente, tokens, db, escenario):
