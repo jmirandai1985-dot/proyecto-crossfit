@@ -1721,6 +1721,38 @@ export function useProgresoAlumnosCoach(alumnos) {
     });
 }
 
+// Contadores de los chips del tab Progreso: el estado (activo/iniciando/sin_datos) de
+// TODO el padrón filtrado, en lotes de 100 (tope del endpoint). Vive acá y no en la
+// pantalla para que las URLs canónicas de la API estén en un solo módulo.
+export function useEstadosProgresoCoach(ids, { enabled = true } = {}) {
+    const lista = (ids || []).slice();
+    const clave = lista.join(',');
+    return useQuery({
+        queryKey: ['historial-rm', 'progreso-estados', clave],
+        enabled: enabled && lista.length > 0,
+        staleTime: 60_000,
+        queryFn: async () => {
+            const lotes = [];
+            for (let i = 0; i < lista.length; i += 100) {
+                lotes.push(lista.slice(i, i + 100));
+            }
+            const filas = (await Promise.all(lotes.map((lote) => api.get(
+                '/api/v1/historial-rm/progreso-lote',
+                { params: { alumno_ids: lote.join(',') } },
+            ).then((r) => r.data?.alumnos || []).catch(() => [])))).flat();
+            const porId = new Map(filas.map((f) => [f.alumno_id, f]));
+            return lista.map((id) => {
+                const rms = porId.get(id)?.rms || [];
+                return {
+                    id,
+                    estado: rms.length >= 5 ? 'activo'
+                        : rms.length > 0 ? 'iniciando' : 'sin_datos',
+                };
+            });
+        },
+    });
+}
+
 // Reservas de UNA clase: la misma lista la miran las DOS pantallas del coach (la
 // tarjeta expandible del Dashboard y "Tomar Asistencia" en Gestión de Clases).
 export function useReservasPorClase(claseId) {

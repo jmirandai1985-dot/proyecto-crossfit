@@ -1,16 +1,14 @@
 import { useState, useMemo, useEffect, useDeferredValue } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
-// Cliente HTTP: el lote de progreso del padrón COMPLETO (contadores de los chips)
-// se pide en trozos de 100, el tope del endpoint `/historial-rm/progreso-lote`.
-import api from '../../services/api';
 import {
     SIN_DATOS, useAccionClase, useAlumnosDeCoach, useAlumnosEnPrueba,
     useAvisosMarketingVigentes,
     useClasesAsistenciaHoy, useClasesDelBox,
     useClasesCoach, useCoachDisciplinas, useCrearWodsBatch, useDisciplinas,
+    useEstadosProgresoCoach,
     useHistorialRmTodos, useProgresoAlumnosCoach, useReservasPorClase, useRmsAlumno,
     useTodosLosWods,
 } from '../../hooks/queries';
@@ -360,28 +358,8 @@ const DashboardCoach = () => {
             .map((a) => a.id),
         [alumnosQ.data, busquedaProgresoConteo],
     );
-    const estadosProgresoQ = useQuery({
-        queryKey: ['coach', 'progreso-estados', usuario_id, idsProgreso],
-        enabled: activeTab === 'progreso' && idsProgreso.length > 0,
-        staleTime: 60_000,
-        queryFn: async () => {
-            const lotes = [];
-            for (let i = 0; i < idsProgreso.length; i += 100) {
-                lotes.push(idsProgreso.slice(i, i + 100));
-            }
-            const filas = (await Promise.all(lotes.map((lote) => api.get(
-                '/api/v1/historial-rm/progreso-lote',
-                { params: { alumno_ids: lote.join(',') } },
-            ).then((r) => r.data?.alumnos || []).catch(() => [])))).flat();
-            const porId = new Map(filas.map((f) => [f.alumno_id, f]));
-            return idsProgreso.map((id) => {
-                const rms = porId.get(id)?.rms || [];
-                return {
-                    id,
-                    estado: rms.length >= 5 ? 'activo' : rms.length > 0 ? 'iniciando' : 'sin_datos',
-                };
-            });
-        },
+    const estadosProgresoQ = useEstadosProgresoCoach(idsProgreso, {
+        enabled: activeTab === 'progreso',
     });
     const rmsRecientesQ = useHistorialRmTodos(5);
     const alumnoRmsQ = useRmsAlumno(selectedAlumno?.id);

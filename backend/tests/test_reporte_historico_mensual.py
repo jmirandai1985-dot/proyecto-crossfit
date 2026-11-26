@@ -125,7 +125,10 @@ def _filas_de_ejemplo(estado_de_la_vencida: str = "vencido") -> list:
 
 
 # ── El SQL capturado, evaluado contra las filas (sin base) ───────────────────────────────────────
-_RE_NUNCA = re.compile(r"estado NOT IN \(([^)]*)\)")
+# El predicado de "nunca vigente" es el de la SUSCRIPCIÓN (`s.estado`). El MRR también
+# excluye `u.estado = 'rechazado'` (usuario sin MRR): sin anclar el alias, el regex
+# capturaba ESA lista (`('rechazado')`) en vez de la de `ESTADOS_SUSCRIPCION_NUNCA_VIGENTES`.
+_RE_NUNCA = re.compile(r"\bs\.estado NOT IN \(([^)]*)\)")
 _RE_INICIO = re.compile(r"fecha_inicio AT TIME ZONE '[^']+'\)::date <= ([^\s,)]+)")
 _RE_FIN = re.compile(r"fecha_expiracion AT TIME ZONE '[^']+'\)::date >= ([^\s,)]+)")
 

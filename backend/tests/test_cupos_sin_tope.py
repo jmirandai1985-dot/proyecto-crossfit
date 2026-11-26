@@ -75,10 +75,15 @@ def test_la_migracion_066_declara_la_cadena_y_el_backfill():
     assert "ck_horarios_cupo_maximo_positivo" in texto
 
 
-def test_la_migracion_066_es_la_cabeza_de_la_cadena():
+def test_la_migracion_066_sigue_en_la_cadena_con_su_contrato_congelado():
+    """La 066 ya NO es la cabeza: la cadena siguió. Lo que no puede cambiar es su
+    contrato (revision/down_revision) ni desaparecer del historial."""
     versiones = {p.stem for p in (BACKEND / "alembic" / "versions").glob("*.py")}
     assert "066_cupos_sin_tope_open_box" in versiones
-    assert not {v for v in versiones if v[:3] in ("067", "068")}
+    texto = MIGRACION.read_text(encoding="utf-8")
+    assert 'down_revision = "065_retencion_datos"' in texto
+    posteriores = {v for v in versiones if v[:3].isdigit() and int(v[:3]) > 66}
+    assert posteriores, "la cadena de migraciones tiene que haber avanzado tras la 066"
 
 
 # ── 2. Reservas: NULL = sin tope ─────────────────────────────────────────────
@@ -142,7 +147,10 @@ def test_el_kpi_por_disciplina_separa_los_dos_universos():
 
 def test_la_ocupacion_promedio_no_mezcla_reservas_sin_cupo():
     texto = fuente("app", "services", "metricas_service.py")
-    assert texto.count("FILTER (WHERE c.cupo_maximo IS NOT NULL)") >= 2
+    # La exclusión de las salas libres vive en el WHERE (antes era un FILTER):
+    # el denominador sólo suma clases con `cupo_maximo` no nulo.
+    assert "AND c.cupo_maximo IS NOT NULL" in texto
+    assert "c.cupo_maximo AS cupo" in texto
     assert "def reservas_sin_tope(" in texto
     assert "c.cupo_maximo IS NULL" in texto
     # El endpoint de Reportes expone el conteo aparte.
@@ -150,11 +158,18 @@ def test_la_ocupacion_promedio_no_mezcla_reservas_sin_cupo():
         "app", "api", "v1", "reportes.py")
 
 
-def test_el_excel_de_reportes_informa_reservas_en_vez_de_porcentaje():
+def test_el_excel_de_reportes_no_incluye_reservas_sin_cupo():
+    """Decisión de negocio 2026-11-26: el Excel de Reportes NO incluye "reservas sin cupo".
+
+    El conteo de las salas libres sigue viajando en el JSON de Reportes
+    (`reservasSinCupo`) y en el historial/KPIs, pero el archivo que descarga el
+    box no lo mezcla con las ventas: no es una columna de plata.
+    """
     texto = fuente("app", "services", "reportes_service.py")
-    assert "FILTER (WHERE c.cupo_maximo IS NOT NULL)" in texto
-    assert "reservas (sin cupo)" in texto
-    assert "clases_sin_tope" in texto
+    excel = texto[texto.index("def crear_reporte_ventas_mensual_bytes"):]
+    assert "reservas (sin cupo)" not in excel
+    assert "clases_sin_tope" not in excel
+    assert "sin cupo" not in excel
 
 
 # ── 5. Front: el util compartido y las pantallas ─────────────────────────────
@@ -184,9 +199,9 @@ def test_las_pantallas_muestran_sin_cupo_y_no_un_cero_por_ciento():
     cupos = fuente_front("utils", "cuposClase.js")
     assert "export const sinTopeClase" in cupos
 
-    for archivo in (("pages", "alumno", "Dashboard.jsx"),
-                    ("pages", "alumno", "InicioMobile.jsx"),
-                    ("pages", "coach", "DashboardCoach.jsx")):
+    for archivo in (("pages", "coach", "DashboardCoach.jsx"),
+                    ("components", "GrillaReservaClases.jsx"),
+                    ("components", "GrillaReservaClasesMobile.jsx")):
         texto = fuente_front(*archivo)
         assert "cupo_maximo === null" in texto, f"{archivo[-1]} no distingue sin tope"
 

@@ -157,7 +157,8 @@ def test_ocupacion_por_disciplina_cupo_cero_no_divide_por_cero():
     resultado = reportes._ocupacion_por_disciplina(db, 1, inicio, fin)
 
     assert len(db.consultas) == 1
-    assert resultado[0]["ocupacion_pct"] == 0
+    # Decisión 066: sin denominador (cupo 0) el % es None, no un 0% falso.
+    assert resultado[0]["ocupacion_pct"] is None
 
 
 def test_ocupacion_por_disciplina_sin_tope_informa_reservas_y_no_porcentaje():
@@ -273,7 +274,7 @@ def _contar_consultas(db, funcion):
     return resultado, consultas
 
 
-def test_el_endpoint_hace_a_lo_mas_22_consultas(db_test):
+def test_el_endpoint_hace_a_lo_mas_24_consultas(db_test):
     reportes = _reportes()
     tenant_id = _tenant_con_clases(db_test)
 
@@ -286,15 +287,16 @@ def test_el_endpoint_hace_a_lo_mas_22_consultas(db_test):
         ),
     )
 
-    # 22 = 19 históricas (endpoint sin N+1) + 2 bloques FIJOS de la revisión
+    # 24 = 19 históricas (endpoint sin N+1) + 2 bloques FIJOS de la revisión
     # 2026-10-22 (Parte B): ranking de planes del mes y Bazar del mes anterior
     # + 1 de la migración 066 (`metricas.reservas_sin_tope`: el conteo de las
-    # disciplinas de acceso libre, que NO entra al denominador de ocupación).
-    # El detalle de "Planes Vencidos" no sumó: reemplazó al COUNT de
+    # disciplinas de acceso libre, que NO entra al denominador de ocupación)
+    # + 2 del presupuesto ampliado por decisión del 2026-11-26 (sin optimizar el
+    # endpoint ahora). El detalle de "Planes Vencidos" no sumó: reemplazó al COUNT de
     # `cancelacionesMes` (mismo WHERE). Si la base no alcanza el mínimo de
-    # retención, `retencion_cohorte` corta antes y son menos: el tope sigue en 22.
-    assert len(consultas) <= 22, (
-        f"El endpoint ejecutó {len(consultas)} consultas (máximo 22).\n"
+    # retención, `retencion_cohorte` corta antes y son menos: el tope sigue en 24.
+    assert len(consultas) <= 24, (
+        f"El endpoint ejecutó {len(consultas)} consultas (máximo 24).\n"
         + "\n\n".join(consultas)
     )
 
@@ -329,20 +331,31 @@ def _legacy_ocupacion(db, tenant_id, inicio_mes, fin_mes):
         "fin_d": fin_mes.date(),
     }
     filas = db.execute(text("""
+        WITH clases_del_periodo AS (
+            SELECT c.id, c.disciplina_id, c.cupo_maximo,
+                   (SELECT COUNT(*)
+                      FROM reservas r
+                      JOIN usuarios u ON u.id = r.alumno_id
+                     WHERE r.clase_id = c.id
+                       AND r.asistio = true
+                       AND u.tenant_id = :tid
+                       AND NOT u.es_prueba) AS asistentes
+            FROM clases c
+            WHERE c.tenant_id = :tid
+              AND c.fecha >= :inicio_d
+              AND c.fecha <= :fin_d
+              AND """ + sql_clase_realizada("c") + """
+        )
         SELECT d.id, d.nombre,
-               COUNT(c.id) as total_clases,
-               COUNT(c.id) FILTER (WHERE c.cupo_maximo IS NULL) as clases_sin_tope,
-               COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0)), 0) as asistentes,
-               COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0))
-                        FILTER (WHERE c.cupo_maximo IS NOT NULL), 0) as asistentes_con_tope,
-               COALESCE(SUM(c.cupo_maximo)
-                        FILTER (WHERE c.cupo_maximo IS NOT NULL), 0) as cupo
-        FROM clases c
-        JOIN disciplinas d ON c.disciplina_id = d.id
-        WHERE c.tenant_id = :tid
-          AND c.fecha >= :inicio_d
-          AND c.fecha <= :fin_d
-          AND """ + sql_clase_realizada("c") + """
+               COUNT(cp.id) as total_clases,
+               COUNT(cp.id) FILTER (WHERE cp.cupo_maximo IS NULL) as clases_sin_tope,
+               COALESCE(SUM(cp.asistentes), 0) as asistentes,
+               COALESCE(SUM(cp.asistentes)
+                        FILTER (WHERE cp.cupo_maximo IS NOT NULL), 0) as asistentes_con_tope,
+               COALESCE(SUM(cp.cupo_maximo)
+                        FILTER (WHERE cp.cupo_maximo IS NOT NULL), 0) as cupo
+        FROM clases_del_periodo cp
+        JOIN disciplinas d ON cp.disciplina_id = d.id
         GROUP BY d.id, d.nombre
         ORDER BY d.id
     """), parametros).fetchall()
@@ -353,7 +366,10 @@ def _legacy_ocupacion(db, tenant_id, inicio_mes, fin_mes):
             SELECT COUNT(DISTINCT r.alumno_id)
             FROM reservas r
             JOIN clases c ON r.clase_id = c.id
+            JOIN usuarios u ON u.id = r.alumno_id
             WHERE c.tenant_id = :tid
+              AND u.tenant_id = :tid
+              AND NOT u.es_prueba
               AND c.disciplina_id = :did
               AND r.asistio = true
               AND c.fecha >= :inicio_d
@@ -362,7 +378,10 @@ def _legacy_ocupacion(db, tenant_id, inicio_mes, fin_mes):
         reservas = db.execute(text(
             "SELECT COUNT(r.id) FROM reservas r "
             "JOIN clases c ON r.clase_id = c.id "
-            "WHERE c.tenant_id = :tid AND c.disciplina_id = :did "
+            "JOIN usuarios u ON u.id = r.alumno_id "
+            "WHERE c.tenant_id = :tid AND u.tenant_id = :tid "
+            "  AND NOT u.es_prueba "
+            "  AND c.disciplina_id = :did "
             "  AND c.fecha >= :inicio_d AND c.fecha <= :fin_d "
             "  AND r.estado NOT IN (" + lista_sql() + ")"
         ), {**parametros, "did": r.id}).scalar() or 0
@@ -379,8 +398,9 @@ def _legacy_ocupacion(db, tenant_id, inicio_mes, fin_mes):
             "reservas": reservas,
             "cupo_total": cupo,
             "alumnos_unicos": alumnos,
-            "ocupacion_pct": None if sin_tope else (
-                round(r.asistentes_con_tope / cupo * 100) if cupo > 0 else 0),
+            # Sin tope o sin denominador: None (la decisión 066), no 0%.
+            "ocupacion_pct": None if (sin_tope or cupo <= 0) else round(
+                r.asistentes_con_tope / cupo * 100),
         })
     return resultado
 
@@ -402,6 +422,9 @@ def test_los_tres_bloques_devuelven_exactamente_lo_mismo_que_antes(db_test):
 
     # 2. Membresías: 6 COUNT por mes (el código anterior).
     from sqlalchemy import text
+
+    from app.utils.santiago import hoy_santiago
+    hoy = hoy_santiago()
     esperado_membresias = []
     for i in range(5, -1, -1):
         ini, fin_mes = reportes._inicio_fin_mes(-i)
@@ -413,7 +436,10 @@ def test_los_tres_bloques_devuelven_exactamente_lo_mismo_que_antes(db_test):
         """), {"tid": tenant_id, "ini": ini, "fin": fin_mes}).scalar() or 0
         esperado_membresias.append({
             "mes": f"{reportes.MESES[ini.month - 1]} {ini.year}",
+            "anio": ini.year,
+            "mes_num": ini.month,
             "membresias": int(cantidad),
+            "parcial": (ini.year, ini.month) == (hoy.year, hoy.month),
         })
     assert datos["historicoMembresias"] == esperado_membresias
 
@@ -424,8 +450,11 @@ def test_los_tres_bloques_devuelven_exactamente_lo_mismo_que_antes(db_test):
         ini, fin_mes = reportes._inicio_fin_mes(-i)
         esperado_ingresos.append({
             "mes": f"{reportes.MESES[ini.month - 1]} {ini.year}",
+            "anio": ini.year,
+            "mes_num": ini.month,
             "ingresos": metricas.ingresos_netos(
                 db_test, tenant_id, ini.date(), fin_mes.date()),
+            "parcial": (ini.year, ini.month) == (hoy.year, hoy.month),
         })
     assert datos["historicoIngresos"] == esperado_ingresos
 
