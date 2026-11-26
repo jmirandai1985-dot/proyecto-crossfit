@@ -8,14 +8,69 @@ Sigue el mismo patron que test_panel_alumno.py.
 """
 import pytest
 import requests
+from sqlalchemy import text
+
+from app.db.database import engine
 
 from tests.conftest import (BASE, ALUMNO_ID, COACH_ID, MOTIVO_SIN_SEED,
                             SEED_DISPONIBLE, TENANT_ID, HOY,
-                            DIA_REF_STR, get_coach_token, get_alumno_token)
+                            DIA_REF, DIA_REF_STR, get_coach_token, get_alumno_token)
 
 # Casos que asumen el MUNDO del seed (coach 1000 con CrossFit y las clases de
 # ese horario): con una TEST sincronizada desde PROD no se pueden correr.
 requiere_seed = pytest.mark.skipif(not SEED_DISPONIBLE, reason=MOTIVO_SIN_SEED)
+
+
+def _coach_solo_disciplina(disc=1, prohibida=4):
+    """Un coach ACTIVO que tenga `disc` y NO tenga `prohibida`.
+
+    El `COACH_ID` del seed (en TEST el demo 531) está asignado a 1,3,4 y 5, así
+    que no sirve para probar el 403 de otra disciplina: el permiso es CORRECTO.
+    Se elige un coach real que solo tenga CrossFit para que la prueba mida la
+    regla y no la amplitud del usuario demo.
+    """
+    with engine.connect() as c:
+        fila = c.execute(text("""
+            SELECT u.id
+            FROM usuarios u
+            JOIN coach_disciplinas cd
+              ON cd.coach_id = u.id AND cd.activo
+            WHERE u.tenant_id = :t
+              AND u.rol::text = 'coach' AND u.estado = 'activo'
+              AND cd.disciplina_id = :d
+              AND NOT EXISTS (
+                    SELECT 1 FROM coach_disciplinas x
+                    WHERE x.coach_id = u.id
+                      AND x.disciplina_id = :p AND x.activo)
+            ORDER BY (u.correo LIKE 'demo.%') DESC, u.id
+            LIMIT 1
+        """), {"t": TENANT_ID, "d": disc, "p": prohibida}).first()
+    if fila is None:
+        pytest.skip(f"No hay coach solo disciplina {disc} (sin {prohibida}) en TEST")
+    return int(fila.id)
+
+
+def _clase_sin_coach(disc, excluir=()):
+    """ID de una clase de `disc` en la fecha de referencia que NO tenga coach."""
+    with engine.connect() as c:
+        filas = c.execute(text("""
+            SELECT id FROM clases
+            WHERE tenant_id = :t AND disciplina_id = :d
+              AND fecha = :f AND cancelada = false
+              AND coach_id IS NULL
+            ORDER BY id
+        """), {"t": TENANT_ID, "d": disc, "f": DIA_REF}).fetchall()
+    ids = [int(f.id) for f in filas if int(f.id) not in set(excluir)]
+    if not ids:
+        pytest.skip(f"No hay clase de disciplina {disc} sin coach en TEST")
+    return ids[0]
+
+
+def _wod_de_la_clase(clase_id):
+    with engine.connect() as c:
+        fila = c.execute(text(
+            "SELECT wod_id FROM clases WHERE id = :i"), {"i": clase_id}).first()
+    return fila.wod_id if fila else None
 
 
 # ── Estado compartido entre tests ──
@@ -355,22 +410,16 @@ def test_c10_seguridad_coach_no_puede_operar_otra_disciplina():
     Coach 1000 solo está asignado a CrossFit (disc 1).
     Intenta operar sobre Levantamiento Olímpico (disc 4) y debe recibir 403.
     """
-    token = get_coach_token(coach_id=COACH_ID)
+    coach_id = _coach_solo_disciplina(1, 4)
+    token = get_coach_token(coach_id=coach_id)
+    assert Shared.wod_creado_id is not None, "Primero debe crear el WOD"
 
-    # ── Obtener una clase de Levantamiento Olímpico (disc 4) ──
-    r = requests.get(f"{BASE}/clases",
-                     params={"tenant_id": TENANT_ID, "fecha_desde": DIA_REF_STR, "fecha_hasta": DIA_REF_STR})
-    assert r.status_code == 200, f"GET clases: {r.status_code}"
-    clases = r.json()
-    clases_hoy = clases if isinstance(clases, list) else (
-        clases.get("clases", []) if isinstance(clases, dict) else [])
-    lev_olimp = [c for c in clases_hoy if c.get("disciplina_id") == 4]
-    assert len(lev_olimp) > 0, "Debe existir clase de Lev. Olímpico hoy"
-    clase_otra_disc = lev_olimp[0]
+    # ── Obtener una clase de Levantamiento Olímpico (disc 4) SIN coach ──
+    clase_otra_id = _clase_sin_coach(4)
 
     # ── Intentar asignar WOD a clase de OTRA disciplina → 403 ──
     r_wod = requests.post(
-        f"{BASE}/wods/clases/{clase_otra_disc['id']}/asignar-wod/1",
+        f"{BASE}/wods/clases/{clase_otra_id}/asignar-wod/{Shared.wod_creado_id}",
         params={"tenant_id": TENANT_ID},
         headers={"Authorization": f"Bearer {token}"}
     )
@@ -383,14 +432,14 @@ def test_c10_seguridad_coach_no_puede_operar_otra_disciplina():
     # ── Intentar marcar asistencia en reserva de OTRA disciplina → 403 ──
     # Crear una reserva en la clase de Lev. Olímpico para tener un ID válido
     r_res = requests.post(f"{BASE}/reservas/",
-                          json={"tenant_id": TENANT_ID, "alumno_id": ALUMNO_ID, "clase_id": clase_otra_disc["id"]},
+                          json={"tenant_id": TENANT_ID, "alumno_id": ALUMNO_ID, "clase_id": clase_otra_id},
                           headers={"Authorization": f"Bearer {get_alumno_token(ALUMNO_ID)}"})
     reserva_id_otra = None
     if r_res.status_code in (200, 201):
         reserva_id_otra = r_res.json().get("id")
     else:
         # Si ya existe, obtenerla del listado
-        r_list = requests.get(f"{BASE}/reservas/por-clase/{clase_otra_disc['id']}",
+        r_list = requests.get(f"{BASE}/reservas/por-clase/{clase_otra_id}",
                               params={"tenant_id": TENANT_ID})
         if r_list.status_code == 200:
             reservas_list = r_list.json()
@@ -421,27 +470,17 @@ def test_c12_batch_asignar_wod():
     a) Batch exitoso con 2 clases de la misma disciplina (CrossFit)
     b) Batch RECHAZADO si incluye una clase de otra disciplina
     """
-    token = get_coach_token(coach_id=COACH_ID)
+    coach_id = _coach_solo_disciplina(1, 4)
+    token = get_coach_token(coach_id=coach_id)
     assert Shared.wod_creado_id is not None, "Primero debe crear el WOD"
 
-    # Obtener clases de hoy
-    r = requests.get(f"{BASE}/clases",
-                     params={"tenant_id": TENANT_ID, "fecha_desde": DIA_REF_STR, "fecha_hasta": DIA_REF_STR})
-    assert r.status_code == 200
-    clases = r.json()
-    clases_hoy = clases if isinstance(clases, list) else (
-        clases.get("clases", []) if isinstance(clases, dict) else [])
-
-    # a) Batch exitoso: 2 clases de CrossFit (disc 1)
-    crossfit = [c for c in clases_hoy if c.get(
-        "disciplina_id") == Shared.disciplina_crossfit_id]
-    assert len(crossfit) >= 1, "Debe haber al menos 1 clase de CrossFit hoy"
-    cf_ids = [crossfit[0]["id"]]
+    # a) Batch exitoso: una clase de CrossFit (disc 1) SIN coach
+    cf_exitosa = _clase_sin_coach(1)
 
     r_batch = requests.post(f"{BASE}/wods/batch",
                             params={"tenant_id": TENANT_ID},
                             json={"wod_id": Shared.wod_creado_id,
-                                  "clase_ids": cf_ids},
+                                  "clase_ids": [cf_exitosa]},
                             headers={"Authorization": f"Bearer {token}"})
     assert r_batch.status_code == 200, \
         f"Esperaba 200 batch exitoso, obtuvo {r_batch.status_code}: {r_batch.text[:200]}"
@@ -452,11 +491,11 @@ def test_c12_batch_asignar_wod():
     print(
         f"  ✅ Batch: WOD asignado a {data['actualizadas']} clase(s) de CrossFit")
 
-    # ── b) Batch RECHAZADO: incluye clase de otra disciplina ──
-    lev_olimp = [c for c in clases_hoy if c.get("disciplina_id") == 4]
-    assert len(lev_olimp) > 0, "Debe existir clase de Lev. Olímpico hoy"
-    # Mezclar: 1 CrossFit + 1 Lev. Olímpico
-    ids_mezclados = [crossfit[0]["id"], lev_olimp[0]["id"]]
+    # ── b) Batch RECHAZADO: incluye clase de otra disciplina (todo o nada) ──
+    cf_mezcla = _clase_sin_coach(1, excluir=(cf_exitosa,))
+    lev_olimp = _clase_sin_coach(4)
+    antes = _wod_de_la_clase(cf_mezcla)
+    ids_mezclados = [cf_mezcla, lev_olimp]
 
     r_reject = requests.post(f"{BASE}/wods/batch",
                              params={"tenant_id": TENANT_ID},
@@ -467,6 +506,8 @@ def test_c12_batch_asignar_wod():
         f"Esperaba 403 batch rechazado, obtuvo {r_reject.status_code}: {r_reject.text[:200]}"
     assert "no esta asignado" in r_reject.json().get("detail", ""), \
         f"Mensaje debe indicar falta de asignacion: {r_reject.text[:200]}"
+    assert _wod_de_la_clase(cf_mezcla) == antes, \
+        "el batch es TODO O NADA: la clase válida no puede quedar modificada"
     print(f"  ✅ Batch mezclado (CrossFit + Lev Olímpico) → 403 (rechazado correctamente, todo-o-nada)")
 
 
@@ -483,22 +524,15 @@ def test_c14_cobertura_emergencia():
     token = get_coach_token(coach_id=COACH_ID)
     assert Shared.wod_creado_id is not None, "Primero debe crear el WOD"
 
-    # Obtener clases de hoy
-    r = requests.get(f"{BASE}/clases",
-                     params={"tenant_id": TENANT_ID, "fecha_desde": DIA_REF_STR, "fecha_hasta": DIA_REF_STR})
-    assert r.status_code == 200
-    clases = r.json()
-    clases_hoy = clases if isinstance(clases, list) else (
-        clases.get("clases", []) if isinstance(clases, dict) else [])
+    coach_id = _coach_solo_disciplina(1, 4)
+    token = get_coach_token(coach_id=coach_id)
 
-    # Encontrar clase de Lev. Olimpico (disc 4) - coach 1000 NO asignado a esta disciplina
-    lev_olimp = [c for c in clases_hoy if c.get("disciplina_id") == 4]
-    assert len(lev_olimp) > 0, "Debe existir clase de Lev. Olímpico en fecha de referencia"
-    clase_otra = lev_olimp[0]
+    # Clase de Lev. Olimpico (disc 4) SIN coach: el coach elegido NO tiene esa disciplina.
+    clase_otra_id = _clase_sin_coach(4)
 
     # ── a) Sin modo_emergencia → 403 (regresion del fix IDOR) ──
     r_sin = requests.post(
-        f"{BASE}/wods/clases/{clase_otra['id']}/asignar-wod/{Shared.wod_creado_id}",
+        f"{BASE}/wods/clases/{clase_otra_id}/asignar-wod/{Shared.wod_creado_id}",
         params={"tenant_id": TENANT_ID},
         headers={"Authorization": f"Bearer {token}"}
     )
@@ -508,7 +542,7 @@ def test_c14_cobertura_emergencia():
 
     # ── b) Con modo_emergencia=true → 200 + auditoria ──
     r_con = requests.post(
-        f"{BASE}/wods/clases/{clase_otra['id']}/asignar-wod/{Shared.wod_creado_id}",
+        f"{BASE}/wods/clases/{clase_otra_id}/asignar-wod/{Shared.wod_creado_id}",
         params={"tenant_id": TENANT_ID, "modo_emergencia": True},
         headers={"Authorization": f"Bearer {token}"}
     )
@@ -516,30 +550,22 @@ def test_c14_cobertura_emergencia():
         f"Con modo_emergencia debe dar 200, obtuvo {r_con.status_code}: {r_con.text[:200]}"
     print(f"  ✅ Con modo_emergencia=true → 200 (cobertura permitida)")
 
-    # Verificar que quedo registro en CoberturaEmergencia via SQL
-    import psycopg2
-    from app.core.config import settings
-    if settings.DATABASE_URL.startswith("postgresql://user:pass@"):
-        raise SystemExit("FATAL: Define DATABASE_URL en backend/.env.test (copia .env.example)")
-    DB = settings.DATABASE_URL
-    c = psycopg2.connect(DB)
-    cur = c.cursor()
-    cur.execute("""
-        SELECT coach_id, clase_id, disciplina_id, accion
-        FROM cobertura_emergencia
-        WHERE coach_id = %s AND clase_id = %s
-        ORDER BY created_at DESC LIMIT 1
-    """, (COACH_ID, clase_otra['id']))
-    row = cur.fetchone()
+    # Verificar que quedo registro en CoberturaEmergencia
+    with engine.connect() as c:
+        row = c.execute(text("""
+            SELECT coach_id, clase_id, disciplina_id, accion
+            FROM cobertura_emergencia
+            WHERE coach_id = :c AND clase_id = :cl
+            ORDER BY created_at DESC LIMIT 1
+        """), {"c": coach_id, "cl": clase_otra_id}).first()
+        c.rollback()
     assert row is not None, "Debe existir registro en CoberturaEmergencia"
-    assert row[0] == COACH_ID, f"coach_id esperado={COACH_ID}, real={row[0]}"
-    assert row[1] == clase_otra['id'], f"clase_id esperado={clase_otra['id']}, real={row[1]}"
-    assert row[2] == 4, f"disciplina_id esperado=4, real={row[2]}"
-    assert row[3] == 'asignar_wod', f"accion esperada='asignar_wod', real='{row[3]}'"
-    cur.close()
-    c.close()
+    assert row.coach_id == coach_id, f"coach_id esperado={coach_id}, real={row.coach_id}"
+    assert row.clase_id == clase_otra_id, f"clase_id esperado={clase_otra_id}, real={row.clase_id}"
+    assert row.disciplina_id == 4, f"disciplina_id esperado=4, real={row.disciplina_id}"
+    assert row.accion == 'asignar_wod', f"accion esperada='asignar_wod', real='{row.accion}'"
     print(
-        f"  ✅ Auditoria registrada: coach={COACH_ID} cubrio clase={clase_otra['id']} disciplina=4 accion=asignar_wod")
+        f"  ✅ Auditoria registrada: coach={coach_id} cubrio clase={clase_otra_id} disciplina=4 accion=asignar_wod")
 
 
 # ===================================================================

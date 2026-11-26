@@ -12,15 +12,17 @@ from app.models.wod_movimiento import WodMovimiento
 from app.models.wod_bloque import WodBloque
 from app.models.movimiento import Movimiento
 from app.models.clase import Clase
-from app.models.asistencia import Asistencia
+from app.models.reserva import Reserva
 from app.models.coach_disciplina import CoachDisciplina
 from app.models.aviso_marketing import AvisoMarketing
 from app.services import avisos_marketing as avisos
 from app.services import wod_semana
+from app.services.asistencia_real import condicion_asistio
 from app.services.movimiento_categoria import categoria_de
 from app.schemas import wod as schemas
 from app.schemas.wod_parse import WodParseRequest, WodParseResponse, MovimientoParseado, DebugInfo, FaseInfo, FaseMovimiento
 from app.schemas.intensidad_relativa import IntensidadRelativaItem
+from app.utils.santiago import hoy_santiago
 from datetime import date, timedelta
 from types import SimpleNamespace
 from typing import List
@@ -902,7 +904,7 @@ def _filas_intensidad_relativa(rows) -> List[dict]:
     """Convierte las filas del JOIN en los ítems que devuelve el endpoint.
 
     Se mantiene como función pura para poder testearla SIN base: recibe las filas ya
-    traídas (con asistencia `presente=True` filtrada en la query) y aplica las reglas:
+    traídas (con la asistencia REAL filtrada en la query: `reservas.asistio`) y aplica las reglas:
       · sólo `fuerza` (kg) y `gimnastico` (reps) — cardio/metabólico se descartan;
       · fuerza: `peso` nulo o 0 se descarta;
       · gimnástico: `repeticiones` se parsea con `_primer_entero`; sin número, se descarta.
@@ -935,11 +937,16 @@ def _filas_intensidad_relativa(rows) -> List[dict]:
 
 
 def _query_intensidad_relativa(db, alumno_id, tenant_id, desde):
-    """JOIN asistencia → clase → wod → wod_movimientos → movimientos.
+    """JOIN reserva (asistencia REAL) → clase → wod → wod_movimientos → movimientos.
 
-    `.select_from(Asistencia)` es OBLIGATORIO: sin él, el primer `.join(Clase, ...)`
-    referencia `asistencias` en el ON sin que esté en el FROM, y Postgres tira
-    "missing FROM-clause entry for table 'asistencias'" (500 en el Performance Hub).
+    La fuente de "asistió" es la ÚNICA del sistema: `reservas.asistio = true` +
+    la reserva no cancelada (`condicion_asistio()` de `services/asistencia_real`).
+    La tabla histórica `asistencias` NO se puebla desde las pantallas, así que
+    leerla dejaba el Performance Hub vacío.
+
+    `.select_from(Reserva)` es OBLIGATORIO: sin él, el primer `.join(Clase, ...)`
+    referencia `reservas` en el ON sin que esté en el FROM, y Postgres tira
+    "missing FROM-clause entry for table 'reservas'" (500 en el Performance Hub).
     """
     return (
         db.query(
@@ -951,15 +958,15 @@ def _query_intensidad_relativa(db, alumno_id, tenant_id, desde):
             WodMovimiento.peso,
             WodMovimiento.repeticiones,
         )
-        .select_from(Asistencia)
-        .join(Clase, Asistencia.clase_id == Clase.id)
+        .select_from(Reserva)
+        .join(Clase, Reserva.clase_id == Clase.id)
         .join(Wod, Clase.wod_id == Wod.id)
         .join(WodMovimiento, WodMovimiento.wod_id == Wod.id)
         .join(Movimiento, WodMovimiento.movimiento_id == Movimiento.id)
         .filter(
-            Asistencia.usuario_id == alumno_id,
-            Asistencia.tenant_id == tenant_id,
-            Asistencia.presente.is_(True),
+            Reserva.alumno_id == alumno_id,
+            Reserva.tenant_id == tenant_id,
+            condicion_asistio(Reserva),
             Wod.tenant_id == tenant_id,
             Wod.fecha >= desde,
         )
@@ -983,7 +990,7 @@ def intensidad_relativa_wods(
     tenant_id = current_user["tenant_id"]
     alumno_id = current_user["usuario_id"]
 
-    desde = date.today() - timedelta(days=90)
+    desde = hoy_santiago() - timedelta(days=90)
     rows = _query_intensidad_relativa(db, alumno_id, tenant_id, desde).all()
 
     return _filas_intensidad_relativa(rows)
@@ -1299,6 +1306,10 @@ def asignar_wod_batch(
 
     Seguridad: valida que el coach autenticado pertenezca a la disciplina
     de CADA clase. Si una sola clase es de una disciplina ajena, TODO el batch falla con 403.
+    El batch NO acepta `modo_emergencia`: la cobertura de emergencia es una acción
+    EXPLÍCITA de la clase puntual (`/clases/{id}/asignar-wod?modo_emergencia=true`),
+    no algo que un coach pueda activar para todo un lote desde el body.
+    Una clase ya asignada a OTRO coach tampoco se puede tocar en el batch.
     tenant_id se deriva del token JWT.
     """
     # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
@@ -1334,12 +1345,22 @@ def asignar_wod_batch(
             raise HTTPException(
                 status_code=404, detail=f"Clase {cid} no encontrada")
 
-        # Validar que el coach pertenece a la disciplina de esta clase
+        # Validar que el coach pertenece a la disciplina de esta clase.
+        # `modo_emergencia=False` FIJO: el batch no puede cubrir emergencias en lote.
         if rol == "coach" and clase.disciplina_id:
             verificar_coach_disciplina(
                 coach_id, clase.disciplina_id, db,
-                modo_emergencia=body.get("modo_emergencia", False),
+                modo_emergencia=False,
                 clase_id=cid, accion="asignar_wod", tenant_id=tenant_id
+            )
+
+        # Una clase que YA es de otro coach no se puede reasignar en lote: el
+        # panel manda el coach explícito (`/supervision/...`) para eso.
+        if rol == "coach" and clase.coach_id not in (None, coach_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(f"La clase {cid} esta asignada a otro coach. "
+                        "Solo el admin puede reasignarla."),
             )
 
         clases_a_asignar.append(clase)

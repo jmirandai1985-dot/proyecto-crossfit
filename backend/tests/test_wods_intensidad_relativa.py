@@ -10,7 +10,7 @@
 
       1. fuerza válido (kg) → devuelve la fila;
       2. gimnástico con texto no parseable ("AMRAP") → se descarta sin romper;
-      3. WOD sin asistencia `presente=True` → no aparece (lo garantiza el WHERE).
+      3. WOD sin asistencia REAL (`reservas.asistio = true`) → no aparece (lo garantiza el WHERE).
 
     Correr (aislado):
         cd backend && py -3.12 -m pytest tests/test_wods_intensidad_relativa.py -q
@@ -81,21 +81,23 @@ def test_cardio_y_metabolico_se_excluyen_a_proposito():
     assert wods._filas_intensidad_relativa([_fila(categoria='metabolico')]) == []
 
 
-def test_sin_asistencia_presente_no_aparece_por_el_where():
-    """El endpoint sólo trae asistencias `presente=True`: un WOD con la asistencia
-    ausente directamente no entra en el JOIN. Se fija el filtro en el código."""
+def test_sin_asistencia_real_no_aparece_por_el_where():
+    """El endpoint sólo trae la asistencia REAL (`reservas.asistio = true`): un WOD
+    sin asistencia directamente no entra en el JOIN. Se fija el predicado en el código."""
     src = (_BACKEND / 'app/api/v1/wods.py').read_text(encoding='utf-8')
-    assert 'Asistencia.presente.is_(True)' in src, \
-        "el endpoint tiene que filtrar `presente=True` (si no, trae WODs no asistidos)"
+    assert 'condicion_asistio(Reserva)' in src, \
+        "el endpoint tiene que usar la definición ÚNICA de 'asistió' (reservas.asistio)"
+    assert 'Asistencia.presente.is_(True)' not in src, \
+        "la tabla histórica `asistencias` NO se puebla: no puede ser la fuente"
 
 
-def test_query_tiene_asistencia_en_el_from():
-    """El FROM arranca en `asistencias` (`.select_from(Asistencia)`).
+def test_query_tiene_reserva_en_el_from():
+    """El FROM arranca en `reservas` (`.select_from(Reserva)`).
 
     Es el fix del 500 en producción: antes el primer `.join(Clase, ...)` referenciaba
-    `asistencias` en el ON sin que estuviera en el FROM, y Postgres tiraba
-    "missing FROM-clause entry for table 'asistencias'". Este test compila el SQL
-    (dialecto Postgres) SIN base y verifica que el FROM quede bien formado.
+    la tabla del FROM sin que estuviera declarada, y Postgres tiraba
+    "missing FROM-clause entry". Este test compila el SQL (dialecto Postgres) SIN
+    base y verifica que el FROM quede bien formado.
     """
     from sqlalchemy.dialects import postgresql
     from sqlalchemy.orm import Query
@@ -106,9 +108,9 @@ def test_query_tiene_asistencia_en_el_from():
 
     q = wods._query_intensidad_relativa(_Db(), 1, 1, date(2026, 1, 1))
     sql = str(q.statement.compile(dialect=postgresql.dialect()))
-    assert "FROM asistencias" in sql, f"FROM sin asistencia:\n{sql}"
-    assert "asistencias.clase_id = clases.id" in sql, \
-        f"el primer JOIN (clases) no está anclado a asistencias:\n{sql}"
+    assert "FROM reservas" in sql, f"FROM sin reservas:\n{sql}"
+    assert "reservas.clase_id = clases.id" in sql, \
+        f"el primer JOIN (clases) no está anclado a reservas:\n{sql}"
 
 
 def test_intensidad_relativa_se_registra_antes_que_wod_id():

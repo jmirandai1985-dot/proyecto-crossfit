@@ -58,6 +58,11 @@ LECTORES = {
         "asistencias_entre_por_alumno(",
     ),
     "backend/app/api/v1/usuarios.py": ("ultima_asistencia_por_alumno(",),
+    "backend/app/api/v1/wods.py": (
+        "from app.services.asistencia_real import condicion_asistio",
+        "condicion_asistio(Reserva)",
+        ".select_from(Reserva)",
+    ),
     "backend/ml/features.py": (
         "ultima_asistencia_por_alumno(",
         "asistencias_entre_por_alumno(",
