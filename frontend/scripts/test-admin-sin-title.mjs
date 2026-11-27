@@ -93,8 +93,14 @@ console.log('\n2. Los avisos que eran tooltips son texto SIEMPRE visible');
 const inicio = leer(DIR + 'InicioMobileAdmin.jsx');
 ok(/className="app-sub"[\s\S]{0,80}por entregar/.test(inicio),
     'Bazar: la cantidad de pedidos por entregar va como texto del acceso');
-ok(/className="att-err"[^>]*>[\s\S]{0,60}\{errores\.activos\}/.test(inicio),
+// f62def4 pasó los KPIs a SECCIONES: el error de la tarjeta lo pinta el componente
+// compartido `Kpi` en `.kpi-error` (texto) y el aviso de Asistencia sigue en `.att-err`.
+ok(/className="att-err"[^>]*role="alert"[^>]*>[\s\S]{0,60}\{resumenAdmin\.errores\.diario\}/.test(inicio),
     'KPIs: el motivo del error se imprime como texto, no como title=');
+ok(/className="kpi-error">\{error\}/.test(inicio),
+    'KPIs: la tarjeta imprime su error como texto (`.kpi-error`)');
+ok(/error=\{errores\.activos\}/.test(inicio),
+    'KPIs: la tarjeta de Alumnos sigue recibiendo su error (sin title=)');
 ok(/className="att-err"[^>]*role="alert"/.test(inicio),
     'KPIs: y el aviso se anuncia (role="alert")');
 ok(/className="now"[\s\S]{0,80}ahora/.test(inicio),

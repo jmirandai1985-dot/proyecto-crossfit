@@ -9,7 +9,7 @@
 // Reportes. Este test fija lo que puede volver a romperse sin que nadie lo note:
 //   1. el onClick de la tarjeta va a `/admin/pedidos` y no a Reportes
 //   2. App.jsx declara la ruta `pedidos` con el componente Pedidos
-//   3. Pedidos.jsx es la pantalla de ventas reales (GET /pedidos + columna Total)
+//   3. Pedidos.jsx es la pantalla de ventas reales (GET /pedidos + total por pedido)
 //   4. la lógica de MÉTRICAS (Reportes.jsx) queda intacta
 import { readFileSync, existsSync } from 'node:fs';
 
@@ -63,7 +63,9 @@ const PEDIDOS = leer(PEDIDOS_REL);
 ok(/const AdminPedidos = \(\) => \{/.test(PEDIDOS), 'conserva su componente');
 ok(/api\.get\('\/api\/v1\/pedidos'/.test(PEDIDOS),
     'lista los pedidos reales (GET /api/v1/pedidos)');
-ok(/\{\(p\.total \|\| 0\)\.toLocaleString\('es-CL'\)\}/.test(PEDIDOS),
+// c8e7cb6 pasó la tabla a TARJETAS (`TarjetaPedido`): la variable es `pedido` (no `p`)
+// y el total se imprime en un template literal dentro del JSX, no en un bloque `{...}`.
+ok(/\(pedido\.total \|\| 0\)\.toLocaleString\('es-CL'\)/.test(PEDIDOS),
     'muestra el total de cada pedido (la venta, no un agregado del informe)');
 
 // ── 4. La lógica de métricas queda intacta ──────────────────────────────────

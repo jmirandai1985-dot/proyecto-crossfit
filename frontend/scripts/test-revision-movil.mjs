@@ -27,7 +27,9 @@ const SIN_COMENTARIOS = MOVIL
     .replace(/^\s*\/\/.*$/gm, '');
 
 console.log('== 1. La tarjeta pide TAMBIÉN los pedidos del Bazar pendientes ==');
-ok(MOVIL.includes("api.get('/api/v1/pedidos', { params: { estado: 'pendiente' } })"),
+// 656ef8b: la cola excluye los pedidos de pago ONLINE sin comprobante (no hay nada que
+// revisar), por eso el fetch lleva `solo_con_voucher: true`.
+ok(MOVIL.includes("api.get('/api/v1/pedidos', { params: { estado: 'pendiente', solo_con_voucher: true } })"),
     'consulta GET /pedidos?estado=pendiente (los recién creados)');
 ok(MOVIL.includes('const [pedidosPendientes, setPedidosPendientes]'),
     'guarda esa cola en su propio estado');
@@ -62,8 +64,12 @@ ok(SIN_COMENTARIOS.includes('vouchers.slice(0, 2).map'),
     'los vouchers de plan se siguen listando primero');
 // Tanda 4: la pantalla de pendientes es UNA con pestañas, así que el acceso apunta a
 // `rutaPendientes('solicitudes')` (helper compartido) en vez del path viejo.
-ok(SIN_COMENTARIOS.includes("navigate(rutaPendientes('solicitudes'))"),
-    'y su acceso a la pestaña Solicitudes de Pendientes sigue igual');
+// e368de4: el voucher se revisa en la MISMA tarjeta (modal `abrirRevision`) y "Ver todas"
+// va a la pantalla unificada de Pendientes (ahí se elige la pestaña).
+ok(/onClick=\{\(\) => abrirRevision\(v\)\}/.test(SIN_COMENTARIOS),
+    'tocar un voucher abre la revisión en la misma tarjeta');
+ok(SIN_COMENTARIOS.includes("navigate('/admin/pendientes')"),
+    'y "Ver todas" sigue llevando a la pantalla unificada de Pendientes');
 
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);

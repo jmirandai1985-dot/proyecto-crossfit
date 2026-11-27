@@ -34,7 +34,11 @@ const eq = (obtenido, esperado, msg) => {
 const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
 const MS_DIA = 24 * 60 * 60 * 1000;
-const AHORA = Date.UTC(2026, 9, 24, 12, 0, 0);
+// El "ahora" del script es el RELOJ REAL: las fixtures son relativas (`hace(n)`), así que
+// los chequeos que llaman sin `ahora` explícito (los que prueban el default del util)
+// siguen valiendo con el paso del tiempo. Con una fecha fija se volvían verdes un día y
+// rojos 30 días después.
+const AHORA = Date.now();
 const hace = (dias) => new Date(AHORA - dias * MS_DIA).toISOString();
 
 const notif = (extra = {}) => ({ id: 1, tipo: 'pedido_nuevo', mensaje: 'hola', leida: false, ...extra });
@@ -159,9 +163,15 @@ ok(campana.includes('const todoVencido = useMemo('),
 ok(campana.includes('{todoVencido && ('),
     'el aviso de los 30 días sólo aparece cuando el motivo es el vencimiento');
 
-// ── 6. No se inventó un borrado: la limpieza es sólo de vista ───────────────
-console.log('6. Sólo vista: no se borra nada');
-ok(!campana.includes('api.delete('), 'la campana no hace DELETE (el backend no lo tiene)');
+// ── 6. "Borrar todas" es soft-delete y pide confirmación por N ──────────────
+console.log('6. "Borrar todas" es soft-delete y pide confirmación por N');
+// 4a47596: el panel ofrece "Borrar todas" y el backend lo soporta con
+// `DELETE /notificaciones?confirmar=N` (soft-delete: marca `eliminada_en`; si el N
+// cambió responde 409 y no borra nada). El test fija ese contrato.
+ok(campana.includes("api.delete('/api/v1/notificaciones'"),
+    'la campana usa el DELETE que sí existe en el backend');
+ok(/params:\s*\{\s*confirmar:\s*cantidad\s*\}/.test(campana),
+    'el borrado manda el N que el usuario confirmó (el backend responde 409 si cambió)');
 ok(campana.includes('/api/v1/notificaciones/leer-todas'),
     'sigue existiendo "marcar todas como leídas" (PUT)');
 ok(campana.includes('/api/v1/notificaciones/${id}/leer'),
