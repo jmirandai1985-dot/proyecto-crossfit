@@ -31,8 +31,11 @@ export const suscripcionVigenteHoy = (fechaExpiracion) =>
 export const suscripcionVigente = (lista = []) => {
     const vigentes = (lista || []).filter((s) => suscripcionVigenteHoy(s?.fecha_expiracion));
     if (vigentes.length === 0) return null;
+    // Valor inicial explícito = la primera vigente: es el mismo acumulador que `reduce`
+    // elegía de forma implícita, así no depende de que la lista venga con datos (el guard
+    // de arriba ya devolvió `null` si no había ninguna).
     return vigentes.reduce((a, b) =>
-        new Date(b.fecha_expiracion) > new Date(a.fecha_expiracion) ? b : a);
+        new Date(b.fecha_expiracion) > new Date(a.fecha_expiracion) ? b : a, vigentes[0]);
 };
 
 /**
@@ -161,9 +164,11 @@ export const solicitudConComprobante = (solicitudes = []) => {
     if (conArchivo.length === 0) return null;
     const pendiente = conArchivo.find((s) => s.estado === 'pending');
     if (pendiente) return pendiente;
+    // Mismo criterio: el guard de arriba ya descartó la lista vacía; el inicial es la
+    // primera CON archivo (lo que `reduce` elegía implícitamente).
     return conArchivo.reduce((mejor, s) => (
         fechaMs(s.created_at) > fechaMs(mejor.created_at) ? s : mejor
-    ));
+    ), conArchivo[0]);
 };
 
 /** Rótulo y color del estado de una solicitud de plan (`NULL`/desconocido no rompe). */
