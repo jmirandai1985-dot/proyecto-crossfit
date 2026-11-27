@@ -9,6 +9,9 @@ Qué cubre
    axios (Authorization + Content-Type, POST/PUT/PATCH/DELETE) responde 200; una cabecera
    o un método que el API no usa responde 400; `*` ya no se anuncia; una respuesta simple
    al origen permitido lleva su `Origin` exacto (necesario con `allow_credentials`).
+3. CORS es el ÚLTIMO `add_middleware` (el más externo de la cadena) y por eso una
+   respuesta de error también es legible desde el navegador (Sonar: "Add
+   CORSMiddleware last in the middleware chain").
 
 No toca la base de datos: `/health` es liveness puro y el preflight no llega al router.
 """
@@ -174,3 +177,36 @@ def test_respuesta_simple_lleva_el_origen_exacto_y_el_header_expuesto(cliente, o
     assert r.headers.get("access-control-allow-credentials") == "true"
     assert "X-Total-Count" in r.headers.get("access-control-expose-headers", "")
 
+
+# ── 3. CORS como ÚLTIMO middleware: los errores también se pueden leer ──────
+
+def test_cors_es_el_ultimo_middleware_de_la_cadena():
+    """Starlette monta el ÚLTIMO `add_middleware` como el MÁS EXTERNO.
+
+    Antes CORS se agregaba primero y quedaba por dentro de SecurityHeaders y
+    TenantAudit. Cualquier respuesta de error emitida por un middleware de afuera
+    (o por uno futuro que corte la request antes del router) saldría sin
+    `Access-Control-Allow-Origin` y el navegador sólo mostraría "CORS policy" en
+    vez del status real. `user_middleware[0]` es el último agregado = el más externo.
+    """
+    from fastapi.middleware.cors import CORSMiddleware
+    from app.main import app
+
+    assert app.user_middleware[0].cls is CORSMiddleware, [
+        m.cls.__name__ for m in app.user_middleware]
+
+
+def test_el_401_sin_token_llega_al_navegador_con_cabecera_cors(cliente, origen):
+    """`/wods/hoy` sin token: 401 de `get_current_user` (no toca la BD) y legible por el front.
+
+    Sin `Access-Control-Allow-Origin` el axios del panel no puede distinguir
+    "sesión vencida" (401) de "el API está caído": el usuario queda en una pantalla
+    muda en vez de ir al login.
+    """
+    r = cliente.get("/api/v1/wods/hoy", headers={"Origin": origen})
+
+    assert r.status_code == 401, r.text
+    assert r.headers["access-control-allow-origin"] == origen
+    assert r.headers.get("access-control-allow-credentials") == "true"
+    # Mover CORS al final NO tapa los headers de seguridad del middleware de adentro.
+    assert r.headers.get("x-frame-options") == "DENY"

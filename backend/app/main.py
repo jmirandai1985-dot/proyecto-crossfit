@@ -138,6 +138,18 @@ _cors_origins = validar_cors_origins(_cors_origins)
 CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 CORS_HEADERS = ["Authorization", "Content-Type", "Accept", "Accept-Language", "X-CSRF-Token"]
 
+# ---- HEADERS DE SEGURIDAD (X-Frame-Options, CSP, HSTS, etc.) ----
+app.add_middleware(SecurityHeadersMiddleware)
+
+# ---- AUDITORIA DE TENANT_ID (solo loguea patrones inseguros: None / 1) ----
+app.add_middleware(TenantAuditMiddleware)
+
+# ---- CORS: SIEMPRE EL ÚLTIMO add_middleware (queda el más externo) ----
+# Starlette monta el ÚLTIMO middleware agregado como el MÁS EXTERNO de la cadena.
+# Si CORS quedara por dentro, una respuesta de error generada por un middleware de
+# afuera (o por uno nuevo que corte la request antes del router) saldría SIN
+# `Access-Control-Allow-Origin`: el navegador mostraría "CORS policy" en la consola
+# en vez del status real (401/403/429) y el frontend no podría reaccionar.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -148,12 +160,6 @@ app.add_middleware(
     # paginado que viaja en X-Total-Count (en prod es mismo origen: no aplica).
     expose_headers=["X-Total-Count"],
 )
-
-# ---- HEADERS DE SEGURIDAD (X-Frame-Options, CSP, HSTS, etc.) ----
-app.add_middleware(SecurityHeadersMiddleware)
-
-# ---- AUDITORIA DE TENANT_ID (solo loguea patrones inseguros: None / 1) ----
-app.add_middleware(TenantAuditMiddleware)
 
 # ---- RATE LIMITING GLOBAL (slowapi) ----
 app.state.limiter = limiter
