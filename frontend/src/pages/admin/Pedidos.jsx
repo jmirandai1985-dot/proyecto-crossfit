@@ -472,7 +472,7 @@ const AdminPedidos = () => {
                                     onClick={() => {
                                         const c = confirmar;
                                         setConfirmar(null);
-                                        cambiarEstado(c.pedido, c.nuevoEstado);
+                                        void cambiarEstado(c.pedido, c.nuevoEstado);  // fire-and-forget: el catch lo pinta en `msg`
                                     }}
                                     className="px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold transition-colors"
                                 >
@@ -529,7 +529,7 @@ const AdminPedidos = () => {
                                         const p = rechazar;
                                         const m = motivoRechazo.trim();
                                         setRechazar(null);
-                                        rechazarPedido(p, m);
+                                        void rechazarPedido(p, m);  // fire-and-forget: el catch lo pinta en `error`
                                     }}
                                     disabled={motivoRechazo.trim().length < 3 || accionId === rechazar.id}
                                     data-testid="confirmar-rechazo"

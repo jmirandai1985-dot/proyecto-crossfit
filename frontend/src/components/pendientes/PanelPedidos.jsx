@@ -295,7 +295,7 @@ const PanelPedidos = () => {
                                 onClick={() => {
                                     const p = comprobante;
                                     setComprobante(null);
-                                    validar(p);
+                                    void validar(p);  // fire-and-forget: `validar` captura el error y lo pinta con setError
                                 }}
                                 className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold"
                             >
