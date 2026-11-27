@@ -43,7 +43,12 @@ def _fuente(relativa: str) -> str:
 
 def test_a1_la_tabla_tiene_filtro_por_tipo_y_por_categoria():
     fuente = _fuente(REPORTES)
-    assert "const [filtroTipo, setFiltroTipo] = useState('todos');" in fuente
+    # El tipo ARRANCA con el `?tipo=` de la URL (la tarjeta "Ingreso del mes" del
+    # Dashboard entra con `?seccion=movimientos&tipo=ingreso`); cualquier valor que
+    # no sea del <select> cae en 'todos'.
+    assert "const [filtroTipo, setFiltroTipo] = useState(" in fuente
+    assert "TIPOS_MOVIMIENTO.includes(tipoPedido) ? tipoPedido : 'todos'" in fuente
+    assert "searchParams.get('tipo')" in fuente
     assert "const [filtroCategoria, setFiltroCategoria] = useState('todas');" in fuente
     assert '<option value="ingreso">Ingresos</option>' in fuente
     assert '<option value="egreso">Egresos</option>' in fuente

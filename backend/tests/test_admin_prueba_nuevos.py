@@ -297,17 +297,15 @@ def test_g2_la_fila_muestra_el_envio_manual_y_lleva_a_la_ficha():
 
 def test_g3_la_tarjeta_suma_la_quinta_kpi_sin_tocar_las_cuatro_de_antes():
     fuente = _fuente("frontend/src/pages/admin/InicioMobileAdmin.jsx")
-    assert 'testid="kpi-prueba"' in fuente
+    assert 'clase="k-prueba"' in fuente
+    assert 'label="Nuevos del mes"' in fuente
     # La capa móvil reusa el panel compartido (no duplica markup ni fetch).
     assert "<PanelAlumnosPrueba" in fuente
     assert "useAlumnosPrueba()" in fuente
-    # Las tarjetas originales siguen declaradas tal cual ("Alumnos activos" ya no
-    # es tarjeta: es el subtítulo `admin-activos` del encabezado).
-    for etiqueta in ('label="Vencen en 5 días"', 'label="Vouchers por aprobar"',
-                     'label="Ingresos de hoy"'):
+    # Las tarjetas originales del bloque "Hoy" siguen declaradas.
+    for etiqueta in ('label="Asistencia de hoy"', 'label="Ingresos de hoy"'):
         assert etiqueta in fuente
     assert 'data-testid="admin-activos"' in fuente
-    assert 'label="Alumnos nuevos y en prueba"' in fuente
 
 
 def test_g4_el_dashboard_abre_la_pantalla_y_la_ruta_existe():

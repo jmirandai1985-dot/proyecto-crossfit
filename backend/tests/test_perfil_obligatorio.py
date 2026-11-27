@@ -43,7 +43,8 @@ def _alta(**extra):
 
     base = {"nombre": "Ana Pérez", "correo": "ana@example.com",
             "rut": "12345678-5", "sexo": "F", "peso": 62.5,
-            "telefono": "+56 9 1234 5678", "fecha_nacimiento": "1995-06-15"}
+            "telefono": "+56 9 1234 5678", "fecha_nacimiento": "1995-06-15",
+            "acepta_tyc": True, "acepta_salud": True}
     base.update(extra)
     return RegistroAlumnoNuevo(**base)
 
@@ -74,7 +75,7 @@ def test_el_alta_normaliza_minusculas_y_acepta_peso_kg():
     datos = RegistroAlumnoNuevo(
         nombre="Ana", correo="ana@example.com", rut="12345678-5",
         sexo="f", peso_kg=60, telefono="+56 9 1234 5678",
-        fecha_nacimiento="1995-06-15")
+        fecha_nacimiento="1995-06-15", acepta_tyc=True, acepta_salud=True)
     assert datos.sexo == "F"
     assert datos.peso == 60.0
 

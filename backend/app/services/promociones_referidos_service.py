@@ -284,7 +284,7 @@ def _notificar_detecciones(db: Session, detectadas: list[dict]) -> int:
             avisos += notificar_admins_del_tenant(
                 db, detectada["tenant_id"], TIPO_NOTIFICACION,
                 _mensaje_notificacion(detectada), commit=False)
-        except Exception:  # pragma: no cover - la primitiva ya es best-effort
+        except Exception:  # pragma: no cover - la primitiva ya es best-effort  # nosec B112 - best-effort: la primitiva ya es best-effort y no corta el job
             continue
     if avisos:
         db.commit()
@@ -314,7 +314,7 @@ def _enviar_correos(detectadas: list[dict]) -> int:
                     premio_texto=detectada["premio_texto"],
                     periodo=detectada["periodo_cumplido"]):
                 enviados += 1
-        except Exception:  # pragma: no cover - un correo no corta el job
+        except Exception:  # pragma: no cover - un correo no corta el job  # nosec B112 - best-effort: un correo que falla no corta la campaña
             continue
     return enviados
 

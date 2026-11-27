@@ -132,7 +132,15 @@ const Reportes = () => {
     // ── Detalle de movimientos: filtro y orden EN MEMORIA ────────────────────
     // La lista ya viene completa del hook (mes en curso): acá sólo se recorta y se
     // ordena para leerla. No hay endpoint nuevo ni otra petición.
-    const [filtroTipo, setFiltroTipo] = useState('todos');            // todos|ingreso|egreso
+    // `tipo` de la URL = filtro INICIAL de los movimientos. Lo manda la tarjeta
+    // "Ingreso del mes" del Dashboard (`?seccion=movimientos&tipo=ingreso`) para no
+    // aterrizar en una lista donde hay que volver a filtrar a mano. Sólo se aceptan
+    // los valores del <select>; cualquier otra cosa cae en 'todos'.
+    const TIPOS_MOVIMIENTO = ['todos', 'ingreso', 'egreso'];
+    const tipoPedido = searchParams.get('tipo');
+    const [filtroTipo, setFiltroTipo] = useState(
+        TIPOS_MOVIMIENTO.includes(tipoPedido) ? tipoPedido : 'todos',
+    );                                                              // todos|ingreso|egreso
     const [filtroCategoria, setFiltroCategoria] = useState('todas');  // todas|<categoría>
     const [ordenMovs, setOrdenMovs] = useState({ campo: 'fecha', dir: 'desc' });
     // Las categorías salen de las filas cargadas (no de una lista fija): si mañana

@@ -256,8 +256,25 @@ const Fidelizacion = () => {
     const porVencer = predicciones.filter(FILTROS.plan_urgente.test);
 
     // ── Filtro activo (query params) ─────────────────────────────────────
-    const claveFiltro = searchParams.get('filtro') || null;
+    const claveFiltro = filtroSolicitado;
     const filtroArquetipo = searchParams.get('arquetipo') || null;
+    // ── Bajar a la lista cuando se llega CON filtro ──────────────────────
+    // La tarjeta "Alumnos en riesgo" del Dashboard entra con `?filtro=total`: la
+    // pantalla abre con el panel de tarjetas arriba y la lista ya filtrada abajo, así
+    // que se hace scroll hasta la lista (el admin no tiene que buscarla). Se usa el
+    // panel VISIBLE: el móvil y el de escritorio conviven (md:hidden / hidden md:block)
+    // y sólo uno tiene layout.
+    useEffect(() => {
+        if (!claveFiltro || loading) return undefined;
+        const t = setTimeout(() => {
+            const movil = document.querySelector('[data-testid="panel-accion-movil"]');
+            const escritorio = document.querySelector('[data-testid="panel-accion-escritorio"]');
+            const visible = movil && movil.offsetParent !== null ? movil : escritorio;
+            visible?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 150);
+        return () => clearTimeout(t);
+    }, [claveFiltro, loading]);
+
 
     // ?alumno_id=<id>: deep-link desde Notificaciones -> abre la ficha de ESE
     // alumno. AlumnoFichaModal se auto-carga por API, asi que no depende de que

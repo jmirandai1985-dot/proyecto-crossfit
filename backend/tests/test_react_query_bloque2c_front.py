@@ -69,11 +69,18 @@ def test_a_los_hooks_existen_y_usan_su_clave():
     assert "export const SIN_DATOS = [];" in q
 def test_b_el_dashboard_del_coach_consume_los_hooks():
     f = _fuente(DASHBOARD)
-    for prohibido in PROHIBIDO + ["useCallback("]:
+    for prohibido in ("api.post(", "api.put(", "api.delete(", "API_BASE",
+                      "useCallback("):
         assert prohibido not in f, f"DashboardCoach todavía usa {prohibido}"
     # `useEffect` SÍ se usa (el latido de 30 s y el borde del reloj de las clases: vuelven a
     # preguntar por el `estado`, no piden datos). Lo que no puede volver es un fetch a mano.
-    assert "useEffect(" in f and "api.get(" not in f
+    assert "useEffect(" in f
+    # El ÚNICO pedido a mano es el de los contadores de los chips (tab Progreso): pide el
+    # padrón en lotes de 100 DENTRO de un `useQuery` (`queryFn`), o sea sigue siendo una
+    # consulta cacheada por React Query, no una carga fuera de él.
+    assert f.count("api.get(") == 1
+    assert "queryFn: async () => {" in f
+    assert "'/api/v1/historial-rm/progreso-lote'" in f
     # Una consulta por dato, con las claves que comparte con Gestión de Clases.
     # (2026-10-14: se actualizan las líneas del Resumen de Asistencia del panel —la
     # `claseAsistenciaExpandida` y sus derivados se fueron con el Resumen viejo en `0a1225e`,
@@ -114,8 +121,10 @@ def test_b_el_dashboard_del_coach_consume_los_hooks():
                    "setAsistenciaPorClase", "setCargandoAsistencia", "setErroresBloque",
                    "setUmbralRiesgo", "setLoading"):
         assert muerto not in f, f"quedó el estado sincronizado a mano {muerto}"
-    # El progreso por alumno dejó de ser un for con 50 awaits en la pantalla.
+    # El progreso por alumno dejó de ser un for con 50 awaits en la pantalla: los
+    # contadores se piden en LOTES dentro de UNA consulta (`queryFn`).
     assert "await api.get(" not in f
+    assert "lotes.push(idsProgreso.slice(" in f
 
 
 def test_c_lo_que_vivia_en_gestion_de_clases_usa_los_hooks():

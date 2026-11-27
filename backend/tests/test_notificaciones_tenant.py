@@ -175,6 +175,7 @@ def test_nb06_marcar_como_leida_sigue_siendo_solo_del_dueno(staff):
         pytest.skip("No hay notificaciones de otros alumnos en el branch TEST")
     r = requests.put(f"{BASE}/notificaciones/{ajena.id}/leer",
                      headers=_token(staff, staff.rol), timeout=30)
-    assert r.status_code == 403, (
+    # 404 (no 403): no se filtra si la notificación EXISTE en otro alumno.
+    assert r.status_code == 404, (
         f"el staff marcó como leída la notificación {ajena.id} del alumno "
         f"{ajena.alumno_id} (status {r.status_code})")

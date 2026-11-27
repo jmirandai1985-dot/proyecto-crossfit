@@ -14,8 +14,9 @@ import { creds, login, tokenDe } from '../helpers.js';
 //
 // Usuario: por defecto `carga_k6_alumno0020` (los k6 tienen plan vigente y una
 // solicitud pendiente sembrada; el `beforeEach` los limpia en la rama TEST con
-// `backend/scripts/limpiar_e2e_pago.py`, el mismo tipo de limpieza que hace el
-// seed de k6). Se puede cambiar con E2E_PAGO_ALUMNO_EMAIL.
+// `backend/scripts/limpiar_e2e_pago.py` ejecutado por el Python del backend
+// —sin Docker—, el mismo tipo de limpieza que hace el seed de k6). Se puede
+// cambiar con E2E_PAGO_ALUMNO_EMAIL.
 //
 // Variables:
 //   E2E_PAGO_ALUMNO_EMAIL   → carga_k6_alumno0020@load.test
@@ -70,17 +71,25 @@ function alumnoE2E() {
     };
 }
 
+// El script de limpieza corre con el Python del BACKEND (no con Docker): el
+// arnés E2E apunta a la rama TEST de Neon, no al Postgres local de :8001.
+// `ENVIRONMENT=test` hace que `app/core/config.py` cargue `.env.test`.
+const PYTHON = process.env.E2E_PYTHON
+    || (process.platform === 'win32' ? 'py' : 'python3');
+const PYTHON_VERSION_ARGS = process.env.E2E_PYTHON
+    ? []
+    : (process.platform === 'win32' ? ['-3.12'] : []);
+
 function limpiarEstado() {
-    const repoRoot = path.resolve(BACKEND, '..');
+    const script = path.join(BACKEND, 'scripts', 'limpiar_e2e_pago.py');
     try {
-        execFileSync('docker', [
-            'compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.local.yml',
-            'run', '--rm',
-            '-v', `${path.resolve(BACKEND)}:/backend:ro`,
-            'backend', 'python', '/backend/scripts/limpiar_e2e_pago.py',
+        execFileSync(PYTHON, [
+            ...PYTHON_VERSION_ARGS,
+            script,
             '--alumno-email', alumnoE2E().email,
         ], {
-            cwd: repoRoot,
+            cwd: BACKEND,
+            env: { ...process.env, ENVIRONMENT: 'test' },
             stdio: 'pipe',
             timeout: 120_000,
         });

@@ -1,11 +1,13 @@
-"""Dashboard admin: las tarjetas de "alumnos en riesgo" avisan el fallo y ofrecen Reintentar.
+"""Dashboard admin: las tarjetas de retención avisan el fallo y ofrecen Reintentar.
 
 Qué fija este archivo (guard de fuente del FRONTEND, sin red y sin base):
 
-  A. El cargador de fidelización usa `Promise.allSettled` (no `Promise.all`): el fallo de
-     un endpoint no puede tumbar el otro.
-  B. La tarjeta de "Alumnos en Riesgo" muestra el ERROR cuando la petición falla, en vez
-     del "0" falso (un panel de churn que dice 0 cuando no pudo leer es una mentira).
+  A. El riesgo sale del resumen compartido (`useResumenAdmin`, snapshot de churn) y la
+     carga propia de la pantalla sólo pide vencimientos: dos fuentes independientes, así
+     el fallo de una no tumba la otra (ya no hay un `Promise.all` que las ate).
+  B. Las DOS tarjetas muestran el motivo cuando su fuente falla, en vez del "0" falso
+     (un panel de churn que dice 0 cuando no pudo leer es una mentira): riesgo con
+     `'n/d'` + `riesgoPendiente`, vencimientos con el `detail` del error.
   C. El bloque tiene un `AvisoCarga` con Reintentar (`cargarFidelizacion`), igual que el
      resto de la pantalla: antes, para volver a intentar había que recargar la página.
   D. No hay `admin_id` hardcodeado en la pantalla (el id sale del token).
@@ -25,19 +27,24 @@ def _fuente(relativa: str) -> str:
 def test_a_el_cargador_de_fidelizacion_no_es_todo_o_nada():
     fuente = _fuente("frontend/src/pages/admin/Dashboard.jsx")
     assert "const cargarFidelizacion" in fuente
-    assert "await Promise.allSettled([" in fuente
-    assert "Promise.all([" not in fuente, (
-        "el dashboard ya no puede usar Promise.all: un fallo dejaría las 2 tarjetas vacías")
+    # El riesgo vive en el resumen compartido; la carga local sólo pide vencimientos.
+    assert "useResumenAdmin(" in fuente
+    assert "await api.get(`/api/v1/fidelizacion/tenant/${tenant_id}/vencimientos`)" in fuente
+    assert "Promise.all(" not in fuente, (
+        "un Promise.all ataría las dos tarjetas: el fallo de una dejaría la otra vacía")
 
 
-def test_b_la_tarjeta_de_riesgo_muestra_el_error_y_no_un_cero_falso():
+def test_b_las_tarjetas_muestran_el_error_y_no_un_cero_falso():
     fuente = _fuente("frontend/src/pages/admin/Dashboard.jsx")
-    assert "fidelizacionError.riesgo ? (" in fuente, (
+    # Riesgo: sale del snapshot y, si todavía no se pudo leer, dice 'n/d' (nunca 0).
+    assert "resumenAdmin.alumnosRiesgo ?? 'n/d'" in fuente
+    assert "resumenAdmin.riesgoPendiente" in fuente
+    # Vencimientos: el motivo se pregunta ANTES de pintar el número.
+    assert "fidelizacionError.vencimientos ? (" in fuente, (
         "la tarjeta tiene que preguntar por el error ANTES de pintar el número")
-    assert "{fidelizacionError.riesgo}" in fuente
+    assert "{fidelizacionError.vencimientos}" in fuente
     assert "setFidelizacionError" in fuente
-    assert "riesgo: riesgoRes.reason?.response?.data?.detail" in fuente
-    assert "alumnos_alerta" in fuente
+    assert "vencimientos: error?.response?.data?.detail" in fuente
 
 
 def test_c_el_bloque_ofrece_reintentar():

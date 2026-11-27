@@ -49,8 +49,8 @@ def _rollback_si_propio(db: Session, commit: bool) -> None:
         return
     try:
         db.rollback()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("rollback best-effort falló: %s", _exc)
 
 
 def notificar_usuario(

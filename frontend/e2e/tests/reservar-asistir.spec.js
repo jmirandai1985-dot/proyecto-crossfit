@@ -21,19 +21,25 @@ function diaDeManana() {
 // usa el panel de Asistencia (staff). Se usa ese endpoint (en vez del QR del
 // alumno) porque el check-in por QR sólo marca cuando la clase está "en curso"
 // (-60 min a fin) y no es determinístico para un test automatizado.
-test('alumno reserva clase, la ve en Mis reservas y se le marca asistencia', async ({ page, request }) => {
+test('alumno reserva clase, la ve en Mis reservas y se le marca asistencia', async ({ page, playwright }) => {
   const { alumno, admin } = creds();
 
   // 1. Login del alumno por UI.
   await login(page, alumno);
   await expect(page).toHaveURL(/\/alumno\/dashboard/);
 
-  // Token del alumno para verificar contra los endpoints reales (mismo origen).
+  // Token del alumno y contexto de API SIN cookies: el `request` fixture comparte
+  // la cookie del navegador, y una mutación por cookie exige CSRF (el DELETE de
+  // limpieza daba 403 y las reservas se acumulaban entre corridas).
   const token = await tokenDe(page);
-  const auth = { Authorization: `Bearer ${token}` };
+  const apiAlumno = await playwright.request.newContext({
+    baseURL: new URL(page.url()).origin,
+    storageState: { cookies: [], origins: [] },
+    extraHTTPHeaders: { Authorization: `Bearer ${token}` },
+  });
 
   // Reservas ANTES (para detectar la nueva sin depender de datos previos).
-  const antesRes = await request.get('/api/v1/reservas', { headers: auth });
+  const antesRes = await apiAlumno.get('/api/v1/reservas');
   expect(antesRes.ok()).toBeTruthy();
   const idsAntes = new Set(((await antesRes.json()) || []).map((r) => r.id));
 
@@ -64,7 +70,7 @@ test('alumno reserva clase, la ve en Mis reservas y se le marca asistencia', asy
   //    "Confirmar Reserva") y un `toBeHidden` pasaría antes de que el POST termine.
   let nueva;
   await expect.poll(async () => {
-    const res = await request.get('/api/v1/reservas', { headers: auth });
+    const res = await apiAlumno.get('/api/v1/reservas');
     const data = await res.json();
     const lista = Array.isArray(data) ? data : [];
     nueva = lista.find((r) => !idsAntes.has(r.id));
@@ -87,31 +93,49 @@ test('alumno reserva clase, la ve en Mis reservas y se le marca asistencia', asy
 
   // 5. Marcar asistencia con el endpoint de check-in del panel (staff/admin,
   //    determinístico: el admin no tiene la restricción de "mismo día" del coach).
-  const adminLogin = await request.post('/api/v1/auth/login', {
+  //    El contexto `request` COMPARTE las cookies del navegador: el `access_token`
+  //    del alumno mandaría sobre el Bearer del admin (la cookie tiene prioridad),
+  //    así que el login y el PUT van por un contexto SIN cookies.
+  const adminApi = await playwright.request.newContext({
+    baseURL: new URL(page.url()).origin,
+    storageState: { cookies: [], origins: [] },
+  });
+  const adminLogin = await adminApi.post('/api/v1/auth/login', {
     data: { correo: admin.email, password: admin.password },
   });
   expect(adminLogin.ok(), 'login del admin para marcar asistencia').toBeTruthy();
   const adminToken = (await adminLogin.json()).access_token;
+  // El login deja la cookie `access_token` en SU contexto; el PUT va por otro
+  // contexto limpio que autentica SÓLO con Bearer (con la cookie, la mutación
+  // exigiría el header CSRF y respondería 403).
+  await adminApi.dispose();
+  const adminMarcaApi = await playwright.request.newContext({
+    baseURL: new URL(page.url()).origin,
+    storageState: { cookies: [], origins: [] },
+    extraHTTPHeaders: { Authorization: `Bearer ${adminToken}` },
+  });
 
-  const marca = await request.put(`/api/v1/reservas/${nueva.id}/asistencia`, {
-    headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+  const marca = await adminMarcaApi.put(`/api/v1/reservas/${nueva.id}/asistencia`, {
+    headers: { 'Content-Type': 'application/json' },
     data: { asistio: true },
   });
-  expect(marca.ok(), 'marcar asistencia de la reserva').toBeTruthy();
+  expect(marca.ok(), `marcar asistencia de la reserva: ${marca.status()} ${await marca.text()}`)
+    .toBeTruthy();
   expect((await marca.json()).asistio).toBe(true);
+  await adminMarcaApi.dispose();
 
   // 6. Verificación: la reserva queda con `asistio === true`.
-  const trasMarca = await request.get('/api/v1/reservas', { headers: auth });
+  const trasMarca = await apiAlumno.get('/api/v1/reservas');
   const marcada = ((await trasMarca.json()) || []).find((r) => r.id === nueva.id);
   expect(marcada.asistio).toBe(true);
 
-  // 7. Limpieza best-effort: cancelar la reserva creada para no acumular datos en
-  //    corridas repetidas (restaura el cupo/crédito). No falla el test si no corre.
-  try {
-    await request.delete(`/api/v1/reservas/${nueva.id}`, { headers: auth });
-  } catch {
-    // best-effort: la corrida siguiente puede chocar con "ya reservada"; ver README.
-  }
+  // 7. Limpieza: cancelar la reserva creada para no acumular datos en corridas
+  //    repetidas (restaura el cupo, y el crédito si la clase es a >6h). Va por el
+  //    contexto SIN cookies: el mismo DELETE con la cookie del navegador exigiría
+  //    el header CSRF y quedaba en 403, dejando la reserva viva para la próxima.
+  const limpieza = await apiAlumno.delete(`/api/v1/reservas/${nueva.id}`);
+  expect(limpieza.ok(), 'cancelar la reserva de la prueba').toBeTruthy();
+  await apiAlumno.dispose();
 });
 
 // Regresión Bloque 3: en el teléfono "Agendar Reserva" tiene que mostrar la

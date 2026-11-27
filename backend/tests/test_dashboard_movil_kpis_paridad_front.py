@@ -6,18 +6,20 @@ QUÉ FIJA Y POR QUÉ:
 
   * En el panel de ESCRITORIO (`Dashboard.jsx`) "Alumnos Activos" y "Alumnos
     Nuevos" son botones que navegan a las vistas YA FILTRADAS:
-    `/admin/alumnos?estado=activo` y `/admin/alumnos-prueba`.
+    `/admin/alumnos?estado=activo` y `/admin/alumnos-prueba` (la tarjeta del
+    embudo) / `/admin/alumnos?alta=mes` (el atajo de "nuevos este mes").
   * En la capa MÓVIL (`InicioMobileAdmin.jsx`) esos dos números viven en el
     subtítulo `admin-activos` del encabezado de asistencia. Ese subtítulo se había
     quedado como TEXTO PLANO: en el teléfono se veía el número pero no se podía
     llegar a la lista. Ahora los DOS números son botones con el MISMO destino que
-    el escritorio —no se inventan rutas nuevas: la paridad es el contrato—.
+    el escritorio —`?estado=activo` y `?alta=mes`, no se inventan rutas nuevas: la
+    paridad es el contrato—.
   * Los dos botones son HERMANOS, nunca anidados: un `<button>` dentro de otro no
     es HTML válido y el lector de pantalla anuncia mal qué se puede tocar.
   * Cada botón lleva `aria-label`: el texto visible arranca con un número
     ("12 alumnos activos"), así que sin etiqueta el nombre accesible no diría qué
     hace el botón.
-  * El caso de ERROR se mantiene tal cual: `s/d` + motivo visible y SIN botones.
+  * El caso de ERROR se mantiene tal cual: `n/d` + motivo visible y SIN botones.
     Si /reportes falla no hay a dónde navegar y no debe aparecer un 0 falso.
   * El estilo del enlace no agranda el renglón (padding compensado con margen
     negativo) pero deja un objetivo táctil de 32px.
@@ -57,8 +59,8 @@ def test_a2_los_dos_numeros_del_subtitulo_movil_navegan_igual_que_el_escritorio(
     bloque = _bloque_subtitulo(_fuente(MOVIL))
     assert "navigate('/admin/alumnos?estado=activo')" in bloque, (
         "el número de alumnos activos del móvil no lleva al padrón filtrado")
-    assert "navigate('/admin/alumnos-prueba')" in bloque, (
-        "el '+N nuevos este mes' del móvil no lleva a la pantalla de alumnos nuevos")
+    assert "navigate('/admin/alumnos?alta=mes')" in bloque, (
+        "el '+N nuevos este mes' del móvil no lleva a los alumnos nuevos del mes")
 
 
 def test_a3_son_dos_botones_hermanos_no_anidados():
@@ -81,8 +83,8 @@ def test_a4_cada_boton_tiene_etiqueta_accesible_y_el_testid_sigue():
 
 def test_a5_el_error_no_ofrece_navegacion_ni_un_cero_falso():
     bloque = _bloque_subtitulo(_fuente(MOVIL))
-    rama_error = bloque.split("errores.activos ? (", 1)[1].split(") : (", 1)[0]
-    assert "s/d" in rama_error, "sin dato debe decir s/d, no 0"
+    rama_error = bloque.split("resumenAdmin.errores.diario ? (", 1)[1].split(") : (", 1)[0]
+    assert "n/d" in rama_error, "sin dato debe decir n/d, no 0"
     assert 'role="alert"' in rama_error, "el motivo del error se anuncia"
     assert "navigate(" not in rama_error and "<button" not in rama_error, (
         "con /reportes caído no hay a dónde navegar: la rama de error no lleva botones")

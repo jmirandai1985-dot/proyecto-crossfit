@@ -458,7 +458,7 @@ def _notificar(db: Session, premios: list[dict]) -> int:
             avisos += notificar_admins_del_tenant(
                 db, premio["tenant_id"], TIPO_NOTIFICACION,
                 _mensaje_notificacion(premio), commit=False)
-        except Exception:  # pragma: no cover - la primitiva ya es best-effort
+        except Exception:  # nosec B112 - best-effort: la primitiva ya es best-effort y no corta el job  # pragma: no cover
             continue
     if avisos:
         db.commit()

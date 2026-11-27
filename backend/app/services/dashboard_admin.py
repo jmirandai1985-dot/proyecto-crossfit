@@ -578,6 +578,7 @@ def ocupacion_mes_por_clase(db: Session, tenant_id: int,
     """
     primer_dia, ultimo_dia, _, _ = rango_del_mes(anio, mes)
 
+    # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     filas = db.execute(text(f"""
         SELECT c.id, c.fecha, c.hora_inicio,
                d.nombre AS disciplina, uc.nombre AS coach,
@@ -623,6 +624,7 @@ def ocupacion_mes_por_clase(db: Session, tenant_id: int,
     total_pct = round(asistentes / cupo * 100, 2) if cupo > 0 else None
 
     # Clases realizadas SIN tope: no entran al %, pero el panel las informa.
+    # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  -- SQL fijo: solo helpers/constantes, valores como parámetros
     sin_cupo = db.execute(text(f"""
         SELECT COUNT(*)
         FROM clases c

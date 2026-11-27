@@ -155,7 +155,7 @@ def login(
 
     return TokenResponse(
         access_token=access_token,
-        token_type="bearer",
+        token_type="bearer",  # nosec B106 - `token_type` es el campo OAuth 'bearer', no una contraseña
         usuario_id=fila["id"],
         rol=fila["rol"],
         tenant_id=fila["tenant_id"],

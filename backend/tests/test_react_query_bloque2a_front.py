@@ -53,8 +53,12 @@ def test_b_la_pestana_de_asistencia_consume_los_hooks():
                  "useConfirmarAsistenciaClase(", "useAmpliarCupo("):
         assert hook in fuente, f"AsistenciaClases no usa {hook}"
     for prohibido in ("services/api", "api.get(", "api.post(", "api.put(",
-                      "api.delete(", "useEffect(", "useCallback("):
+                      "api.delete(", "useCallback("):
         assert prohibido not in fuente, f"AsistenciaClases todavía usa {prohibido}"
+    # `useEffect` SÍ se usa (2026-11-24): abre la clase pedida por la URL (`?clase=`).
+    # No pide datos — sólo mueve la selección cuando la consulta ya trajo las clases.
+    assert fuente.count("useEffect(") == 1
+    assert "clasePedida" in fuente
     # Cargando/error derivados de las consultas, no de estados sincronizados a mano.
     assert "const cargando = clasesQ.isPending;" in fuente
     assert "const error = clasesQ.isError" in fuente

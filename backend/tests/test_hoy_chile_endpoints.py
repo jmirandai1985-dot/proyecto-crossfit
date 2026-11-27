@@ -8,9 +8,10 @@ con el día corrían un día adelante: "las clases de hoy" del dashboard, desde 
 clases, qué clases ve supervisión, y la fecha que queda escrita en el ingreso de una membresía.
 
 Lo que estaba roto y acá no puede volver: ocho `date.today()` en la app (clases, dashboard, horarios,
-supervision, solicitudes_planes, suscripciones, los DOS callbacks del startup en main y el job del
-scheduler). Ahora todos le piden el día al helper único de `app/utils/santiago.py` (`hoy_santiago()`),
-el mismo que ya usaban la vigencia de los planes y el mantenimiento.
+supervision, suscripciones, la aprobación de una solicitud —`services.aprobacion_planes`—, los DOS
+callbacks del startup en main y el job del scheduler). Ahora todos le piden el día al helper único de
+`app/utils/santiago.py` (`hoy_santiago()`), el mismo que ya usaban la vigencia de los planes y el
+mantenimiento.
 
   A. GUARD (lee las fuentes): en `app/` no puede quedar NI UN `.today()` —el AST ignora comentarios y
      docstrings a propósito, porque ahí el bug se sigue nombrando para explicarlo— y los ocho módulos
@@ -51,7 +52,7 @@ MODULOS_TOCADOS = (
     "app.api.v1.clases",
     "app.api.v1.dashboard",
     "app.api.v1.horarios",
-    "app.api.v1.solicitudes_planes",
+    "app.services.aprobacion_planes",
     "app.api.v1.supervision",
     "app.api.v1.suscripciones",
     "app.main",

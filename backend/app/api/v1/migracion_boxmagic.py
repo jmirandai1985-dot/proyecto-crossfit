@@ -153,7 +153,7 @@ VIGENCIA_TOKEN_MIGRACION = timedelta(days=7)
 # 404 genérico del link de activación. Es el MISMO texto que usa `validar-token`
 # (arriba): ni la pantalla ni el alumno pueden deducir si el token no existía, ya se
 # había usado o había vencido.
-DETALLE_TOKEN_INVALIDO = "El link de activación es inválido o expiró."
+DETALLE_TOKEN_INVALIDO = "El link de activación es inválido o expiró."  # nosec B105 - mensaje de error del link, no una credencial
 
 
 def _etapa(alumno, plan_nombre):
@@ -601,7 +601,7 @@ class CompletarActivacion(BaseModel):
     @field_validator("fecha_nacimiento")
     @classmethod
     def _fecha_no_futura(cls, valor):
-        if valor is not None and valor > date.today():
+        if valor is not None and valor > hoy_santiago():
             raise ValueError("La fecha de nacimiento no puede ser futura")
         return valor
 

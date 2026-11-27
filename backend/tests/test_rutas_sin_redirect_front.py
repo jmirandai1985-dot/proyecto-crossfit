@@ -87,10 +87,12 @@ def test_c_los_hooks_que_usa_coaches_tienen_las_rutas_canonicas():
     assert hallazgo is None, f"listado sin barra final: {hallazgo.group(0)}"
 
 
-def test_d_supervision_llama_al_listado_de_disciplinas_con_barra():
+def test_d_supervision_solo_llama_los_endpoints_de_cupos_sin_barra():
+    """La pantalla quedó reducida a "Gestión de Cupos": sus dos llamadas van al
+    router de supervisión SIN barra final (ningún listado que dispare un 307)."""
     fuente = _fuente(SUPERVISION)
-    assert "api.get(`${API_BASE}/disciplinas/`)" in fuente
-    assert "${API_BASE}/disciplinas`" not in fuente
-    # El resto de las llamadas de la pantalla ya eran canónicas.
-    assert "api.get(`${API_BASE}/clases/`, { params })" in fuente
-    assert "api.get(`${API_BASE}/supervision/grilla`, { params })" in fuente
+    assert "api.get(`${API_BASE}/supervision/cupos-disciplinas`)" in fuente
+    assert "api.patch(`${API_BASE}/supervision/cupo-disciplina`" in fuente
+    # Ya no pide el listado de disciplinas ni la grilla de clases desde acá.
+    assert "`${API_BASE}/disciplinas`" not in fuente
+    assert "`${API_BASE}/clases/`" not in fuente

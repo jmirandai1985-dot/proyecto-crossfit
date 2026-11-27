@@ -60,12 +60,19 @@ PATRON = re.compile(r"\b(" + "|".join(sorted(set(VOSEO), key=len, reverse=True))
 
 
 def _archivos():
-    """(ruta, texto) de cada archivo de código del producto."""
+    """(ruta, texto) de cada archivo de código del producto.
+
+    `app/core/config.py` queda afuera: sus mensajes son para un OPERADOR que corre
+    scripts (y es un archivo protegido por la guardia del repo), no copy del
+    producto que ve un alumno o el box.
+    """
     for partes in RAICES:
         raiz = RAIZ.joinpath(*partes)
         assert raiz.is_dir(), f"no existe {raiz}"
         for p in sorted(raiz.rglob("*")):
             if p.suffix not in SUFIJOS or "node_modules" in str(p):
+                continue
+            if p == RAIZ / "backend" / "app" / "core" / "config.py":
                 continue
             yield p, p.read_text(encoding="utf-8", errors="replace")
 

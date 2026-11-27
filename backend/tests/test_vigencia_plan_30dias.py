@@ -16,7 +16,7 @@ CUATRO caminos: `solicitudes_planes.aprobar_solicitud`, `comprar_emergencia`, `f
   A. PURAS (sin BD): la aritmetica de `fin_de_plan_chile` (30 dias, el fin del dia chileno,
      DST, cruce de mes/anio y el piso de 1 dia).
   B. ESTRUCTURA (sin BD): los cuatro caminos usan LA MISMA funcion y ninguno volvio al fin de
-     mes â€” si uno diverge, este test FALLA.
+     mes — si uno diverge, este test FALLA.
   C. INTEGRACION (HTTP, contra TEST): ESCRIBE dinero, asi que va `@pytest.mark.skip` (escrita
      y NO ejecutada en esta fase). Se corre a mano cuando se valide sobre TEST.
 
@@ -116,7 +116,7 @@ def test_b2_ningun_camino_volvio_al_fin_de_mes():
 
 
 # ==============================================================================
-# C. Integracion (HTTP, contra TEST) â€” ESCRIBE dinero: escrita y NO ejecutada
+# C. Integracion (HTTP, contra TEST) — ESCRIBE dinero: escrita y NO ejecutada
 # ==============================================================================
 @pytest.mark.skip(reason="toca dinero (vigencia): integracion escrita, NO ejecutada en esta "
                          "fase. Correr a mano sobre TEST cuando se valide.")

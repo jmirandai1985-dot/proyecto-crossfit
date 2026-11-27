@@ -16,8 +16,8 @@ Qué fija este archivo (análisis estático, sin red y sin base):
      la fila: sin eso, dos clics generaban DOS contraseñas provisionales y el alumno se
      quedaba con una clave que no era la que le llegó por correo.
   E. La tarjeta "En revisión" del Inicio móvil manda los pedidos a la PESTAÑA Pedidos
-     (`rutaPendientes('pedidos')`), no a la pantalla suelta `/admin/pedidos`, igual que
-     los vouchers van a la pestaña Solicitudes.
+     (`rutaPendientes('pedidos')`), no a la pantalla suelta `/admin/pedidos`, y su
+     "Ver todas" abre el panel de pendientes (`/admin/pendientes`).
 
 Correr (aislado):
     cd backend && py -3.12 -m pytest tests/test_pendientes_modal_rechazo.py -q --noconftest
@@ -140,8 +140,9 @@ def test_d_activar_bloquea_la_fila_y_solo_acepta_pendientes():
 # ── E. La tarjeta "En revisión" del Inicio móvil ─────────────────────────────
 def test_e_en_revision_manda_las_dos_colas_a_su_pestana():
     fuente = _fuente(MOVIL)
-    assert "onClick={() => navigate(rutaPendientes('solicitudes'))}" in fuente, (
-        "los vouchers van a la pestaña Solicitudes (sin cambios)")
+    # "Ver todas" abre la pantalla de pendientes (el panel completo).
+    assert "onClick={() => navigate('/admin/pendientes')}" in fuente, (
+        "la tarjeta tiene que abrir la pantalla de pendientes")
     assert fuente.count("navigate(rutaPendientes('pedidos'))") == 2, (
         "la fila del pedido y 'Ver los N pedidos' van a la pestaña Pedidos")
     assert "onClick={() => navigate('/admin/pedidos')}" not in fuente, (

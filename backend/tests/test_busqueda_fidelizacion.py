@@ -106,7 +106,7 @@ def alumno_buscable(db):
 def _buscar(db, termino):
     """Ids devueltos por el endpoint del panel (llamada directa, sin levantar servidor)."""
     data = kpis_api.get_predictions_churn(
-        buscar=termino, db=db,
+        buscar=termino, db=db, background_tasks=None, solo_activos=False,
         current_user={"tenant_id": TENANT_ID, "usuario_id": 1})
     return {p["usuario_id"] for p in data["predicciones"]}
 
@@ -131,10 +131,10 @@ def test_b3_sin_buscar_trae_a_todos(db, alumno_buscable):
 def test_b4_los_contadores_son_del_box_completo(db, alumno_buscable):
     """Buscar NO cambia los contadores de las tarjetas (siguen siendo del box COMPLETO)."""
     completo = kpis_api.get_predictions_churn(
-        buscar=None, db=db,
+        buscar=None, db=db, background_tasks=None, solo_activos=False,
         current_user={"tenant_id": TENANT_ID, "usuario_id": 1})
     filtrado = kpis_api.get_predictions_churn(
-        buscar="munoz", db=db,
+        buscar="munoz", db=db, background_tasks=None, solo_activos=False,
         current_user={"tenant_id": TENANT_ID, "usuario_id": 1})
     assert filtrado["total"] == completo["total"]
     assert filtrado["altos"] == completo["altos"]
