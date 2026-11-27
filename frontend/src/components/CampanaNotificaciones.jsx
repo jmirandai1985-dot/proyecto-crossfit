@@ -552,7 +552,7 @@ const CampanaNotificaciones = () => {
                                                     type="button"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        marcarLeida(n.id);
+                                                        void marcarLeida(n.id);  // fire-and-forget: la función ya pinta su propio error
                                                     }}
                                                     disabled={accionando}
                                                     className="shrink-0 text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 disabled:opacity-40"

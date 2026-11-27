@@ -74,7 +74,7 @@ const BeneficioModal = ({ alumno, onClose, onCreado }) => {
                 if (vivo) setCargando(false);
             }
         };
-        if (alumnoId) cargar();
+        if (alumnoId) void cargar();  // fire-and-forget: la función ya pinta su propio error
         return () => { vivo = false; };
     }, [alumnoId]);
 

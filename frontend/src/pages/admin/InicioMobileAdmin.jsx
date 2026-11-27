@@ -945,7 +945,7 @@ const InicioMobileAdmin = ({ resumenAdmin }) => {
                                     aria-hidden="true"
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        abrirBazar('badge');
+                                        void abrirBazar('badge');  // fire-and-forget: `cargarPedidos` pinta `pedidosError`
                                     }}>
                                     {pedidos.length}
                                 </span>

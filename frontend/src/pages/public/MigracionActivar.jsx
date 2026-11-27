@@ -65,7 +65,7 @@ const MigracionActivar = () => {
             }
         };
 
-        validar();
+        void validar();  // fire-and-forget: el catch de `validar` marca el link como inválido
         return () => { cancelado = true; };
     }, [token]);
 

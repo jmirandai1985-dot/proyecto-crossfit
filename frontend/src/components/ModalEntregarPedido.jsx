@@ -160,7 +160,7 @@ const ModalEntregarPedido = ({
                         onLeer={(texto) => {
                             setEscaneando(false);
                             setCodigo(normalizarCodigoRetiro(texto));
-                            entregar(texto);
+                            void entregar(texto);  // fire-and-forget: `entregar` captura el error y lo pinta con setError
                         }}
                         onCerrar={() => setEscaneando(false)}
                     />

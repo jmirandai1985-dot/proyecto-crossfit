@@ -172,7 +172,7 @@ const ModalAgregarSinReserva = ({ clase, onCerrar, onAgregado }) => {
     };
 
     const confirmar = () => {
-        if (confirmando) agregar(confirmando);
+        if (confirmando) void agregar(confirmando);  // fire-and-forget: `agregar` pinta su propio error
     };
 
     const hora = (clase?.hora_inicio || '').slice(0, 5);

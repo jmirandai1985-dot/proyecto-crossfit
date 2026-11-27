@@ -60,7 +60,7 @@ const AsistenciaQr = () => {
             }
         };
 
-        hacerCheckin();
+        void hacerCheckin();  // fire-and-forget: el catch de `hacerCheckin` pinta el error en `vista`
     }, [loading, isAuthenticated, rol, publicId, navigate]);
 
     const estilos = {
