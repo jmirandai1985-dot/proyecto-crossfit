@@ -296,18 +296,24 @@ def test_g2_la_fila_muestra_el_envio_manual_y_lleva_a_la_ficha():
 
 
 def test_g3_la_tarjeta_suma_la_quinta_kpi_sin_tocar_las_cuatro_de_antes():
+    # NOMBRE HISTÓRICO: f62def4 ("alinear inicio admin con Hoy, Negocio, Alumnos,
+    # Conversión y Ocupación") reemplazó la fila de 5 KPIs por SECCIONES, así que
+    # `testid="kpi-prueba"` y el rótulo `Vencen en 5 días` se eliminaron a propósito
+    # (no fue una regresión: el mismo commit cambió el layout entero). El embudo de
+    # prueba vive ahora en la sección Alumnos ("Nuevos del mes") y en Conversión.
     fuente = _fuente("frontend/src/pages/admin/InicioMobileAdmin.jsx")
-    assert 'testid="kpi-prueba"' in fuente
+    for seccion in ('data-testid="admin-alumnos-mock"',
+                    'data-testid="admin-conversion-mock"'):
+        assert seccion in fuente
+    assert 'label="Nuevos del mes"' in fuente
+    assert 'label="Conversión prueba' in fuente          # "Conversión prueba→plan"
     # La capa móvil reusa el panel compartido (no duplica markup ni fetch).
     assert "<PanelAlumnosPrueba" in fuente
     assert "useAlumnosPrueba()" in fuente
-    # Las tarjetas originales siguen declaradas tal cual ("Alumnos activos" ya no
-    # es tarjeta: es el subtítulo `admin-activos` del encabezado).
-    for etiqueta in ('label="Vencen en 5 días"', 'label="Vouchers por aprobar"',
-                     'label="Ingresos de hoy"'):
-        assert etiqueta in fuente
+    # Las tarjetas que el rediseño conservó siguen declaradas tal cual ("Alumnos activos"
+    # ya no es tarjeta: es el subtítulo `admin-activos` del encabezado).
+    assert 'label="Ingresos de hoy"' in fuente
     assert 'data-testid="admin-activos"' in fuente
-    assert 'label="Alumnos nuevos y en prueba"' in fuente
 
 
 def test_g4_el_dashboard_abre_la_pantalla_y_la_ruta_existe():
