@@ -7,9 +7,12 @@ para la ficha administrativa, pero el BACKEND seguía aceptando
 cliente viejo) los cambiaba igual. Backend ≠ UI.
 
 CONTRATO QUE SE PRUEBA ACÁ (uno por campo, lo que ve el alumno):
-  * `correo` / `genero` / `fecha_nacimiento` / `nombre` → el PUT responde **200**
+  * `correo` / `fecha_nacimiento` / `nombre` → el PUT responde **200**
     (los clientes viejos no reciben 422) y el valor **NO cambia** ni en la
     respuesta ni en la BD;
+  * `genero` ya NO es un campo de ficha: desde D2 es autogestionable (se valida
+    M/F y se completa UNA vez si está vacío); su contrato vive en
+    `test_perfil_obligatorio.py`;
   * los campos autogestionados (teléfono/peso/estatura) siguen funcionando,
     incluso mezclados con los descartados y con un `correo` malformado;
   * la validación estricta del schema sigue viva: una clave desconocida da 422.
@@ -27,15 +30,15 @@ from app.db.database import engine
 from tests.conftest import BASE, TENANT_ID
 
 CORREO_INYECTADO = "intruso.n1.perfil@test.com"
-GENERO_INYECTADO = "otro"
 FECHA_INYECTADA = "1990-01-01"
 NOMBRE_INYECTADO = "Alumno Renombrado TEST (N-1b)"
 TELEFONO_TEST = "+569 0000 2222"
 
 # (campo, valor inyectado) — un caso por campo de CAMPOS_SOLO_BOX.
+# `genero` YA NO está acá: desde D2 es autogestionable (se valida M/F) y se
+# prueba en `test_perfil_obligatorio.py`.
 CAMPOS = [
     ("correo", CORREO_INYECTADO),
-    ("genero", GENERO_INYECTADO),
     ("fecha_nacimiento", FECHA_INYECTADA),
     ("nombre", NOMBRE_INYECTADO),
 ]
@@ -147,7 +150,6 @@ def test_c03_payload_viejo_completo_sigue_dando_200(alumno):
         r = _put_me(alumno, {
             "nombre": NOMBRE_INYECTADO,
             "correo": "esto-no-es-un-correo",
-            "genero": GENERO_INYECTADO,
             "fecha_nacimiento": FECHA_INYECTADA,
             "telefono": TELEFONO_TEST,
         })
@@ -156,7 +158,7 @@ def test_c03_payload_viejo_completo_sigue_dando_200(alumno):
             f"{r.status_code} {r.text[:200]}")
 
         despues = _ficha(alumno["id"])
-        for campo in ("nombre", "correo", "genero", "fecha_nacimiento"):
+        for campo in ("nombre", "correo", "fecha_nacimiento"):
             assert _como_texto(getattr(despues, campo)) == _como_texto(getattr(antes, campo)), \
                 f"{campo} CAMBIÓ en la BD"
         assert despues.telefono == TELEFONO_TEST, "el teléfono (editable) no se guardó"

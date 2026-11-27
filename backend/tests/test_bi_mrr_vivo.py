@@ -8,16 +8,18 @@ sin número ("— CLP") aunque el ingreso recurrente VIGENTE HOY lo calcula el b
 `metricas_service.mrr(db, tenant, hoy)` — la MISMA definición que muestran el dashboard y
 Reportes.jsx (precio de lista de los planes con suscripción vigente hoy).
 
-El arreglo: el MRR del BI es el de HOY y sale de `GET /reportes/` (una request que la pestaña
-ya hacía para el ARPU), así que no depende de `monthly_kpis`.
+El arreglo: el MRR del BI es el de HOY. La tarjeta del Dashboard admin lo toma de
+`GET /admin/mrr` (membresías de pago vigentes hoy, por plan — `dashboard_svc.mrr_por_plan`)
+a través del hook `useMrr` (`hooks/queries.js`) y de `useResumenAdmin`; no depende de
+`monthly_kpis` ni del índice de períodos. `GET /reportes/` sigue exponiendo su propio
+`mrr` vivo (`metricas.mrr`), que es la fuente que verifica la parte C/D.
 
 Lo que fija este archivo:
   A. GUARD de `reportes.py`: el MRR se calcula EN VIVO en la request con
      `metricas.mrr(db, tenant_id, ahora.date())` y se expone como `"mrr"`; el módulo no
      consulta `monthly_kpis` (el MRR del BI no puede depender del data mart mensual).
-  B. GUARD de `frontend/src/pages/admin/Kpis.jsx`: el cargador de la pestaña BI toma el MRR
-     de `/api/v1/reportes/` y NO de `/api/v1/kpis/mensual/periodos` (se miran sólo las líneas
-     de CÓDIGO: los comentarios del arreglo nombran la fuente vieja a propósito).
+  B. GUARD del front: la tarjeta MRR del Dashboard sale de `GET /admin/mrr`
+     (`useMrr` → `useResumenAdmin`) y NO de `/api/v1/kpis/mensual/periodos`.
   C. IN-PROCESS (espía + sesión TEST): el endpoint devuelve EXACTAMENTE el valor de
      `metricas.mrr` y lo pide con la fecha de HOY en Chile; en el mismo momento, el MRR del
      mes que devuelve `/kpis/mensual` sigue siendo el de `monthly_kpis`: las dos fuentes son
@@ -54,6 +56,9 @@ API_BASE = os.environ.get("API_BASE", "http://localhost:8000/api/v1")
 HOST = API_BASE.replace("/api/v1", "")
 TENANT_ID = 1
 KPI_JSX = REPO / "frontend" / "src" / "pages" / "admin" / "Kpis.jsx"
+QUERIES_JS = REPO / "frontend" / "src" / "hooks" / "queries.js"
+RESUMEN_JS = REPO / "frontend" / "src" / "components" / "dashboard" / "useResumenAdmin.js"
+DASHBOARD_JSX = REPO / "frontend" / "src" / "pages" / "admin" / "Dashboard.jsx"
 REPORTES_PY = BACKEND / "app" / "api" / "v1" / "reportes.py"
 
 VALOR_VIVO_FALSO = 424242.0     # lo que devuelve el espía de `metricas.mrr` en C
@@ -124,19 +129,26 @@ def test_a_reportes_calcula_el_mrr_en_vivo_con_la_fecha_de_hoy():
         "y el data mart mensual es otra fuente (otro período)")
 
 
-# ── B. Kpis.jsx: el MRR del BI sale de /reportes/ (no del índice de períodos) ──
-def test_b_el_bi_toma_el_mrr_de_reportes_y_no_del_indice_de_periodos():
-    fuente = KPI_JSX.read_text(encoding="utf-8")
-    bloque = _sin_comentarios(
-        _bloque(fuente, "const cargarBi = useCallback(", "}, [tenant_id]);"))
+# ── B. El Dashboard: el MRR sale de /admin/mrr (no del índice de períodos) ────
+def test_b_el_bi_toma_el_mrr_de_admin_mrr_y_no_del_indice_de_periodos():
+    queries = _sin_comentarios(QUERIES_JS.read_text(encoding="utf-8"))
+    assert "export function useMrr()" in queries, "falta el hook del MRR"
+    assert "api.get('/api/v1/admin/mrr')" in queries, (
+        "el MRR del panel tiene que salir de GET /admin/mrr")
 
-    assert "/api/v1/reportes/" in bloque, "la pestaña BI tiene que pedir /reportes/"
-    assert re.search(r"setMrrBi\(\s*rRep\?\.data\?\.mrr", bloque), (
-        "el MRR de la tarjeta tiene que salir de la respuesta de /reportes/")
-    assert "mensual/periodos" not in bloque, (
-        "el MRR del BI no puede volver a depender de /kpis/mensual/periodos "
-        "(era la regresión: sin esa fila, la tarjeta quedaba en '— CLP')")
-    assert "periodos" not in bloque, "el cargador del BI no usa el índice de meses"
+    resumen = _sin_comentarios(RESUMEN_JS.read_text(encoding="utf-8"))
+    assert "const mrrQ = useMrr();" in resumen, (
+        "useResumenAdmin tiene que consumir el hook del MRR")
+    assert "mrrQ.data" in resumen
+
+    dashboard = _sin_comentarios(DASHBOARD_JSX.read_text(encoding="utf-8"))
+    assert "resumenAdmin.mrr?.total_clp" in dashboard, (
+        "la tarjeta MRR se pinta con el dato del resumen compartido")
+    assert "mrr={resumenAdmin.mrr}" in dashboard
+
+    for prohibido in ("mensual/periodos", "setMrrBi"):
+        assert prohibido not in dashboard + resumen + queries, (
+            f"el MRR del panel no puede volver a depender de {prohibido}")
 
 
 # ── C. In-process: el valor es el de metricas.mrr(HOY) y el del mes es otro ────
@@ -158,8 +170,8 @@ def test_c_el_mrr_del_bi_es_el_de_hoy_y_no_el_del_mes_cerrado(monkeypatch, db):
         current_user={"tenant_id": TENANT_ID, "rol": "administrador"})
 
     assert datos["mrr"] == VALOR_VIVO_FALSO, "el endpoint devuelve el MRR vivo"
-    assert llamadas == [(TENANT_ID, hoy)], (
-        f"el MRR se pide UNA vez y con la fecha de HOY en Chile: {llamadas}")
+    assert llamadas and all(llamada == (TENANT_ID, hoy) for llamada in llamadas), (
+        f"el MRR se pide siempre con la fecha de HOY en Chile: {llamadas}")
 
     # El data mart mensual sigue siendo su propia fuente: leer el mes cerrado NO
     # devuelve el valor vivo (por eso el BI no puede depender de esa fila).

@@ -43,7 +43,6 @@ MODALES_DE_PANTALLA = (
     # GestionClases.jsx` (retirada) y ahora son componentes del panel. Sus overlays son los
     # que tienen que tapar el header.
     "frontend/src/components/AccionesClaseCoach.jsx",
-    "frontend/src/pages/admin/SupervisionClases.jsx",
 )
 
 

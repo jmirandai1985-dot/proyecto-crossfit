@@ -29,6 +29,8 @@ import re
 from datetime import date, timedelta
 from pathlib import Path
 
+from shared.estados import lista_sql
+
 import pytest
 import requests
 from sqlalchemy import text
@@ -105,7 +107,9 @@ def test_el_sql_del_helper_trae_las_tres_vias_y_la_reserva_viva():
     assert "clases.coach_id = 531" in sql      # vía 1: asignada al coach
     assert "coach_disciplinas" in sql          # vía 2: disciplina que dicta
     assert "horarios_coach" in sql             # vía 3: horario que dicta vigente esa fecha
-    assert "reservas.estado NOT IN ('cancelled', 'cancelada')" in sql, sql
+    # El criterio de "reserva viva" es la lista COMPARTIDA (shared.estados): si el
+    # estado nuevo de la suspensión falta acá, el alcance del coach contaría de más.
+    assert f"reservas.estado NOT IN ({lista_sql()})" in sql, sql
 
 
 # ─────────────────────────────────────────────────────────────────────────────

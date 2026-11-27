@@ -70,14 +70,14 @@ def test_a3_la_fila_trae_cuando_se_calculo_el_modelo():
 
 # ---- B. Estructura: los disparadores encolan el recalculo ----
 def _disparadores():
-    import app.api.v1.solicitudes_planes as sp
+    import app.services.aprobacion_planes as ap
     import app.api.v1.comprar_emergencia as ce
     import app.api.v1.reservas as rv
     import app.api.v1.fidelizacion as fid
     import app.api.v1.asistencia as asis
     import app.api.v1.beneficios as ben
     import app.api.v1.suscripciones as sus
-    return (sp, ce, rv, fid, asis, ben, sus)
+    return (ap, ce, rv, fid, asis, ben, sus)
 
 
 def test_b1_los_disparadores_usan_churn_service():

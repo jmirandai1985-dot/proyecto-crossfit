@@ -598,7 +598,8 @@ def _clase(ident, cupo=10, asistentes=0, fecha=None, hora_inicio=hora_del_dia(12
 
 
 def _alumno(ident=42):
-    return {"id": ident, "tenant_id": 1, "rol": "alumno"}
+    return {"id": ident, "tenant_id": 1, "rol": "alumno",
+            "nombre": "Alumno de prueba"}
 
 
 def _membresia(creditos, ident=1, usuario_id=42):
@@ -923,15 +924,25 @@ def test_f_el_indice_del_modelo_es_unico_parcial_y_por_clase_alumno():
         assert f"'{estado}'" in predicado
 
 
-def test_f2_el_modelo_y_la_migracion_057_declaran_el_mismo_indice():
-    """Si el modelo y la migración divergen, `create_all` y PROD no coinciden."""
-    migracion = _migracion("057_reserva_unica_viva")
+def test_f2_el_modelo_y_la_migracion_del_indice_declaran_lo_mismo():
+    """Si el modelo y la migración VIGENTE divergen, `create_all` y PROD no coinciden.
+
+    La 057 creó el índice; la 093 lo recrea con `cancelada_por_suspension` en el
+    predicado. El contrato con el modelo lo sostiene la última (la 057 queda
+    congelada con los dos estados de su momento).
+    """
+    migracion = _migracion("093_reserva_suspension_viva")
     indice = _indice_del_modelo()
 
     assert migracion.TABLA == Reserva.__tablename__ == "reservas"
     assert migracion.INDICE == indice.name == NOMBRE_INDICE_RESERVA_UNICA
     assert migracion.PREDICADO == indice.dialect_options["postgresql"]["where"].text
-    assert migracion.down_revision == "056_aviso_promocion"
+    assert migracion.down_revision == "092_usuarios_es_prueba"
+
+    # La 057 es histórica: su predicado NO se edita (es el congelado de ese momento).
+    original = _migracion("057_reserva_unica_viva")
+    assert original.INDICE == NOMBRE_INDICE_RESERVA_UNICA
+    assert "cancelada_por_suspension" not in original.PREDICADO
 
 
 def test_f3_la_057_es_la_unica_cabeza_sobre_la_056():
@@ -1088,7 +1099,8 @@ def test_g3_el_delete_no_vuelve_al_ajuste_en_memoria():
     assert "asistentes_confirmados -= 1" not in bloque
     assert "creditos_disponibles += 1" not in bloque
     assert "asistentes_confirmados=Clase.asistentes_confirmados - 1" in bloque
-    assert "creditos_disponibles=Suscripcion.creditos_disponibles + 1" in bloque
+    # El reembolso se delega al servicio único (migración 059/auditoría).
+    assert "reembolsar_credito_reserva(" in bloque
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1210,11 +1222,19 @@ def test_i5_la_fuente_del_delete_resuelve_por_la_columna_y_audita():
     fuente = _fuente("app/api/v1/reservas.py")
     bloque = _sin_comentarios(_bloque(fuente, "def _cancelar_reserva"))
 
-    assert "Suscripcion.id == reserva.suscripcion_id" in bloque
-    assert "reserva.suscripcion_id is not None" in bloque
-    assert bloque.count("with_for_update()") == 1     # la búsqueda por el DATO
-    assert "Suscripcion.id.desc()" in bloque          # desempate determinista
-    assert "tokens_gastados or 0) > 0" in bloque      # el bug B
+    assert "reembolsar_credito_reserva(" in bloque
+    # La resolución por `reserva.suscripcion_id` vive en el servicio único.
+    servicio = _sin_comentarios(
+        _bloque(_fuente("app/services/reservas_service.py"),
+                "def reembolsar_credito_reserva"))
+    assert "reserva.suscripcion_id" in servicio
+    assert "reserva.suscripcion_id is not None" in servicio
+    # El docstring NOMBRA el lock para explicarlo; el conteo es del CÓDIGO: sólo la
+    # búsqueda por el DATO bloquea (el fallback por `ORDER BY` no toma lock).
+    codigo = "".join(servicio.split('"""')[2:])
+    assert codigo.count("with_for_update()") == 1   # la búsqueda por el DATO
+    assert "Suscripcion.id.desc()" in servicio        # desempate determinista
+    assert "tokens_gastados or 0) > 0" in servicio    # el bug B
     assert "reembolso_redirigido" in bloque           # se audita la redirección
     assert "registrar_auditoria(" in bloque
 

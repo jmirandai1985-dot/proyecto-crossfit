@@ -31,7 +31,7 @@ from app.core.dependencies import get_current_user, get_current_admin, es_usuari
 # de la cuenta). Se importa acá y se sigue exponiendo como `alumnos.validar_rut` porque
 # hay consumidores que lo importan desde este módulo (`scripts/seed_ml_data*.py`).
 from app.utils.rut import validar_rut
-from app.utils.santiago import SANTIAGO, ahora_santiago
+from app.utils.santiago import SANTIAGO, ahora_santiago, hoy_santiago
 from app.services.auditoria_service import registrar_auditoria
 # D3: peso/género son los insumos del nivel persistido (`usuarios.nivel_*`).
 from app.services.nivel_service import recalcular_nivel
@@ -196,7 +196,7 @@ class RegistroAlumnoNuevo(BaseModel):
     @classmethod
     def _fecha_nacimiento_valida(cls, valor: date):
         """Rechaza fechas futuras y edades fuera de rango razonable (10–100 años)."""
-        hoy = date.today()
+        hoy = hoy_santiago()
         if valor > hoy:
             raise ValueError("La fecha de nacimiento no puede ser futura")
         edad = hoy.year - valor.year - (

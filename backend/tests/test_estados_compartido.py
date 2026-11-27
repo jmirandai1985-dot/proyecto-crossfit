@@ -79,7 +79,8 @@ def test_a_las_constantes_se_definen_solo_en_shared_estados():
 
     assert list(definiciones) == ["shared/estados.py"], definiciones
     assert definiciones["shared/estados.py"] == sorted(nombres)
-    assert estados.ESTADOS_CANCELADA == ("cancelled", "cancelada")
+    assert estados.ESTADOS_CANCELADA == (
+        "cancelled", "cancelada", "cancelada_por_suspension")
     assert estados.ESTADO_CANCELADO == "cancelled"
     assert estados.ESTADO_CANCELADO in estados.ESTADOS_CANCELADA
 
@@ -104,7 +105,8 @@ def test_c_los_helpers_son_exactos_y_derivan_de_la_constante(monkeypatch):
     """`lista_sql()` es la lista del SQL y `es_cancelada()` el mismo criterio del lado Python:
     **exacto** (nada de `lower()` ni de `LIKE` "por parecido": eso es justamente lo que hacía
     imposible ver una variante nueva)."""
-    assert estados.lista_sql() == "'cancelled', 'cancelada'"
+    assert estados.lista_sql() == (
+        "'cancelled', 'cancelada', 'cancelada_por_suspension'")
     assert estados.es_cancelada("cancelled") is True
     assert estados.es_cancelada("cancelada") is True
     for otro in (None, "", "confirmada", "cancelled_x", "Cancelled", "CANCELADA", "reserved"):

@@ -118,7 +118,7 @@ const SolicitarPlan = () => {
     // dentro del fetch); si el alumno elige "Todos", su elección manda.
     //
     // `'todas'` es el sentinel de "Todos": NO se puede usar `null`, porque `null` ya
-    // significa "todavía no elegí nada" y el render caería al sexo del alumno. Con
+    // significa "todavía no hay una categoría elegida" y el render caería al sexo del alumno. Con
     // `'todas'` el filtro por género se apaga de verdad.
     const [categoriaElegida, setCategoriaElegida] = useState(null);
     const mostrarTodos = categoriaElegida === 'todas';

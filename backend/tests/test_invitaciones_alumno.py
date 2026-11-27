@@ -151,7 +151,8 @@ def test_el_alta_acepta_el_token_de_invitacion_opcional():
 
     base = {"nombre": "Ana María", "correo": "ana@box.cl",
             "rut": "12.345.678-5", "sexo": "F", "peso": 60,
-            "telefono": "+56 9 1234 5678", "fecha_nacimiento": "1995-06-15"}
+            "telefono": "+56 9 1234 5678", "fecha_nacimiento": "1995-06-15",
+            "acepta_tyc": True, "acepta_salud": True}
 
     assert RegistroAlumnoNuevo(**base).token_invitacion is None
     assert RegistroAlumnoNuevo(

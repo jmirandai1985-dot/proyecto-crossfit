@@ -37,8 +37,8 @@ class TenantAuditMiddleware(BaseHTTPMiddleware):
                         "TENANT_AUDIT query tenant_id=%s %s %s ip=%s",
                         tenant_value, method, path, client_ip,
                     )
-        except Exception:
-            pass  # Nunca debe romper la request por un problema del log
+        except Exception as _exc:
+            logger.debug("TENANT_AUDIT: no se pudo auditar (best-effort): %s", _exc)
 
         # ── 2) tenant_id en body JSON ──
         # Starlette cachea el body (request._body), por lo que el handler
@@ -57,8 +57,8 @@ class TenantAuditMiddleware(BaseHTTPMiddleware):
                                 "TENANT_AUDIT body tenant_id=%s %s %s ip=%s",
                                 data.get("tenant_id"), method, path, client_ip,
                             )
-            except Exception:
-                pass  # Ídem
+            except Exception as _exc:
+                logger.debug("TENANT_AUDIT: no se pudo auditar el body (best-effort): %s", _exc)
 
         response = await call_next(request)
         return response

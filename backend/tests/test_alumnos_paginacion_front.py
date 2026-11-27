@@ -36,7 +36,9 @@ def test_a_pide_limit_skip_y_lee_el_total_del_header():
     hook = _texto(HOOK)
     util = _texto(UTIL)
     assert "useAlumnosPaginados({" in fuente
-    assert "paramsAlumnos({ rol, porPagina, pagina, buscar, estado })" in hook
+    assert "params: paramsAlumnos({" in hook
+    for clave in ("rol, porPagina, pagina, buscar, estado,", "excluirPrueba, alta,"):
+        assert clave in hook, f"paramsAlumnos perdió {clave}"
     assert "x-total-count" in hook, "el total sale del header del padrón"
     assert "limit: porPagina," in util
     assert "skip: (Math.max(1, pagina) - 1) * porPagina," in util

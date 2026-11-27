@@ -379,7 +379,7 @@ def _reenviar_por_tipo(db: Session, reg, alumno) -> bool:
     link_panel = url_frontend("/alumno/dashboard")
 
     if tipo == "bienvenida":
-        return enviar_email_bienvenida(alumno_dict, token_onboarding="")
+        return enviar_email_bienvenida(alumno_dict, token_onboarding="")  # nosec B106 - cadena VACÍA: 'sin token' en el correo de bienvenida
     if tipo == "vencimiento":
         fecha = sus.fecha_expiracion if sus else None
         return enviar_email_vencimiento_plan(alumno_dict, fecha)

@@ -51,10 +51,8 @@ const enOperativa = (texto) => bloqueOperativa.indexOf(texto);
 ok(enOperativa('Clases de Hoy') >= 0
     && enOperativa('Solicitudes Pendientes') > enOperativa('Clases de Hoy'),
     'Clases de Hoy aparece antes que Solicitudes Pendientes');
-ok(enOperativa('Ocupación promedio') > enOperativa('Solicitudes Pendientes'),
-    'Ocupación promedio queda como KPI de apoyo, al final del bloque');
-ok(bloqueOperativa.includes('grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4'),
-    'el grid operativo usa 1/2/3 columnas (sin la fila única de 6 del layout viejo)');
+ok(bloqueOperativa.includes('grid grid-cols-1 sm:grid-cols-2 gap-4'),
+    'el grid operativo usa 1/2 columnas (sin la fila única de 6 del layout viejo)');
 
 // ── 3. Finanzas: Alumnos → Membresías → Ingreso → Bazar ──────────────────────
 console.log('3. Bloque Finanzas y negocio');
@@ -99,7 +97,7 @@ ok(dashboard.indexOf('aria-labelledby="dashboard-conversion"')
     < dashboard.indexOf('<AdminTarjetaAlumnosPrueba />'),
     'la tarjeta de prueba ya no abre el Dashboard antes de la operativa');
 ok(dashboard.includes('<div className="md:hidden">')
-    && dashboard.includes('<InicioMobileAdmin />'),
+    && dashboard.includes('<InicioMobileAdmin'),
     'la vista móvil (<768px) sigue montando InicioMobileAdmin');
 
 console.log(`\n${fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`}`);

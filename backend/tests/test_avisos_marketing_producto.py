@@ -61,6 +61,7 @@ def _aviso(**cambios):
         vigente_hasta=datetime.combine(HOY + timedelta(days=4), time(23, 59, 59),
                                        tzinfo=timezone.utc),
         fijado_arriba=False, producto_id=3, creado_por=None,
+        promocion_id=None, escalera_tramos=False, publicar_en=None,
         creado_en=datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc),
     )
     base.update(cambios)

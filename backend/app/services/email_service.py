@@ -420,7 +420,7 @@ def _log_seguro(mensaje: str, nivel: str = "error") -> None:
     except Exception:
         try:
             print(seguro, file=sys.stderr)
-        except Exception:
+        except Exception:  # nosec B110 - último recurso del logger: no hay a dónde más reportar
             pass
 
 

@@ -22,6 +22,7 @@ Se corre con:
 import smtplib
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
@@ -263,26 +264,64 @@ def test_un_deduplicado_no_gasta_pausa(entorno_real, registro, monkeypatch):
     assert registro.dormido == []
 
 
+class _ConsultaUsuario:
+    """`db.query(Usuario).filter(Usuario.id == X).first()` del endpoint."""
+
+    def __init__(self, usuarios):
+        self._usuarios = usuarios
+        self._id = None
+
+    def filter(self, criterio):
+        self._id = getattr(getattr(criterio, "right", None), "value", None)
+        return self
+
+    def first(self):
+        return self._usuarios.get(self._id)
+
+
+class _SesionConAlumnos:
+    """Sesión mínima VÁLIDA (no `None`): el endpoint consulta el `Usuario` por id.
+
+    La campaña resuelve el objeto `Usuario` de cada alumno del análisis para poder
+    pedirle la plantilla a `fidelizacion_plantillas`; con `db=None` reventaba en el
+    `db.query(...)` antes de enviar el primer correo.
+    """
+
+    def __init__(self, correos):
+        self._usuarios = {
+            i: SimpleNamespace(id=i, nombre=f"Alumno {i}", correo=correo)
+            for i, correo in correos.items()
+        }
+
+    def query(self, modelo):
+        return _ConsultaUsuario(self._usuarios)
+
+
 def test_la_campana_de_fidelizacion_espacia_por_alumno(entorno_real, registro, monkeypatch):
     """La campaña manual (`POST /fidelizacion/campana-email/{tenant_id}`) también es ráfaga."""
     from app.api.v1 import fidelizacion
 
     enviados = []
 
-    def _fake_envio(nombre, correo, dias_ausente):
-        enviados.append(correo)
-        return True
+    def _fake_envio(db, alumno, plantilla):
+        enviados.append(alumno.correo)
+        return {"ok": True}
 
-    monkeypatch.setattr(fidelizacion, "enviar_email_fidelizacion", _fake_envio)
+    # El envío real de la campaña pasa por el MISMO motor de plantillas que el
+    # resto de Fidelización (`fidelizacion_plantillas.sugerir` + `.enviar`).
+    monkeypatch.setattr(fidelizacion.fidelizacion_plantillas, "sugerir",
+                        lambda db, alumno: {"plantilla": "inactividad", "motivo": ""})
+    monkeypatch.setattr(fidelizacion.fidelizacion_plantillas, "enviar", _fake_envio)
     monkeypatch.setattr(fidelizacion, "analizar_fidelizacion", lambda *a, **k: {
         "alumnos_alerta": [
-            {"nombre": "A", "correo": "a@example.com", "dias_ausente": 9, "tiene_historial": True},
-            {"nombre": "B", "correo": "b@example.com", "dias_ausente": 12, "tiene_historial": True},
-            {"nombre": "C", "correo": "c@example.com", "dias_ausente": None, "tiene_historial": False},
+            {"id": 1, "nombre": "A", "correo": "a@example.com", "dias_ausente": 9, "tiene_historial": True},
+            {"id": 2, "nombre": "B", "correo": "b@example.com", "dias_ausente": 12, "tiene_historial": True},
+            {"id": 3, "nombre": "C", "correo": "c@example.com", "dias_ausente": None, "tiene_historial": False},
         ]})
 
     resumen = fidelizacion.enviar_campana_email(
-        tenant_id=1, umbral_dias=7, background_tasks=None, db=None,
+        tenant_id=1, umbral_dias=7, background_tasks=None,
+        db=_SesionConAlumnos({1: "a@example.com", 2: "b@example.com"}),
         current_user={"tenant_id": 1, "id": 1, "rol": "admin"})
 
     assert resumen["emails_enviados"] == 2

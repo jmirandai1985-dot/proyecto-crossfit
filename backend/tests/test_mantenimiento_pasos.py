@@ -60,7 +60,7 @@ def test_run_daily_cuenta_los_fallos_en_el_resumen(monkeypatch, caplog):
         rd.run()
 
     texto = "\n".join(r.getMessage() for r in caplog.records)
-    assert "❌ JOB DIARIO TERMINADO CON 3 FALLO(S) de 5 pasos" in texto
+    assert "❌ JOB DIARIO TERMINADO CON 3 FALLO(S) de 6 pasos" in texto
     assert "✅ JOB DIARIO COMPLETADO" not in texto
     assert "✅ 3/5 transacciones_huerfanas OK" in texto
 

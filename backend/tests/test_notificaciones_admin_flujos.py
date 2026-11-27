@@ -195,6 +195,9 @@ def test_registro_de_alumno_avisa_a_los_admins():
             "sexo": "M",
             "telefono": "+56 9 8765 4321",
             "fecha_nacimiento": "1990-01-02",
+            # Alta (migración 076): los dos consentimientos son obligatorios.
+            "acepta_tyc": True,
+            "acepta_salud": True,
         }, timeout=30)
         assert r.status_code == 201, r.text[:300]
 

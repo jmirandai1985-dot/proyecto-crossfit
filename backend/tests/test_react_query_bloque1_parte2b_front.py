@@ -84,7 +84,9 @@ def test_c_el_inicio_comparte_la_consulta_de_reservas_y_la_invalida_al_reservar(
     fuente = _fuente(DASHBOARD)
     assert "const misReservas = reservasQ.data || [];" in fuente
     assert "const reservasActivas = misReservas.length;" in fuente
-    assert "await crearReserva.mutateAsync({" in fuente
+    # El modal de confirmación delega en la mutación (el Dashboard la devuelve).
+    assert "return crearReserva.mutateAsync({" in fuente
+    assert "onConfirmar={handleConfirmarReserva}" in fuente
     # Nada de contar a mano: el número sale de la lista que ya consultó.
     assert "setReservasActivas((prev) => prev + 1)" not in fuente
     assert "setMisReservas((prev) => [" not in fuente

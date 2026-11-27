@@ -145,7 +145,13 @@ def test_b2_un_mes_cerrado_no_cambia_de_numero(db):
 
 
 def test_b3_ocupacion_promedio_del_mes_en_curso_solo_cuenta_realizadas(db):
-    """`metricas_service.ocupacion_promedio` aplica la definición: descarta las clases futuras."""
+    """`metricas_service.ocupacion_promedio` aplica la definición: descarta las clases futuras.
+
+    El numerador son las asistencias REALES (`reservas.asistio = true` de usuarios
+    que no son `es_prueba`), no el contador `clases.asistentes_confirmados`; el
+    denominador es la suma de `cupo_maximo` de esas clases (las de cupo NULL no
+    tienen denominador).
+    """
     from app.services import metricas_service as metricas
 
     hoy = ahora_santiago().date()
@@ -155,13 +161,20 @@ def test_b3_ocupacion_promedio_del_mes_en_curso_solo_cuenta_realizadas(db):
     # Migración 066: sólo las clases CON cupo entran al cociente (Musculación y
     # Open Box tienen cupo NULL = sin tope y sus reservas no tienen denominador).
     fila = db.execute(text(
-        "SELECT COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0)) "
-        "                FILTER (WHERE c.cupo_maximo IS NOT NULL), 0), "
-        "       COALESCE(SUM(c.cupo_maximo) "
-        "                FILTER (WHERE c.cupo_maximo IS NOT NULL), 0) "
-        "FROM clases c WHERE c.tenant_id = :t AND c.fecha >= :a AND c.fecha <= :b AND "
-        + cs.sql_clase_realizada("c")), params).first()
-    esperado = round(int(fila[0]) / int(fila[1]) * 100, 2) if fila[1] else 0
+        "SELECT COALESCE(SUM(asis.asistentes), 0), COALESCE(SUM(asis.cupo), 0) "
+        "FROM ("
+        "  SELECT c.id, c.cupo_maximo AS cupo, "
+        "         COUNT(r.id) FILTER (WHERE r.asistio IS TRUE AND NOT u.es_prueba) "
+        "             AS asistentes "
+        "    FROM clases c "
+        "    LEFT JOIN reservas r ON r.clase_id = c.id AND r.tenant_id = c.tenant_id "
+        "    LEFT JOIN usuarios u ON u.id = r.alumno_id AND u.tenant_id = c.tenant_id "
+        "   WHERE c.tenant_id = :t AND c.fecha >= :a AND c.fecha <= :b "
+        "     AND c.cupo_maximo IS NOT NULL AND "
+        + cs.sql_clase_realizada("c") +
+        "   GROUP BY c.id, c.cupo_maximo) AS asis"), params).first()
+    cupo = int(fila[1])
+    esperado = round(int(fila[0]) / cupo * 100, 2) if cupo > 0 else None
     assert metricas.ocupacion_promedio(db, TENANT_ID, ini, hoy) == esperado
 
 

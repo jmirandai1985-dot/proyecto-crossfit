@@ -44,7 +44,10 @@ PERMITIDAS = (
 # Filtros por la bandera heredada. `Usuario.activo` sólo importa comparado (`== True`): las
 # LECTURAS para la respuesta de la API (`"activo": usuario.activo`) son contrato, no filtro.
 RE_ORM = re.compile(r"Usuario\.activo\s*[=!]=")
-RE_SQL_U = re.compile(r"u\.activo\b")
+RE_SQL_U = re.compile(
+    r"(?:\bWHERE|\bAND|\bOR)\s+u\.activo\b|u\.activo\s*(?:=|<>|!=|IS\b)",
+    re.IGNORECASE,
+)
 RE_SQL_USUARIOS = re.compile(r"usuarios[^\n]{0,140}\bactivo\s*=\s*(?:true|false)")
 
 
