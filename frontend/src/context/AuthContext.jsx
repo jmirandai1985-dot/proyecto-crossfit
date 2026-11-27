@@ -38,7 +38,7 @@ export const AuthProvider = ({ children }) => {
             }
         };
 
-        hidratar();
+        void hidratar();  // fire-and-forget: el catch de `hidratar` deja la sesión cerrada
     }, []);
 
     // Persiste la sesión (estado de React + caché visual de localStorage) tras un

@@ -75,7 +75,7 @@ const AlumnoFichaModal = ({ alumnoId, tenantId, onClose, onVerHistorial }) => {
             }
             setLoading(false);
         };
-        carga();
+        void carga();  // fire-and-forget: usa Promise.allSettled y pinta el error de cada bloque
     }, [alumnoId, tenantId]);
 
     if (!alumnoId) return null;

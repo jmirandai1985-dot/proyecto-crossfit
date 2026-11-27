@@ -158,7 +158,7 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
             setErrores(errs);
             setLoading(false);
         };
-        carga();
+        void carga();  // fire-and-forget: usa Promise.allSettled y pinta el error de cada bloque
     }, [alumnoId]);
 
     // Al cambiar de alumno se vuelve a la pestaña Resumen.

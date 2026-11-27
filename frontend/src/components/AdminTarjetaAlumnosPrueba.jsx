@@ -30,7 +30,7 @@ const AdminTarjetaAlumnosPrueba = () => {
     };
 
     useEffect(() => {
-        cargar();
+        void cargar();  // fire-and-forget: la función ya pinta su propio error
         const id = setInterval(cargar, INTERVALO_MS);
         return () => clearInterval(id);
     }, []);

@@ -92,7 +92,7 @@ ok(/onClick=\{\(\) => setConfirmando\(a\)\}/.test(MODAL),
     'tocar un nombre SÓLO abre la tarjeta (todavía no llama a `agregar`)');
 eq(/onClick=\{\(\) => agregar\(a\)\}/.test(MODAL), false,
     'no queda ningún click que agregue directo (era el descuento de un toque)');
-ok(/const confirmar = \(\) => \{\s*if \(confirmando\) agregar\(confirmando\);/.test(MODAL),
+ok(/const confirmar = \(\) => \{\s*if \(confirmando\) (?:void )?agregar\(confirmando\);/.test(MODAL),
     '`Confirmar` es el único camino a `agregar` (los endpoints de siempre)');
 ok(/data-testid="cancelar-token"/.test(MODAL) && /data-testid="confirmar-token-btn"/.test(MODAL),
     'la tarjeta tiene Cancelar y Confirmar');

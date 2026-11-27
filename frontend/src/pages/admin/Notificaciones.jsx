@@ -149,7 +149,11 @@ const Notificaciones = () => {
                     // stopPropagation: sin esto, el click en "Reenviar" también disparaba el
                     // onRowClick de la fila y te sacaba de la pantalla antes de ver el
                     // resultado del reenvío (el estado de la fila no se veía actualizar).
-                    onClick={(e) => { e.stopPropagation(); reenviar(row.id); }}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        // fire-and-forget: `reenviar` captura el error y lo pinta con setError.
+                        void reenviar(row.id);
+                    }}
                     disabled={reenviando === row.id}
                     className="rounded bg-orange-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-orange-600 disabled:opacity-50"
                 >

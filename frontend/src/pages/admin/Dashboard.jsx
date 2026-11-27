@@ -208,7 +208,7 @@ const AdminDashboard = () => {
         // sólo la fidelización, que sigue con estado local. El auto-refresco de
         // "Clases de hoy" cada 45 s lo hace `refetchInterval` del hook (y NO corre con
         // la pestaña oculta).
-        cargarFidelizacion();
+        void cargarFidelizacion();  // fire-and-forget: la función ya pinta su propio error
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [tenant_id]);
 
@@ -236,7 +236,7 @@ const AdminDashboard = () => {
         clasesDiaQ.refetch();
         nuevosMesQ.refetch();
         resumenAdmin.recargar();
-        cargarFidelizacion();
+        void cargarFidelizacion();  // fire-and-forget: la función ya pinta su propio error
     };
 
     const cargarFidelizacion = async () => {
@@ -269,7 +269,7 @@ const AdminDashboard = () => {
             setTimeout(() => setMsg(''), 4000);
             // Sin `cargarSolicitudes()`: la mutación invalida las colas y React Query
             // las refresca (acá y en Pendientes). La fidelización sigue con estado local.
-            cargarFidelizacion();
+            void cargarFidelizacion();  // fire-and-forget: la función ya pinta su propio error
         } catch (err) {
             setMsg('❌ ' + (err.response?.data?.detail || err.message));
             setTimeout(() => setMsg(''), 4000);
@@ -1446,7 +1446,7 @@ const AdminDashboard = () => {
                                 </button>
                                 <button onClick={() => {
                                     if (rechazoModal.motivo.trim()) {
-                                        handleRechazar(rechazoModal.solicitud_id, rechazoModal.motivo.trim());
+                                        void handleRechazar(rechazoModal.solicitud_id, rechazoModal.motivo.trim());  // fire-and-forget: el catch lo pinta en `msg`
                                         setRechazoModal({ open: false, solicitud_id: null, motivo: '' });
                                     }
                                 }}

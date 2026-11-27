@@ -87,7 +87,7 @@ export function useDocumentoAutenticado({
             }, timeoutMs);
         });
 
-        (async () => {
+        void (async () => {  // fire-and-forget: el IIFE captura sus errores en preview.error
             setPreview({ ...PREVIEW_INICIAL, loading: true });
             try {
                 const res = await Promise.race([
