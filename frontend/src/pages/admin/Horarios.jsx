@@ -63,7 +63,8 @@ export default function Horarios() {
 
     // Agrupar por hora_inicio para las filas del grid
     const { filas, celdasMap } = useMemo(() => {
-        const horas = [...new Set(gridData.map(c => `${c.hora_inicio?.slice(0, 5)}-${c.hora_fin?.slice(0, 5)}`))].sort();
+        const horas = [...new Set(gridData.map(c => `${c.hora_inicio?.slice(0, 5)}-${c.hora_fin?.slice(0, 5)}`))]
+            .sort((a, b) => a.localeCompare(b));
         const map = {};
         gridData.forEach(c => {
             const key = `${c.hora_inicio?.slice(0, 5)}-${c.hora_fin?.slice(0, 5)}`;

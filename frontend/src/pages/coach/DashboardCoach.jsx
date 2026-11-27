@@ -445,7 +445,7 @@ const DashboardCoach = () => {
         clasesLibresSemana.forEach((c) => {
             if (diasSeleccionados.includes(fechaISOde(c))) horas.add(horaCorta(c.hora_inicio));
         });
-        return [...horas].sort();
+        return [...horas].sort((a, b) => a.localeCompare(b));
     }, [clasesLibresSemana, diasSeleccionados]);
     // Agrupados por la MISMA franja del resto del panel (Mañana / Tarde / Noche).
     const horariosPorFranja = useMemo(() => FRANJAS

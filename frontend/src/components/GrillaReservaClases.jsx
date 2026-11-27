@@ -103,7 +103,8 @@ const GrillaReservaClases = ({
                 const { manana, tarde } = separarClasesPorFranja(clasesDelDia);
                 const esPrimerDisponible = primerDiaDisponible === diaExpandido;
 
-                const disciplinasUnicas = [...new Set(clasesDelDia.map(c => c.disciplina_nombre).filter(Boolean))].sort();
+                const disciplinasUnicas = [...new Set(clasesDelDia.map(c => c.disciplina_nombre).filter(Boolean))]
+                    .sort((a, b) => a.localeCompare(b));
 
                 const filtrarPorDisciplina = (clases) => {
                     if (disciplinaFiltro === 'Todos') return clases;

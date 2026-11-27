@@ -149,7 +149,7 @@ const ModalPublicarWod = ({
     // Días a publicar (los que el coach marca en la grilla).
     const fechas = useMemo(() => {
         const base = diasTocados ?? (fechaClase ? [fechaClase] : []);
-        return [...base].sort();
+        return [...base].sort((a, b) => a.localeCompare(b));
     }, [diasTocados, fechaClase]);
 
     // Horarios de ESA disciplina en la semana en curso, agrupados por franja (Mañana/Tarde/
@@ -164,7 +164,7 @@ const ModalPublicarWod = ({
         const set = new Set();
         clasesDeLaDisciplina.forEach((c) => { const h = horaDe(c); if (h) set.add(h); });
         if (hora) set.add(hora);
-        const horas = [...set].sort();
+        const horas = [...set].sort((a, b) => a.localeCompare(b));
         return FRANJAS
             .map((f) => ({ ...f, horas: horas.filter((h) => franjaDe(h) === f.id) }))
             .filter((f) => f.horas.length > 0);
