@@ -58,6 +58,9 @@ const FUERA_DEL_PANEL = {
 // import de `hooks/queries` que no necesita.
 const SIN_HOOKS = {
     'EntregarPedido.jsx': 'delega en components/ModalEntregarPedido.jsx',
+    // 1e70f71: pantalla nueva del coach que monta el panel COMPARTIDO del admin; sus
+    // datos los trae el hook dedicado `hooks/useAlumnosPrueba`, no `hooks/queries`.
+    'AlumnosPrueba.jsx': 'delega en components/PanelAlumnosPrueba.jsx (hook useAlumnosPrueba)',
 };
 const DELEGADOS = ['../src/components/ModalEntregarPedido.jsx'];
 
@@ -83,7 +86,9 @@ for (const [rel, hook] of MODALES) {
     // `useFichaAlumnoCoach` y `useRmsAlumno` juntos): lo que importa es que el hook esté ahí.
     ok(new RegExp(`import \\{[^}]*\\b${hook}\\b[^}]*\\} from '\\.\\.\\/hooks\\/queries'`).test(src),
         `${nombre}: usa ${hook}`);
-    ok(!/use(Effect|State)\s*\(|const cargar/.test(src),
+    // `useState`/`useEffect` SÍ están permitidos: AlumnoFichaCoach los usa para el
+    // formulario de perfil (89bea0c). Lo que no puede volver es el LOADER a mano.
+    ok(!/const cargar\b/.test(src),
         `${nombre}: no quedó la carga a mano (ni el \`cargar\` fantasma)`);
     ok(/refetch\(\)/.test(src), `${nombre}: "Reintentar" reintenta con refetch()`);
 }
