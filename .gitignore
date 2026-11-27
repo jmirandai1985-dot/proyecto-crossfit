@@ -76,3 +76,8 @@ k6-tests/tokens.json
 # versionan, no se comparten y NUNCA se agregan con git add -A (siempre archivo por archivo).
 # ==============================================================================
 backend/data/
+
+.venv-tools/
+_tests_nocturno_2026-11-26/
+INFORME_*.md
+auditoria_dashboard_admin.md
