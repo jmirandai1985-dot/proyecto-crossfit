@@ -5,6 +5,9 @@ cada script, así que un job con fallas quedaba con todos los ✅. Estos tests u
 falsos (nunca los de verdad: no se toca ninguna base) y comprueban que un `False` se loguea
 como error y que el resumen final dice cuántos pasos fallaron.
 
+El paso `activar_planes_en_cola` del job diario ESCRIBE en la base (activa planes reales), así
+que se parchea con `unittest.mock.patch`: ningún test de este archivo debe escribir en TEST.
+
 Se corre con:
     py -3.12 -m pytest tests/test_mantenimiento_pasos.py -q --noconftest
 """
@@ -12,6 +15,7 @@ import logging
 import sys
 import types
 from pathlib import Path
+from unittest.mock import patch
 
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
@@ -56,13 +60,21 @@ def test_run_daily_cuenta_los_fallos_en_el_resumen(monkeypatch, caplog):
     _modulo_falso(monkeypatch, "maintenance.neon_usage_alerts",
                   {"verificar_uso": lambda: False})
 
-    with caplog.at_level(logging.INFO):
-        rd.run()
+    # 3/6 `activar_planes_en_cola` ESCRIBE en la base (activa planes reales: el
+    # 2026-11-27 activó 2 en TEST). `run()` lo importa DENTRO de la función, así que
+    # se mockea el atributo del módulo: el `from ... import activar_en_cola` se lleva
+    # el mock y el paso devuelve None (None NO es fallo, ver `_paso`).
+    with patch("maintenance.activar_planes_en_cola.activar_en_cola",
+               return_value=None) as activar_en_cola:
+        with caplog.at_level(logging.INFO):
+            rd.run()
+    activar_en_cola.assert_called_once_with()
 
     texto = "\n".join(r.getMessage() for r in caplog.records)
     assert "❌ JOB DIARIO TERMINADO CON 3 FALLO(S) de 6 pasos" in texto
     assert "✅ JOB DIARIO COMPLETADO" not in texto
-    assert "✅ 3/5 transacciones_huerfanas OK" in texto
+    assert "✅ 3/6 activar_planes_en_cola OK" in texto      # paso mockeado = OK
+    assert "✅ 4/6 transacciones_huerfanas OK" in texto     # es el 4º de 6 pasos
 
 
 def test_run_monthly_cuenta_los_fallos_en_el_resumen(monkeypatch, caplog):
