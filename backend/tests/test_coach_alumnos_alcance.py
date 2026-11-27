@@ -20,7 +20,8 @@ QUÉ SE PRUEBA
   (2) INTEGRACIÓN (salta si el entorno no está): arma el caso patológico en TEST —una clase CON
       `coach_id = NULL` de una disciplina del coach, con la reserva viva de un alumno— y
       comprueba que ese alumno aparece en LAS DOS respuestas y que los dos `total_alumnos`
-      coinciden (A = B).
+      coinciden (A = B). La clase se crea en la primera fecha futura LIBRE (idempotente: no
+      choca con lo que dejó otra corrida) y se borra en el `finally`; nunca borra filas ajenas.
 
 ⚠️ INTEGRACIÓN: la parte (2) requiere la API corriendo contra el branch TEST (`conftest.BASE`) y
 BORRA lo que crea (una clase y su reserva). Mismo patrón que `test_clases_coach_alcance.py`.
@@ -34,6 +35,7 @@ from shared.estados import lista_sql
 import pytest
 import requests
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token
@@ -187,15 +189,51 @@ def _alumno_activo():
         t=TENANT_ID)
 
 
-def _crear_clase_sin_coach(ref):
-    """Clase del caso patológico: disciplina del coach, `coach_id = NULL` (pool sin asignar)."""
+def _crear_clase_sin_coach(ref, fecha):
+    """Clase del caso patológico: disciplina del coach, `coach_id = NULL` (pool sin asignar).
+
+    `fecha` la elige el test (una futura LIBRE): la única constraint es
+    `uq_clases_horario_base_fecha` (horario_base_id, fecha), así que una fecha fija
+    hacía fallar la segunda corrida con UniqueViolation.
+    """
     return _one_commit(
         "INSERT INTO clases (tenant_id, horario_base_id, disciplina_id, coach_id, fecha, "
         "hora_inicio, hora_fin, cupo_maximo, cupo_original, asistentes_confirmados, cancelada) "
         "VALUES (:t, :h, :d, NULL, :f, :hi, :hf, :c, :c, 0, false) RETURNING id",
         t=TENANT_ID, h=ref.horario_id, d=ref.disciplina_id,
-        f=str(HOY + timedelta(days=3)),
+        f=str(fecha),
         hi=ref.hora_inicio, hf=ref.hora_fin, c=ref.cupo_maximo).id
+
+
+def _fechas_futuras_libres(ref, dias=60):
+    """Fechas futuras (HOY+1 .. HOY+dias) SIN clase para ese horario (SELECT previo).
+
+    Con esto el test es IDEMPOTENTE: crea su clase en la primera fecha libre y así no
+    choca con lo que dejó otra corrida (que puede limpiar otro proceso). Nunca reusa ni
+    borra filas ajenas: en el `finally` sólo borra la que creó.
+    """
+    desde, hasta = HOY + timedelta(days=1), HOY + timedelta(days=dias)
+    with engine.connect() as c:
+        ocupadas = {fila[0] for fila in c.execute(text(
+            "SELECT fecha FROM clases WHERE horario_base_id = :h "
+            "  AND fecha BETWEEN :a AND :b"),
+            {"h": ref.horario_id, "a": desde, "b": hasta}).fetchall()}
+    return [HOY + timedelta(days=i) for i in range(1, dias + 1)
+            if HOY + timedelta(days=i) not in ocupadas]
+
+
+def _crear_clase_sin_coach_en_fecha_libre(ref):
+    """Crea la clase en la primera fecha libre; si otra corrida gana la carrera, sigue.
+
+    `IntegrityError` = alguien insertó (horario_base_id, fecha) entre el SELECT y el
+    INSERT: se prueba la siguiente fecha libre en vez de fallar.
+    """
+    for fecha in _fechas_futuras_libres(ref):
+        try:
+            return _crear_clase_sin_coach(ref, fecha)
+        except IntegrityError:
+            continue
+    pytest.skip("TEST no tiene una fecha futura libre para el horario del coach")
 
 
 def _reservar(clase_id, alumno_id):
@@ -211,8 +249,10 @@ def _reservar(clase_id, alumno_id):
         t=TENANT_ID, c=clase_id, a=alumno_id).id
 
 
-def _borrar(clase_id, reserva_id):
-    _exec("DELETE FROM reservas WHERE id = :id", id=reserva_id)
+def _borrar(clase_id, reserva_id=None):
+    """Borra SÓLO lo que creó el test (por id); tolera que la reserva no se haya creado."""
+    if reserva_id is not None:
+        _exec("DELETE FROM reservas WHERE id = :id", id=reserva_id)
     _exec("DELETE FROM clases WHERE id = :id", id=clase_id)
 
 
@@ -226,9 +266,10 @@ def test_una_clase_sin_coach_de_mi_disciplina_sale_en_Alumnos_Y_en_En_Riesgo():
     if not alumno:
         pytest.skip("Hace falta un alumno activo en TEST")
 
-    clase_id = _crear_clase_sin_coach(ref)
-    reserva_id = _reservar(clase_id, alumno.id)
+    clase_id = _crear_clase_sin_coach_en_fecha_libre(ref)
+    reserva_id = None
     try:
+        reserva_id = _reservar(clase_id, alumno.id)
         headers = _token(ref, "coach")
         alumnos = requests.get(
             f"{BASE}/fidelizacion/coach/{ref.coach_id}/alumnos", headers=headers)
